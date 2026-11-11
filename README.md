@@ -4,6 +4,7 @@ Local-first app that turns videos into affiliate shorts for Shopee Video, Facebo
 
 - **Có video base:** thả video vào inbox (hoặc kéo thả trên web). AI xem video, tìm sản phẩm Shopee, lấy link affiliate, viết kịch bản viral, tự cắt và sắp lại cảnh, thêm hook, phụ đề karaoke, giọng đọc, nhạc nền, chuyển cảnh và CTA, rồi xuất video 9:16.
 - **Không có video base:** chọn một trend (Google Trends VN, hoặc trend TikTok/Facebook bạn dán vào) hoặc một sản phẩm bán chạy. AI chọn sản phẩm, viết kịch bản bắt trend và tự dựng video từ ảnh sản phẩm, video stock (Pexels) hoặc clip AI (Muse/khác, qua adapter).
+- **Clip của bạn:** tab *Clip & hình* của mỗi video nhận clip quay thật, clip AI (Muse trong Meta AI, CapCut, Veo…) hoặc ảnh sản phẩm. AI ưu tiên dùng các clip này khi viết kịch bản, và bạn có thể gán clip cho từng cảnh. Clip đánh dấu "do AI tạo" sẽ được gắn nhãn nội dung AI khi đăng TikTok.
 - **Một click duyệt:** xem video, sửa kịch bản/caption nếu muốn, rồi bấm *Duyệt & đăng* (có thể lên lịch).
 - **Đo lường:** báo cáo hoa hồng Shopee được gắn về từng video (sub_id = mã job).
 

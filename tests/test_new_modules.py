@@ -255,3 +255,93 @@ class MetaTokenTests(unittest.TestCase):
 
         self.assertEqual(exchange_for_page_token("v27.0", "a", "s", "short", "2",
                                                  httpx.MockTransport(handler)), "LONGPAGE")
+
+
+class ClipLibraryTests(unittest.TestCase):
+    def _settings(self, root):
+        settings = temp_settings(root)
+        settings.assets_dir = root / "assets"
+        return settings
+
+    def _make_clip(self, root, name="c.mp4", seconds=3):
+        import shutil
+        import subprocess
+        path = root / name
+        subprocess.run([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+                        "-f", "lavfi", "-i", "testsrc2=size=320x568:rate=24", "-t", str(seconds),
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)], check=True)
+        return path
+
+    def test_add_list_delete_and_reject_bad_files(self):
+        import io
+
+        from agent_core.clips import ClipError, add_clip, delete_clip, list_clips
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = self._settings(root)
+            src = self._make_clip(root)
+            with src.open("rb") as f:
+                clip = add_clip(settings, "job12345", "Muse clip.mp4", f, ai_generated=True, note="xay")
+            self.assertEqual(clip["kind"], "video")
+            self.assertTrue(clip["ai_generated"])
+            self.assertAlmostEqual(clip["duration"], 3, delta=0.2)
+            self.assertEqual(len(list_clips(settings, "job12345")), 1)
+            with self.assertRaises(ClipError):
+                add_clip(settings, "job12345", "x.exe", io.BytesIO(b"MZ"))
+            with self.assertRaises(ClipError):
+                add_clip(settings, "job12345", "broken.mp4", io.BytesIO(b"not a video"))
+            with self.assertRaises(ClipError):
+                add_clip(settings, "../evil", "a.mp4", io.BytesIO(b""))
+            delete_clip(settings, "job12345", clip["id"])
+            self.assertEqual(list_clips(settings, "job12345"), [])
+
+    def test_script_can_use_clip_and_rejects_foreign_paths(self):
+        from agent_core.clips import add_clip
+        from agent_core.workflow import update_script
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = self._settings(root)
+            job_id = create_trend_job(settings, "Clip test")
+            src = self._make_clip(root)
+            with src.open("rb") as f:
+                clip = add_clip(settings, job_id, "real.mp4", f, ai_generated=True)
+            update_script(settings, job_id, {"hook": "h", "scenes": [
+                {"clip_id": clip["id"], "start": 99, "duration": 2, "voiceover": "a"}]})
+            scene = json.loads(db.get_job(settings.database_path, job_id)["script_json"])["scenes"][0]
+            self.assertEqual(scene["kind"], "video")
+            self.assertTrue(scene["generated"])
+            self.assertLessEqual(scene["start"], 3)
+            self.assertTrue(scene["source"].endswith(clip["file"]))
+            with self.assertRaises(WorkflowError):
+                update_script(settings, job_id, {"scenes": [
+                    {"kind": "image", "source": str(root / "state.sqlite3")}]})
+            with self.assertRaises(WorkflowError):
+                update_script(settings, job_id, {"scenes": [{"clip_id": "nope"}]})
+
+    def test_plan_clip_field_and_timeline(self):
+        from agent_core.assets import VideoGenerator
+        from agent_core.workflow import build_timeline
+
+        plan = normalise_plan({"scenes": [
+            {"clip": 0, "start_offset": 1, "voiceover": "x"},
+            {"visual": "stock", "voiceover": "y"},
+            {"clip": 5, "visual": "card", "voiceover": "z"},
+        ]}, "trend", None, n_clips=2)
+        self.assertEqual(plan["scenes"][0]["clip"], 0)
+        self.assertNotIn("clip", plan["scenes"][2])
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = self._settings(Path(tmp))
+            clips = [{"id": "a", "file": "a.mp4", "kind": "video", "duration": 4},
+                     {"id": "b", "file": "b.jpg", "kind": "image", "duration": None,
+                      "ai_generated": True}]
+            job = {"id": "job12345", "mode": "trend", "source_path": ""}
+            product = Path(tmp) / "p.jpg"
+            product.write_bytes(b"x")
+            tl = build_timeline(settings, job, plan, product, VideoGenerator(settings),
+                                Path(tmp), clips)
+        kinds = [(s["kind"], s.get("clip_id")) for s in tl["scenes"]]
+        self.assertEqual(kinds, [("video", "a"), ("image", "b"), ("card", None)])
+        self.assertEqual(tl["scenes"][0]["start"], 1.0)
+        self.assertTrue(tl["scenes"][1]["generated"])

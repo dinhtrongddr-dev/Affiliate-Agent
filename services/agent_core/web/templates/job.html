@@ -52,6 +52,7 @@
     <div class="tabs">
       <button data-tab="t-publish" class="active">✅ Duyệt & đăng</button>
       <button data-tab="t-script">🎬 Kịch bản</button>
+      <button data-tab="t-clips">📁 Clip & hình ({{ clips|length }})</button>
       <button data-tab="t-caption">✍️ Caption</button>
       <button data-tab="t-product">🛒 Sản phẩm</button>
       <button data-tab="t-info">ℹ️ Phân tích</button>
@@ -121,6 +122,38 @@
       {% else %}<p class="muted">Chưa có kịch bản.</p>{% endif %}
     </div>
 
+    <!-- Clip library -->
+    <div class="tab" id="t-clips">
+      <p class="small muted">Thêm clip quay thật, clip AI (Muse trong Meta AI, CapCut…) hoặc ảnh sản phẩm.
+        AI sẽ ưu tiên dùng chúng khi viết kịch bản; bạn cũng có thể gán clip cho từng cảnh ở tab Kịch bản.
+        Chỉ dùng nội dung bạn sở hữu hoặc có quyền.</p>
+      <div class="drop" id="clip-drop"><input type="file" accept="video/*,image/*" multiple hidden>
+        <div style="font-size:26px">⬆</div><b>Kéo thả clip / ảnh vào đây</b> hoặc bấm để chọn
+        <div class="small muted">mp4, mov, webm, jpg, png, webp · tối đa 40 file</div></div>
+      <div class="row" style="margin:10px 0">
+        <label class="check"><input type="checkbox" id="clip-ai"> Clip do AI tạo (gắn nhãn nội dung AI khi đăng)</label>
+        <input id="clip-note" placeholder="Mô tả ngắn cho AI, VD: cận cảnh xay sinh tố" style="flex:1;min-width:220px">
+      </div>
+      {% if clips %}
+      <div class="offers">
+        {% for c in clips %}
+        <div class="card offer" style="padding:10px">
+          {% if c.thumb %}<img src="/clips/{{ job.id }}/{{ c.thumb }}" style="aspect-ratio:9/16">{% endif %}
+          <div class="small" style="margin-top:6px"><b>{{ c.name }}</b></div>
+          <div class="small muted">{{ 'Video %.1fs'|format(c.duration) if c.kind == 'video' else 'Ảnh' }} · {{ c.width }}x{{ c.height }}
+            {% if c.ai_generated %}<span class="badge info">AI</span>{% endif %}</div>
+          <input class="small" value="{{ c.note }}" placeholder="Mô tả cho AI" style="margin-top:6px"
+                 onchange="api('/api/jobs/{{ job.id }}/clips/{{ c.id }}',{note:this.value},{ok:'Đã lưu mô tả'})">
+          <div class="row" style="margin-top:6px">
+            {% if script.scenes %}<button class="btn sm" onclick="addClipScene('{{ c.id }}')">+ Thêm thành cảnh</button>{% endif %}
+            <button class="btn sm danger" onclick="if(confirm('Xoá clip này?'))api('/api/jobs/{{ job.id }}/clips/{{ c.id }}/delete',undefined,{reload:true})">Xoá</button>
+          </div>
+        </div>{% endfor %}
+      </div>
+      <p></p><button class="btn primary" {{ 'disabled' if busy }} onclick="if(confirm('AI viết kịch bản mới quanh các clip này và dựng lại video?'))api('/api/jobs/{{ job.id }}/regenerate',undefined,{ok:'AI đang viết kịch bản với clip của bạn…',reload:true})">✨ AI dựng video với các clip này</button>
+      {% else %}<p class="muted">Chưa có clip nào.</p>{% endif %}
+    </div>
+
     <!-- Caption -->
     <div class="tab" id="t-caption">
       <label>Tiêu đề</label><input id="c-title" value="{{ content.title }}">
@@ -180,6 +213,8 @@
 <script>
 const JOB = "{{ job.id }}";
 const SCRIPT = {{ script | tojson }};
+const CLIPS = {{ clips | tojson }};
+setupClipDrop(document.getElementById("clip-drop"));
 tabs(document.getElementById("tabs-root"));
 {% if job.status in ('NEEDS_PRODUCT_REVIEW','WAITING_FOR_SHOPEE_CREDENTIALS','WAITING_FOR_SHOPEE_API') %}
 document.querySelector('.tabs button[data-tab="t-product"]').click();{% endif %}
@@ -197,6 +232,11 @@ function drawScenes(){
      <label>Lời thoại</label><textarea class="vo" rows="2">${esc(s.voiceover)}</textarea>
      <div class="grid g2"><div><label>Chữ trên màn hình</label><input class="tx" value="${esc(s.text)}"></div>
      <div><label>Thời lượng tối thiểu (giây)</label><input class="du" type="number" step="0.1" min="1" max="8" value="${s.duration??2.5}"></div></div>
+     <div class="grid g2"><div><label>Nguồn hình</label><select class="src">
+       <option value="">${s.clip_id?'(giữ clip hiện tại)':'Giữ nguyên ('+esc(s.kind)+')'}</option>
+       ${CLIPS.map(c=>`<option value="${c.id}" ${c.id===s.clip_id?'selected':''}>Clip: ${esc(c.name)}${c.kind==='video'?' ('+c.duration+'s)':''}</option>`).join("")}
+     </select></div>
+     <div><label>Bắt đầu từ giây (clip video)</label><input class="st" type="number" step="0.1" min="0" value="${s.start??0}"></div></div>
    </div>`).join("");
 }
 function collect(){
@@ -204,12 +244,43 @@ function collect(){
     const s=SCRIPT.scenes[+el.dataset.i];
     s.voiceover=el.querySelector(".vo").value; s.text=el.querySelector(".tx").value;
     s.duration=parseFloat(el.querySelector(".du").value)||2.5;
+    const src=el.querySelector(".src").value, st=parseFloat(el.querySelector(".st").value)||0;
+    if(src){ s.clip_id=src; s.start=st; }
+    else if(s.clip_id || s.kind==="video"){ s.start=st; }
   });
 }
 function moveScene(i,d){collect();const j=i+d;if(j<0||j>=SCRIPT.scenes.length)return;
   [SCRIPT.scenes[i],SCRIPT.scenes[j]]=[SCRIPT.scenes[j],SCRIPT.scenes[i]];drawScenes();}
 function delScene(i){collect();if(SCRIPT.scenes.length<2)return toast("Cần ít nhất 1 cảnh",true);
   SCRIPT.scenes.splice(i,1);drawScenes();}
+function addClipScene(id){
+  collect();
+  SCRIPT.scenes.push({clip_id:id,start:0,duration:2.5,voiceover:"",text:"",motion:null});
+  drawScenes();
+  document.querySelector('.tabs button[data-tab="t-script"]').click();
+  toast("Đã thêm cảnh cuối — sửa lời thoại rồi bấm Lưu & dựng lại");
+}
+function setupClipDrop(el){
+  if(!el) return;
+  const input=el.querySelector("input[type=file]");
+  el.addEventListener("click",()=>input.click());
+  ["dragenter","dragover"].forEach(e=>el.addEventListener(e,ev=>{ev.preventDefault();el.classList.add("over");}));
+  ["dragleave","drop"].forEach(e=>el.addEventListener(e,ev=>{ev.preventDefault();el.classList.remove("over");}));
+  el.addEventListener("drop",ev=>upload(ev.dataTransfer.files));
+  input.addEventListener("change",()=>upload(input.files));
+  async function upload(files){
+    if(!files.length) return;
+    const fd=new FormData();
+    for(const f of files) fd.append("files",f);
+    fd.append("ai_generated",document.getElementById("clip-ai").checked?"true":"false");
+    fd.append("note",document.getElementById("clip-note").value);
+    toast(`Đang tải lên ${files.length} file…`);
+    const r=await api(`/api/jobs/${JOB}/clips`,fd);
+    if(r.errors&&r.errors.length) toast(r.errors.join("; "),true);
+    toast(`Đã thêm ${r.added.length} clip`);
+    setTimeout(()=>location.reload(),700);
+  }
+}
 function caption(){return{title:document.getElementById("c-title").value,caption:document.getElementById("c-caption").value,
   hashtags:document.getElementById("c-tags").value,facebook_description:document.getElementById("c-fb").value};}
 async function saveRender(){

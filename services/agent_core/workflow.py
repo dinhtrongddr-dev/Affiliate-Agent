@@ -15,6 +15,7 @@ from . import creative
 from .ai_client import AIClient, AIClientError
 from .affiliate_client import ShopeeAffiliateClient, ShopeeAffiliateError
 from .assets import VideoGenerator, pexels_video, product_image
+from .clips import clip_dir, describe_for_ai, is_allowed_source, list_clips
 from .db import (
     JOB_FIELDS,
     enqueue_task,
@@ -449,6 +450,10 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     brief = json.loads(job.get("brief_json") or "{}")
     asset_dir = settings.work_dir / job_id / "assets"
     product_img = product_image(product, asset_dir)
+    user_clips = list_clips(settings, job_id)[:8]
+    clip_thumbs = [t for t in (_clip_thumb(settings, job_id, c) for c in user_clips) if t]
+    clips_text = describe_for_ai(user_clips)
+    n_clips = len(user_clips)
 
     # 4) creative plan ---------------------------------------------------------
     update_job(db, job_id, status="SCRIPTING")
@@ -461,10 +466,11 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
             segments = build_segments(cuts, float(metadata["duration_sec"]))
             thumbs = segment_thumbnails(settings.ffmpeg_path, source, segments,
                                         settings.work_dir / job_id / "segments")
-            prompt = creative.base_plan_prompt(analysis, product, segments, metadata)
+            prompt = creative.base_plan_prompt(analysis, product, segments, metadata, clips_text)
             try:
-                raw = _ask_json(client, settings, prompt, thumbs, temperature=0.6)
-                plan = creative.normalise_plan(raw, "base", segments)
+                raw = _ask_json(client, settings, prompt, [*thumbs, *clip_thumbs],
+                                temperature=0.6)
+                plan = creative.normalise_plan(raw, "base", segments, n_clips)
             except AIClientError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -474,10 +480,11 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         else:
             prompt = creative.trend_plan_prompt(
                 {**brief, **{k: analysis.get(k) for k in ("topic", "angle")}}, product,
-                generator.available, bool(settings.pexels_api_key.get_secret_value()))
-            raw = _ask_json(client, settings, prompt, [product_img] if product_img else None,
-                            temperature=0.7)
-            plan = creative.normalise_plan(raw, "trend")
+                generator.available, bool(settings.pexels_api_key.get_secret_value()),
+                clips_text, 2 if product_img else 1)
+            images = ([product_img] if product_img else []) + clip_thumbs
+            raw = _ask_json(client, settings, prompt, images or None, temperature=0.7)
+            plan = creative.normalise_plan(raw, "trend", None, n_clips)
         score = None
         if settings.viral_review:
             try:
@@ -485,7 +492,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                     plan, product, settings.viral_min_score), temperature=0.3)
                 score = float(review.get("score")) if review.get("score") is not None else None
                 if review.get("revised") and (score is None or score < settings.viral_min_score):
-                    plan = creative.normalise_plan(review["revised"], mode, segments)
+                    plan = creative.normalise_plan(review["revised"], mode, segments, n_clips)
                     plan["revised_after_review"] = review.get("issues") or True
                     try:  # score the rewrite so the UI shows the final script's score
                         again = _ask_json(client, settings, creative.review_prompt(
@@ -503,7 +510,11 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         _stop(settings, job_id, "CONTENT_GENERATION_FAILED", exc)
 
     # 5) visual assets -> timeline -------------------------------------------
-    timeline = build_timeline(settings, job, plan, product_img, generator, asset_dir)
+    try:
+        timeline = build_timeline(settings, job, plan, product_img, generator, asset_dir,
+                                  user_clips)
+    except WorkflowError as exc:
+        _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", exc)
     content = _content_from_plan(plan, affiliate_link)
     update_job(db, job_id, script_json=json.dumps(timeline, ensure_ascii=False),
                content_json=json.dumps(content, ensure_ascii=False), viral_score=score)
@@ -511,15 +522,41 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                       frame_paths=frame_paths)
 
 
+def _clip_thumb(settings, job_id: str, clip: dict) -> Path | None:
+    base = clip_dir(settings, job_id)
+    if clip.get("thumb") and (base / clip["thumb"]).is_file():
+        return base / clip["thumb"]
+    if clip["kind"] == "image":
+        return base / clip["file"]
+    return None
+
+
+def _clip_scene(settings, job_id: str, clip: dict, start: float = 0.0) -> dict:
+    path = clip_dir(settings, job_id) / clip["file"]
+    is_video = clip["kind"] == "video"
+    if is_video:
+        start = max(0.0, min(float(start or 0), max(0.0, float(clip["duration"] or 0) - 0.5)))
+    return {"kind": "video" if is_video else "image", "source": str(path),
+            "start": round(start, 3) if is_video else 0.0, "clip_id": clip["id"],
+            "visual": "user_clip", "generated": bool(clip.get("ai_generated"))}
+
+
 def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
-                   generator: VideoGenerator, asset_dir: Path) -> dict:
+                   generator: VideoGenerator, asset_dir: Path,
+                   user_clips: list[dict] | None = None) -> dict:
     mode = job.get("mode") or "base"
+    user_clips = user_clips or []
     scenes: list[dict] = []
     used_stock: set[str] = set()
+    used_clips = {s["clip"] for s in plan["scenes"] if s.get("clip") is not None}
+    spare_clips = [i for i in range(len(user_clips)) if i not in used_clips]
     generated = 0
     for i, scene in enumerate(plan["scenes"]):
         item = {k: scene.get(k) for k in ("duration", "voiceover", "text", "motion")}
-        if mode == "base":
+        if scene.get("clip") is not None and scene["clip"] < len(user_clips):
+            item.update(_clip_scene(settings, job["id"], user_clips[scene["clip"]],
+                                    scene.get("start_offset") or 0))
+        elif mode == "base":
             item.update(kind="video", source=job["source_path"], start=scene["start"],
                         segment=scene.get("segment"))
         else:
@@ -532,6 +569,11 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
                 if path:
                     generated += 1
                     kind = "video"
+            if path is None and visual in {"stock", "generate"} and spare_clips:
+                # Hand-added clips beat stock footage for "stock"/"generate" scenes.
+                item.update(_clip_scene(settings, job["id"], user_clips[spare_clips.pop(0)]))
+                scenes.append(item)
+                continue
             if path is None and visual in {"stock", "generate"}:
                 path = pexels_video(settings, scene.get("stock_query") or "", asset_dir, used_stock)
                 kind = "video" if path else kind
@@ -552,8 +594,8 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
         scenes.append({"kind": "card", "source": str(product_img), "duration": 2.4,
                        "voiceover": "", "text": "", "motion": "zoom_in"})
     if not scenes:
-        raise WorkflowError("No visual assets available. Add Pexels/video generator keys or "
-                            "pick a product with an image.")
+        raise WorkflowError("Chưa có hình ảnh để dựng: thêm clip/ảnh ở tab Kịch bản, "
+                            "link ảnh sản phẩm, hoặc key Pexels/video AI.")
     return {"hook": plan.get("hook", ""), "cta": plan.get("cta") or settings.cta_text,
             "music_mood": plan.get("music_mood", "upbeat"), "scenes": scenes}
 
@@ -791,7 +833,31 @@ def update_script(settings, job_id: str, timeline: dict | None = None,
     if timeline is not None:
         if not isinstance(timeline, dict) or not timeline.get("scenes"):
             raise WorkflowError("Script must contain scenes")
-        fields["script_json"] = json.dumps(timeline, ensure_ascii=False)
+        clips = {c["id"]: c for c in list_clips(settings, job_id)}
+        # Sources the pipeline already chose stay valid; anything new must be a clip
+        # or one of this job's own files.
+        known = {str(sc.get("source")) for sc in
+                 json.loads(job.get("script_json") or "{}").get("scenes") or []}
+        scenes = []
+        for scene in timeline["scenes"]:
+            if not isinstance(scene, dict):
+                continue
+            clip_id = scene.get("clip_id")
+            if clip_id and clip_id not in clips and str(scene.get("source")) in known:
+                scene = {k: v for k, v in scene.items() if k != "clip_id"}  # clip deleted
+                clip_id = None
+            if clip_id:
+                if clip_id not in clips:
+                    raise WorkflowError(f"Clip không tồn tại: {clip_id}")
+                scene = {**scene, **_clip_scene(settings, job_id, clips[clip_id],
+                                                scene.get("start") or 0)}
+            elif (str(scene.get("source")) not in known
+                  and not is_allowed_source(settings, job, str(scene.get("source") or ""))):
+                raise WorkflowError("Nguồn hình của cảnh không hợp lệ")
+            scenes.append(scene)
+        if not scenes:
+            raise WorkflowError("Script must contain scenes")
+        fields["script_json"] = json.dumps({**timeline, "scenes": scenes}, ensure_ascii=False)
     if content_updates:
         content = json.loads(job.get("content_json") or "{}")
         for key in ("title", "caption", "facebook_description"):

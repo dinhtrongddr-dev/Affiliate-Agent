@@ -11,13 +11,14 @@ from contextlib import asynccontextmanager
 from importlib.util import find_spec
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import db, workflow
 from ..affiliate_client import SORT_COMMISSION, SORT_ITEM_SOLD, SORT_RELEVANCE, ShopeeAffiliateClient
+from ..clips import ClipError, add_clip, clip_dir, delete_clip, list_clips, update_clip
 from ..editor.music import list_tracks
 from ..editor.tts import VOICES
 from ..env_file import update_env
@@ -213,7 +214,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       content=json.loads(job.get("content_json") or "{}"),
                       candidates=json.loads(job.get("product_candidates_json") or "[]"),
                       brief=json.loads(job.get("brief_json") or "{}"),
-                      busy=job["status"] in BUSY, active="jobs")
+                      busy=job["status"] in BUSY, active="jobs",
+                      clips=list_clips(s, job_id))
 
     @app.get("/trends", response_class=HTMLResponse)
     def trends_page(request: Request):
@@ -270,6 +272,17 @@ def create_app(start_worker: bool = True) -> FastAPI:
         base = (S().shopee_output / job_id).resolve()
         target = (base / name).resolve()
         if not target.is_relative_to(base) or not target.is_file():
+            raise HTTPException(404)
+        return FileResponse(target)
+
+    @app.get("/clips/{job_id}/{name}")
+    def clip_file(job_id: str, name: str):
+        try:
+            base = clip_dir(S(), job_id).resolve()
+        except ClipError as exc:
+            raise HTTPException(404) from exc
+        target = (base / name).resolve()
+        if not target.is_relative_to(base) or not target.is_file() or target.suffix == ".json":
             raise HTTPException(404)
         return FileResponse(target)
 
@@ -389,6 +402,39 @@ def create_app(start_worker: bool = True) -> FastAPI:
     async def api_reconcile(job_id: str, request: Request):
         body = await request.json()
         workflow.mark_post_reconciled(S(), job_id, body["platform"], bool(body.get("success")))
+        return {"ok": True}
+
+    @app.post("/api/jobs/{job_id}/clips")
+    async def api_clip_upload(job_id: str, files: list[UploadFile] = File(...),
+                              ai_generated: str = Form("false"), note: str = Form("")):
+        job_or_404(job_id)
+        added, errors = [], []
+        for upload in files:
+            try:
+                clip = add_clip(S(), job_id, upload.filename or "clip", upload.file,
+                                ai_generated=ai_generated in ("true", "1", "on"), note=note)
+                added.append(clip["id"])
+            except ClipError as exc:
+                errors.append(f"{upload.filename}: {exc}")
+        if errors and not added:
+            raise HTTPException(400, "; ".join(errors))
+        return {"added": added, "errors": errors}
+
+    @app.post("/api/jobs/{job_id}/clips/{clip_id}")
+    async def api_clip_update(job_id: str, clip_id: str, request: Request):
+        job_or_404(job_id)
+        body = await request.json()
+        update_clip(S(), job_id, clip_id, note=body.get("note"),
+                    ai_generated=body.get("ai_generated"))
+        return {"ok": True}
+
+    @app.post("/api/jobs/{job_id}/clips/{clip_id}/delete")
+    def api_clip_delete(job_id: str, clip_id: str):
+        job = job_or_404(job_id)
+        script = json.loads(job.get("script_json") or "{}")
+        if any(sc.get("clip_id") == clip_id for sc in script.get("scenes") or []):
+            raise HTTPException(400, "Clip đang được dùng trong kịch bản: đổi cảnh đó trước")
+        delete_clip(S(), job_id, clip_id)
         return {"ok": True}
 
     @app.post("/api/jobs/{job_id}/delete")

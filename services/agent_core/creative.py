@@ -47,15 +47,27 @@ PLAN_SCHEMA = """
 }
 """.strip()
 
-BASE_SCENE_FIELDS = '"segment": 0, "start_offset": 0.0,'
+BASE_SCENE_FIELDS = '"segment": 0, "clip": null, "start_offset": 0.0,'
 TREND_SCENE_FIELDS = (
-    '"visual": "product_image|card|stock|generate", '
+    '"visual": "user_clip|product_image|card|stock|generate", "clip": null, "start_offset": 0.0, '
     '"stock_query": "english keywords for stock footage", '
     '"gen_prompt": "english prompt for a 9:16 AI video clip, product-accurate",'
 )
 
 
-def base_plan_prompt(analysis: dict, product: dict, segments: list[dict], meta: dict) -> str:
+def _clips_block(clips_text: str, first_image: int) -> str:
+    if not clips_text:
+        return ""
+    return f"""
+Clip người dùng tự thêm (ảnh đại diện đính kèm từ ảnh thứ {first_image}). Đây là chất liệu
+ĐẮT GIÁ NHẤT (quay thật / AI chất lượng cao): ưu tiên dùng, đặc biệt cho cảnh hook và cảnh
+khoe sản phẩm. Dùng bằng trường "clip": số thứ tự clip (start_offset = giây bắt đầu trong clip):
+{clips_text}
+"""
+
+
+def base_plan_prompt(analysis: dict, product: dict, segments: list[dict], meta: dict,
+                     clips_text: str = "") -> str:
     seg_lines = "\n".join(
         f"- segment {s['index']}: bắt đầu {s['start']:.1f}s, dài {s['duration']:.1f}s (ảnh #{s['index']} đính kèm)"
         for s in segments
@@ -73,7 +85,8 @@ Cách dựng:
 - Chọn và SẮP XẾP LẠI các segment: cảnh mở đầu là khung hình bắt mắt nhất.
 - Có thể dùng lại 1 segment với start_offset khác (giây tính từ đầu segment).
 - Bỏ đoạn mờ, rung, trống, không liên quan.
-
+- Mỗi cảnh dùng HOẶC "segment" (video gốc) HOẶC "clip" (clip người dùng), cái còn lại = null.
+{_clips_block(clips_text, len(segments) + 1)}
 Công thức hook gợi ý:
 {HOOK_FORMULAS}
 
@@ -84,8 +97,12 @@ Trả về DUY NHẤT 1 JSON object, không markdown:
 """.strip()
 
 
-def trend_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock: bool) -> str:
-    visuals = ["product_image (ảnh sản phẩm thật, có chuyển động zoom/pan)",
+def trend_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock: bool,
+                      clips_text: str = "", first_clip_image: int = 1) -> str:
+    visuals = []
+    if clips_text:
+        visuals.append('user_clip (clip người dùng thêm, chọn bằng trường "clip")')
+    visuals += ["product_image (ảnh sản phẩm thật, có chuyển động zoom/pan)",
                "card (ảnh sản phẩm trên nền màu, hợp cảnh liệt kê/CTA)"]
     if has_stock:
         visuals.append("stock (video stock theo stock_query tiếng Anh: bối cảnh, con người, tình huống)")
@@ -101,7 +118,7 @@ Sản phẩm (dữ liệu thật từ Shopee): {json.dumps(_product_facts(produc
 Nguồn hình ảnh có sẵn cho mỗi cảnh (trường "visual"):
 - {chr(10).join('- ' + v for v in visuals)[2:]}
 Không lặp product_image quá 2 cảnh liền nhau; xen kẽ card/stock để đa dạng.
-
+{_clips_block(clips_text, first_clip_image)}
 Bắt trend: dùng đúng tinh thần/format của trend (câu nói, tình huống, nhịp), nhưng nội dung là của mình.
 
 Công thức hook gợi ý:
@@ -140,7 +157,7 @@ Sản phẩm: {json.dumps(_product_facts(product), ensure_ascii=False)}
 Kịch bản: {json.dumps(plan, ensure_ascii=False)}
 
 Nếu điểm < {min_score}, BẮT BUỘC viết lại toàn bộ kịch bản tốt hơn trong "revised" (hook mạnh hơn, bỏ câu rào đón, nhịp nhanh hơn) (giữ nguyên cấu trúc JSON,
-giữ nguyên các trường segment/visual/stock_query/gen_prompt hợp lệ). Nếu đạt, "revised" = null.
+giữ nguyên các trường segment/clip/visual/stock_query/gen_prompt hợp lệ). Nếu đạt, "revised" = null.
 Trả về DUY NHẤT JSON: {{"score": 8.0, "issues": ["..."], "revised": null}}
 """.strip()
 
@@ -150,7 +167,8 @@ def _product_facts(product: dict) -> dict:
     return {k: product.get(k) for k in keys if product.get(k) not in (None, "")}
 
 
-def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None) -> dict:
+def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
+                   n_clips: int = 0) -> dict:
     """Validate/clean AI output so rendering never trusts raw model JSON."""
     if not isinstance(plan, dict):
         raise ValueError("Plan must be a JSON object")
@@ -166,7 +184,11 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None) ->
             "motion": raw.get("motion") if raw.get("motion") in
             {"zoom_in", "zoom_out", "pan_left", "pan_right"} else None,
         }
-        if mode == "base":
+        clip = _int(raw.get("clip"))
+        if clip is not None and 0 <= clip < n_clips:
+            scene.update({"clip": clip, "visual": "user_clip",
+                          "start_offset": _num(raw.get("start_offset"), 0.0, 0.0, 600.0)})
+        elif mode == "base":
             try:
                 index = int(raw.get("segment"))
             except (TypeError, ValueError):
@@ -209,6 +231,13 @@ def fallback_base_plan(analysis: dict, segments: list[dict]) -> dict:
                "voiceover": hook if i == 0 else "", "text": ""} for i, s in enumerate(picks)]
     return {"hook": hook[:60], "scenes": scenes, "cta": "", "caption": hook,
             "hashtags": [], "music_mood": "upbeat"}
+
+
+def _int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _text(value, limit: int) -> str:
