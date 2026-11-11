@@ -1,51 +1,28 @@
-# Deployment status — 2026-11-11
+# Deployment status — 2026-11-11 (v0.2.0)
 
-## Working
+## Working and verified locally
 
-- Windows desktop connected; OpenClaw 2026.10.3 is reused.
-- Node 24.21.0, Python 3.12.10, FFmpeg 8.1 and Chrome are available.
-- Project: D:\AffiliateAgent.
-- Media root: E:\AffiliateAgentMedia.
-- LUNO is a sparse clone pinned at 0065ad0; only the selected Shopee uploader functions and MIT license remain.
-- Shopee Skill is a sparse clone pinned at 209c53f; only Affiliate API client, minimal helpers, credentials example and MIT license remain.
-- Full upstream UI/server/task queue and unrelated integrations are excluded.
-- Python environment was pruned; FastAPI, Uvicorn, APScheduler and Tenacity are absent.
-- SQLite connections now close cleanly; schema migrations add analysis, candidates, review and readiness fields.
-- Video intake uses SHA-256 deduplication and ffprobe metadata.
-- Three keyframes can be extracted for multimodal AI analysis.
-- AI client now calls ChatGPT2API directly through OpenAI Chat Completions, including image_url blocks and ChatGPT2API thinking_effort=extended. AffiliateAgent uses the model gpt-6-astra-wm; the API's normalizer maps extended to the supported deep-reasoning mode. The local ChatGPT2API model list and authenticated text call were verified; an actual Vision request using a local QA video frame returned a description.
-- Workflow supports analysis, Shopee offer search, fuzzy product ranking, tracked affiliate link creation and Vietnamese content generation.
-- Ambiguous product candidates can be manually selected; the agent does not silently choose a weak match.
-- Review package includes source copy, preview frames, caption.txt, manifest.json and static review.html.
-- Facebook 9:16 QA is evaluated independently from Shopee media integrity.
-- Shopee Creator Center upload is explicitly gated and saves as a non-public draft.
-- Facebook Reel publishing command is wired with explicit confirmation, Meta credentials and AUTO_PUBLISH gates.
-- Uncertain Shopee upload results are recorded for reconciliation; blind retries are blocked.
-- Inbox watcher runs via scripts/start-media-watcher.cmd.
-- Unit tests and mocked end-to-end pipeline test: 15 passed.
-- Affiliate API dry-run passed without a network request.
-- AUTO_PUBLISH remains false.
+- **Web UI** (`scripts/start-app.cmd`): dashboard, video list/detail, script editor, caption editor, product picker (search or paste a Shopee link), trend list, hot products, approval and scheduling, revenue page, queue, settings, log viewer.
+- **Background worker:** SQLite task queue with retry/backoff and inbox watcher; periodic Google Trends fetch and conversion sync. A publish interrupted by a crash is never retried automatically.
+- **Render engine:** 9:16 1080x1920 output with blur-fill, Ken Burns/zoom, product cards, 10 xfade transition styles, Edge TTS Vietnamese voice with word timings, karaoke subtitles, hook title, CTA, ducked music and -14 LUFS loudness.
+- **Base-video mode:** scene-cut detection → AI picks and reorders segments → render.
+- **Trend/offer mode:** AI ideation → product → script → product images / Pexels / AI-clip adapter → render.
+- **Script quality:** an AI self-review scores each script and rewrites it when the score is below the threshold.
+- **Shopee Affiliate client:** rewritten as a native signed GraphQL client. The old subprocess parser could never read the upstream script's multi-line JSON, so live API calls always failed before.
+- **Shopee uploader:** fixed the garbled button names (`Lưu bản nháp`, `Đăng`). Submissions now report CONFIRMED only when Shopee shows a success message or redirects.
+- **TikTok Content Posting API** (inbox and direct), Facebook Reels (existing), approval gating per platform.
+- **Tests:** 33 automated tests pass, plus ruff lint. The real ChatGPT2API vision analysis ran through the UI worker. The full render ran with real Edge TTS.
 
 ## Waiting for account setup
 
-- Shopee Affiliate App ID and App Secret in config\shopee-skill\credentials.json.
-- AA_SHOPEE_AFFILIATE_ENABLED=true after those credentials are configured.
-- Manual Shopee Creator Center login in the dedicated Chrome profile.
-- Meta Graph API version, Facebook Page ID and Page Access Token in .env.
+- Shopee Affiliate App ID and Secret (Cài đặt → Shopee), then enable the API.
+- Manual Shopee Creator Center login (`scripts/open-shopee-login.cmd`).
+- Licensed music tracks in `<media>\assets\music`.
+- Optional: Pexels key, AI video generator endpoint (Muse or other), Meta Page token, TikTok token.
 
 ## Not yet verified live
 
-- AI visual analysis against the user's actual affiliate video (only a local QA test frame has been used so far).
-- Live Shopee Affiliate offer search and short-link creation.
-- Actual Creator Center draft upload and success-state reconciliation.
-- Facebook live publishing and Meta Page permissions.
-- Automatic startup after Windows reboot.
-- Final video rendering/transcoding beyond safe copying and platform QA.
-
-## Safety defaults
-
-- AUTO_PUBLISH=false.
-- Shopee Affiliate API and Meta publishing are disabled by default.
-- No credentials are stored in source code or sent through ChatGPT.
-- Product matches below threshold or with a small score margin require human selection.
-- Unknown upload outcomes must be reconciled before retrying.
+- Live Shopee offer search, short links and conversion report (needs credentials).
+- Creator Center draft upload with the new success detection (needs login; selectors come from upstream).
+- Facebook and TikTok live uploads.
+- The `http` video-generator contract against the actual Muse API (the adapter may need its field names adjusted).

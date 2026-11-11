@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import job_row %}
+{% block content %}
+<div class="row space"><div><h1>Video</h1><p class="sub">Tất cả video đang xử lý, chờ duyệt và đã đăng.</p></div>
+  <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">🔄 Quét inbox</button></div>
+<div class="row" style="margin-bottom:14px">
+  <a class="btn sm {{ 'primary' if not status }}" href="/jobs">Tất cả</a>
+  {% for st, n in counts.items() %}
+  <a class="btn sm {{ 'primary' if status == st }}" href="/jobs?status={{ st }}">{{ label(st)[0] }} ({{ n }})</a>
+  {% endfor %}
+</div>
+<div class="card">
+  {% if jobs %}
+  <table><tr><th>Video</th><th>Trạng thái</th><th>Điểm</th><th>Cập nhật</th></tr>
+    {% for job in jobs %}{{ job_row(job) }}{% endfor %}</table>
+  {% else %}<p class="muted">Không có video.</p>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>setInterval(()=>{ if(document.querySelector(".badge.run")) location.reload(); }, 8000);</script>{% endblock %}

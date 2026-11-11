@@ -8,5 +8,5 @@ set "TEMP=%ROOT%\cache\tmp"
 set "TMP=%ROOT%\cache\tmp"
 set "PLAYWRIGHT_BROWSERS_PATH=%ROOT%\cache\playwright"
 if not exist "%TEMP%" mkdir "%TEMP%"
-".venv\Scripts\python.exe" -m agent_core.cli watch %*
+".venv\Scripts\python.exe" -m agent_core.cli worker %*
 endlocal

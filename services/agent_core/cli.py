@@ -1,7 +1,6 @@
 import argparse
 from importlib.util import find_spec
 import json
-import logging
 import shutil
 import sys
 
@@ -17,9 +16,17 @@ from .db import (
 from .media import scan_inbox
 from .settings import get_settings
 from .watcher import watch_inbox
+from .logging_setup import setup_logging
 from .workflow import (
-    process_job, select_product_for_job,
-    publish_facebook_reel_job, upload_shopee_draft,
+    PENDING_STATUSES,
+    create_trend_job,
+    process_job,
+    publish_facebook_reel_job,
+    publish_tiktok_job,
+    regenerate_script,
+    render_job,
+    select_product_for_job,
+    upload_shopee_draft,
 )
 
 
@@ -117,6 +124,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="affiliate-agent")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    ui = sub.add_parser("ui", help="open the web interface (also runs the background worker)")
+    ui.add_argument("--no-browser", action="store_true")
+    ui.add_argument("--port", type=int)
+    sub.add_parser("worker", help="run the background worker + inbox watcher without UI")
+
+    trend = sub.add_parser("trend-job", help="create a video from a trend topic (no base video)")
+    trend.add_argument("topic")
+    trend.add_argument("--notes", default="")
+    trend.add_argument("--keywords", default="", help="comma separated Shopee keywords")
+    trend.add_argument("--run", action="store_true", help="process immediately")
+
+    render = sub.add_parser("render", help="re-render a job from its stored script")
+    render.add_argument("job_id")
+    regen = sub.add_parser("regenerate", help="ask AI for a new script and render")
+    regen.add_argument("job_id")
+    sub.add_parser("trends-fetch", help="fetch Google Trends Vietnam")
+    sub.add_parser("sync-conversions", help="pull Shopee conversion report (30 days)")
+
+    tiktok = sub.add_parser("tiktok-upload", help="send a reviewed video to TikTok")
+    tiktok.add_argument("job_id")
+    tiktok.add_argument("--confirm", action="store_true")
+
     sub.add_parser("doctor")
     sub.add_parser("credentials")
     sub.add_parser("scan")
@@ -150,10 +179,41 @@ def main() -> int:
 
     args = parser.parse_args()
     settings = get_settings()
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    setup_logging(settings.logs_dir)
+
+    if args.command == "ui":
+        from .web.app import run
+        run(port=args.port, open_browser=not args.no_browser)
+        return 0
+    if args.command == "worker":
+        from .worker import run_forever
+        run_forever(settings)
+        return 0
+    if args.command == "trend-job":
+        keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
+        job_id = create_trend_job(settings, args.topic, args.notes, keywords)
+        _print(process_job(settings, job_id) if args.run else {"job_id": job_id})
+        return 0
+    if args.command == "render":
+        _print(render_job(settings, args.job_id))
+        return 0
+    if args.command == "regenerate":
+        _print(regenerate_script(settings, args.job_id))
+        return 0
+    if args.command == "trends-fetch":
+        from .trends import fetch_google_trends
+        _print({"google_trends": fetch_google_trends(settings)})
+        return 0
+    if args.command == "sync-conversions":
+        from .analytics import sync_conversions
+        _print(sync_conversions(settings))
+        return 0
+    if args.command == "tiktok-upload":
+        if not args.confirm:
+            _print({"status": "NOT_STARTED", "message": "Repeat with --confirm to upload."})
+            return 2
+        _print(publish_tiktok_job(settings, args.job_id, confirmed=True))
+        return 0
 
     if args.command == "doctor":
         return doctor(settings)
@@ -183,20 +243,7 @@ def main() -> int:
         _print(process_job(settings, args.job_id))
         return 0
     if args.command == "process-all":
-        pending = list_jobs_by_status(
-            settings.database_path,
-            [
-                "DISCOVERED",
-                "WAITING_FOR_AI_CREDENTIALS",
-                "WAITING_FOR_AI_SERVICE",
-                "WAITING_FOR_SHOPEE_CREDENTIALS",
-                "WAITING_FOR_SHOPEE_API",
-                "ANALYZED",
-                "CONTENT_GENERATION_FAILED",
-                "KEYFRAME_EXTRACTION_FAILED",
-            ],
-            args.limit,
-        )
+        pending = list_jobs_by_status(settings.database_path, PENDING_STATUSES, args.limit)
         results = [process_job(settings, job["id"]) for job in pending]
         _print({"processed": len(results), "results": results})
         return 0

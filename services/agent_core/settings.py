@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,25 +27,72 @@ class Settings(BaseSettings):
     ffprobe_path: str = "ffprobe"
     timezone: str = "Asia/Ho_Chi_Minh"
 
+    # AI gateway (OpenAI-compatible or Anthropic Messages)
     ai_protocol: str = "openai"
     ai_base_url: str = "http://127.0.0.1:13000/v1"
     ai_api_key: SecretStr = SecretStr("")
     ai_model: str = "gpt-6-astra-wm"
     ai_thinking_effort: str = "extended"
+    ai_timeout_seconds: int = 180
 
+    # Shopee
     shopee_skill_home: Path = PROJECT_ROOT / "config" / "shopee-skill"
     shopee_affiliate_enabled: bool = False
+    shopee_seed_keywords: str = "máy xay mini,đèn ngủ,ốp lưng,bình giữ nhiệt,son môi"
 
+    # Facebook
     meta_graph_version: str = ""
     meta_page_id: str = ""
     meta_page_access_token: SecretStr = SecretStr("")
     meta_enabled: bool = False
 
+    # TikTok Content Posting API
+    tiktok_enabled: bool = False
+    tiktok_access_token: SecretStr = SecretStr("")
+    tiktok_mode: str = "inbox"  # inbox = send to TikTok drafts; direct = post publicly
+    tiktok_privacy_level: str = "SELF_ONLY"
+
+    # Creative / rendering
+    tts_enabled: bool = True
+    tts_voice: str = "vi-VN-HoaiMyNeural"
+    tts_rate: str = "+8%"
+    music_dir: Path | None = None
+    music_volume: float = 0.22
+    keep_source_audio: bool = False
+    source_audio_volume: float = 0.35
+    render_width: int = 1080
+    render_height: int = 1920
+    render_fps: int = 30
+    transition_seconds: float = 0.35
+    target_min_seconds: float = 12.0
+    target_max_seconds: float = 45.0
+    font_name: str = "Arial"
+    font_file: str = r"C:\Windows\Fonts\arialbd.ttf"
+    cta_text: str = "Link sản phẩm ở giỏ hàng / bình luận"
+    viral_review: bool = True
+    viral_min_score: float = 7.0
+    variants: int = 1
+
+    # Stock footage and AI video generation (optional)
+    pexels_api_key: SecretStr = SecretStr("")
+    videogen_provider: str = "none"  # none | http
+    videogen_base_url: str = ""
+    videogen_api_key: SecretStr = SecretStr("")
+    videogen_model: str = ""
+    videogen_timeout_seconds: int = 600
+    videogen_max_clips: int = 3
+
+    # Automation
+    auto_process: bool = True
     auto_publish: bool = False
+    worker_poll_seconds: float = 3.0
+    web_host: str = "127.0.0.1"
+    web_port: int = 8765
+
     stable_file_seconds: float = 3.0
     file_stable_timeout_seconds: int = 300
     facebook_min_duration_seconds: float = 4.0
-    facebook_max_duration_seconds: float = 60.0
+    facebook_max_duration_seconds: float = 90.0
     facebook_min_width: int = 540
     facebook_min_height: int = 960
 
@@ -57,6 +105,10 @@ class Settings(BaseSettings):
         return self.assets_dir or self.media_root / "assets"
 
     @property
+    def music(self) -> Path:
+        return self.music_dir or self.assets / "music"
+
+    @property
     def shopee_output(self) -> Path:
         return self.output_shopee_dir or self.media_root / "outbox" / "shopee"
 
@@ -67,6 +119,18 @@ class Settings(BaseSettings):
     @property
     def quarantine(self) -> Path:
         return self.quarantine_dir or self.media_root / "quarantine"
+
+    @property
+    def work_dir(self) -> Path:
+        return self.project_root / "cache" / "work"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.project_root / "logs"
+
+    @property
+    def seed_keywords(self) -> list[str]:
+        return [k.strip() for k in self.shopee_seed_keywords.split(",") if k.strip()]
 
 
 def get_settings() -> Settings:

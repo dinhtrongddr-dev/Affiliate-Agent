@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Affiliate Agent{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js"></script>
+</head>
+<body data-busy="{{ '1' if busy else '0' }}">
+<div class="layout">
+  <nav class="side">
+    <div class="logo"><span>▶</span> Affiliate Agent</div>
+    <a href="/" class="{{ 'active' if active == 'dashboard' }}">🏠 Tổng quan</a>
+    <a href="/jobs" class="{{ 'active' if active in ('jobs', 'job') }}">🎬 Video</a>
+    <a href="/trends" class="{{ 'active' if active == 'trends' }}">🔥 Trend</a>
+    <a href="/products" class="{{ 'active' if active == 'products' }}">🛒 Sản phẩm hot</a>
+    <a href="/analytics" class="{{ 'active' if active == 'analytics' }}">📈 Doanh thu & đăng</a>
+    <a href="/tasks" class="{{ 'active' if active == 'tasks' }}">⏱ Hàng đợi</a>
+    <a href="/settings" class="{{ 'active' if active == 'settings' }}">⚙️ Cài đặt</a>
+    <a href="/logs" class="{{ 'active' if active == 'logs' }}">📄 Nhật ký</a>
+    <div class="worker" id="worker">…</div>
+  </nav>
+  <main>{% block content %}{% endblock %}</main>
+</div>
+<div id="toast"></div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

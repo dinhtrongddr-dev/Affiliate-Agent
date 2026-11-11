@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge %}
+{% block content %}
+<h1>Hàng đợi</h1>
+<p class="sub">Việc chạy nền: xử lý video, dựng, đăng, lấy trend, đồng bộ doanh thu.</p>
+<div class="card">
+{% if tasks %}
+<table><tr><th>#</th><th>Loại</th><th>Video</th><th>Trạng thái</th><th>Lần</th><th>Cập nhật</th><th></th></tr>
+{% for t in tasks %}
+<tr><td>{{ t.id }}</td><td>{{ t.kind }}</td>
+  <td>{% if t.job_id %}<a href="/jobs/{{ t.job_id }}">{{ t.job_id }}</a>{% endif %}</td>
+  <td>{{ badge(t.status) }}{% if t.last_error %}<div class="small err-text">{{ t.last_error[:200] }}</div>{% endif %}</td>
+  <td>{{ t.attempts }}/{{ t.max_attempts }}</td>
+  <td class="small muted">{{ t.updated_at[:19].replace('T',' ') }}</td>
+  <td>{% if t.status == 'FAILED' and t.kind != 'publish' %}<button class="btn sm" onclick="api('/api/tasks/{{ t.id }}/retry',undefined,{reload:true})">Thử lại</button>{% endif %}</td></tr>
+{% endfor %}</table>
+{% else %}<p class="muted">Hàng đợi trống.</p>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>setTimeout(()=>location.reload(),10000)</script>{% endblock %}

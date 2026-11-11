@@ -60,3 +60,20 @@ def validate_shopee_video(path, metadata: dict) -> QualityResult:
         reasons=reasons,
         metadata=metadata,
     )
+
+
+def validate_rendered_video(metadata: dict, settings) -> QualityResult:
+    """Checks for the finished short video (format, length, audio)."""
+    reasons = []
+    duration = float(metadata.get("duration_sec") or 0)
+    if duration < 3:
+        reasons.append(f"Rendered video too short ({duration:.1f}s)")
+    if duration > 180:
+        reasons.append(f"Rendered video too long ({duration:.1f}s)")
+    if metadata.get("has_audio") is False:
+        reasons.append("Rendered video has no audio track")
+    width, height = int(metadata.get("width") or 0), int(metadata.get("height") or 0)
+    if width <= 0 or height <= 0 or width >= height:
+        reasons.append(f"Rendered video must be vertical; got {width}x{height}")
+    return QualityResult(passed=not reasons, platform="render", reasons=reasons,
+                         metadata=metadata)

@@ -1,6 +1,7 @@
 import logging
 import threading
 from pathlib import Path
+from typing import Callable
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -11,8 +12,9 @@ log = logging.getLogger("affiliate_agent.watcher")
 
 
 class VideoInboxHandler(FileSystemEventHandler):
-    def __init__(self, settings):
+    def __init__(self, settings, on_registered: Callable[[str, bool], None] | None = None):
         self.settings = settings
+        self.on_registered = on_registered
         self._active: set[str] = set()
         self._lock = threading.Lock()
 
@@ -30,6 +32,8 @@ class VideoInboxHandler(FileSystemEventHandler):
             try:
                 inserted, info = register_video(path, self.settings)
                 log.info("Video scan complete inserted=%s info=%s", inserted, info)
+                if self.on_registered and info.get("job_id"):
+                    self.on_registered(info["job_id"], inserted)
             except Exception:
                 log.exception("Failed to register video: %s", path)
             finally:

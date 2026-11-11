@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge %}
+{% block title %}{{ job.product_name or job.file_name }} · Affiliate Agent{% endblock %}
+{% block content %}
+<div class="row space">
+  <div>
+    <a href="/jobs" class="small">← Danh sách video</a>
+    <h1>{{ content.title or job.product_name or job.file_name }}</h1>
+    <p class="sub">{{ 'Tạo từ trend/sản phẩm' if job.mode == 'trend' else 'Dựng từ video base' }} · {{ job.id }}
+      · <span data-live-status>{{ label(job.status)[0] }}</span></p>
+  </div>
+  <div class="row">
+    {{ badge(job.status) }}
+    {% if job.viral_score %}<span class="badge info">⭐ Điểm viral {{ '%.1f' % job.viral_score }}</span>{% endif %}
+  </div>
+</div>
+
+{% if job.last_error and label(job.status)[1] in ('warn','err') %}
+<div class="card" style="border-color:#f5c2be;background:#fff8f7;margin-bottom:16px">
+  <b>Cần chú ý:</b> {{ job.last_error }}
+  <div class="row" style="margin-top:8px">
+    {% if job.status.startswith('WAITING') %}<a class="btn sm" href="/settings">Mở cài đặt</a>{% endif %}
+    <button class="btn sm" onclick="api('/api/jobs/{{ job.id }}/process?force=true',undefined,{ok:'Đã đưa vào hàng đợi',reload:true})">↻ Chạy lại</button>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid split">
+  <div>
+    <div class="phone">
+      {% if job.output_path and not busy %}
+      <video controls preload="metadata" poster="/files/{{ job.id }}/cover.jpg"
+             src="/files/{{ job.id }}/{{ job.id }}.mp4?v={{ job.updated_at }}"></video>
+      {% elif busy %}
+      <div style="aspect-ratio:9/16;display:grid;place-items:center;color:#fff;text-align:center;padding:20px">
+        <div><div class="badge run">{{ label(job.status)[0] }}</div>
+        <p class="small" style="color:#aaa">Trang tự cập nhật khi xong.</p></div></div>
+      {% else %}
+      <div style="aspect-ratio:9/16;display:grid;place-items:center;color:#888">Chưa có video</div>
+      {% endif %}
+    </div>
+    {% set frames = (job.keyframes_json | fromjson) or [] %}
+    {% if frames %}<p class="small muted" style="margin:12px 0 4px">Khung hình video gốc</p>
+    <div class="thumbs">{% for f in frames %}<img src="/keyframe/{{ job.id }}/{{ loop.index0 }}">{% endfor %}</div>{% endif %}
+    <div class="row" style="margin-top:14px">
+      {% if job.output_path %}<a class="btn sm" href="/files/{{ job.id }}/{{ job.id }}.mp4" download>⬇ Tải video</a>{% endif %}
+      <button class="btn sm danger" onclick="if(confirm('Xoá job này khỏi danh sách? File video không bị xoá.'))api('/api/jobs/{{ job.id }}/delete',undefined,{go:()=>'/jobs'})">Xoá</button>
+    </div>
+  </div>
+
+  <div class="card" id="tabs-root">
+    <div class="tabs">
+      <button data-tab="t-publish" class="active">✅ Duyệt & đăng</button>
+      <button data-tab="t-script">🎬 Kịch bản</button>
+      <button data-tab="t-caption">✍️ Caption</button>
+      <button data-tab="t-product">🛒 Sản phẩm</button>
+      <button data-tab="t-info">ℹ️ Phân tích</button>
+    </div>
+
+    <!-- Publish -->
+    <div class="tab active" id="t-publish">
+      {% if job.status in ('READY_FOR_REVIEW', 'APPROVED') %}
+      <p class="muted small">Xem video bên trái. Khi hài lòng, chọn nơi đăng rồi bấm duyệt. Shopee mặc định lưu <b>bản nháp</b>.</p>
+      {% for p, name in platform_labels.items() %}
+      <div class="scene">
+        <label class="check"><input type="checkbox" name="pf" value="{{ p }}" {{ 'disabled' if blockers[p] }}
+            {{ 'checked' if p == 'shopee' and not blockers[p] }}> {{ name }}</label>
+        {% if p == 'shopee' %}
+        <select id="shopee-action" style="max-width:260px;margin-top:6px">
+          <option value="draft">Lưu bản nháp (an toàn)</option>
+          <option value="publish">Đăng ngay (cần AA_AUTO_PUBLISH)</option>
+        </select>{% endif %}
+        {% for b in blockers[p] %}<div class="small err-text">• {{ b }}</div>{% endfor %}
+      </div>
+      {% endfor %}
+      <label>Lên lịch (để trống = đăng ngay)</label>
+      <input type="datetime-local" id="schedule" style="max-width:260px">
+      <p></p>
+      <button class="btn primary" onclick="approve()">✅ Duyệt & đăng</button>
+      {% else %}
+      <p class="muted">Video chưa ở trạng thái chờ duyệt.</p>
+      {% endif %}
+
+      {% if posts %}
+      <h3 style="margin-top:22px">Lịch sử đăng</h3>
+      <table><tr><th>Nền tảng</th><th>Trạng thái</th><th>Lịch</th><th></th></tr>
+      {% for p in posts %}
+      <tr><td>{{ platform_labels.get(p.platform, p.platform) }}</td>
+        <td>{{ badge(p.status) }}{% if p.last_error %}<div class="small err-text">{{ p.last_error[:200] }}</div>{% endif %}
+          {% if p.permalink %}<div><a href="{{ p.permalink }}" target="_blank" rel="noopener">Xem bài</a></div>{% endif %}</td>
+        <td class="small">{{ (p.scheduled_at or '')[:16].replace('T',' ') }}</td>
+        <td>{% if p.status in ('UPLOAD_NEEDS_RECONCILIATION','DRAFT_SUBMITTED_UNCONFIRMED','SUBMITTED_UNCONFIRMED') %}
+          <div class="small muted">Kiểm tra trên nền tảng rồi xác nhận:</div>
+          <button class="btn sm" onclick="reconcile('{{ p.platform }}',true)">Đã lên</button>
+          <button class="btn sm" onclick="reconcile('{{ p.platform }}',false)">Không có</button>{% endif %}</td></tr>
+      {% endfor %}</table>
+      {% endif %}
+    </div>
+
+    <!-- Script editor -->
+    <div class="tab" id="t-script">
+      {% if script.scenes %}
+      <div class="grid g2">
+        <div><label>Hook (chữ 0-3 giây)</label><input id="hook" value="{{ script.hook }}"></div>
+        <div><label>CTA cuối video</label><input id="cta" value="{{ script.cta }}"></div>
+      </div>
+      <label>Nhạc (mood)</label>
+      <select id="mood" style="max-width:220px">
+        {% for m in ['upbeat','chill','emotional','funny','epic'] %}
+        <option {{ 'selected' if script.music_mood == m }}>{{ m }}</option>{% endfor %}
+      </select>
+      <h3 style="margin-top:16px">Cảnh ({{ script.scenes|length }})</h3>
+      <div id="scenes"></div>
+      <div class="row">
+        <button class="btn primary" onclick="saveRender()" {{ 'disabled' if busy }}>💾 Lưu & dựng lại</button>
+        <button class="btn" onclick="if(confirm('AI viết kịch bản mới và dựng lại?'))api('/api/jobs/{{ job.id }}/regenerate',undefined,{ok:'AI đang viết lại',reload:true})" {{ 'disabled' if busy }}>✨ AI viết lại kịch bản</button>
+      </div>
+      {% if script.render %}<p class="small muted">Lần dựng gần nhất: {{ script.render.duration }}s ·
+        {{ 'có giọng đọc' if script.render.voice else 'không có giọng' }} ·
+        nhạc: {{ (script.render.music or 'chưa có').split('\\')[-1] }}</p>{% endif %}
+      {% else %}<p class="muted">Chưa có kịch bản.</p>{% endif %}
+    </div>
+
+    <!-- Caption -->
+    <div class="tab" id="t-caption">
+      <label>Tiêu đề</label><input id="c-title" value="{{ content.title }}">
+      <label>Caption</label><textarea id="c-caption" rows="4">{{ content.caption }}</textarea>
+      <label>Hashtag</label><input id="c-tags" value="{{ (content.hashtags or [])|join(' ') }}">
+      <label>Mô tả Facebook</label><textarea id="c-fb" rows="3">{{ content.facebook_description }}</textarea>
+      <p></p><button class="btn primary" onclick="saveCaption()">💾 Lưu caption</button>
+      <h3 style="margin-top:18px">Bản xem trước Shopee</h3>
+      <pre style="white-space:pre-wrap;background:#f5f6f8;padding:12px;border-radius:8px">{{ content.shopee_caption }}</pre>
+    </div>
+
+    <!-- Product -->
+    <div class="tab" id="t-product">
+      <div class="scene">
+        <h3>Tìm / đổi sản phẩm</h3>
+        <div class="row"><input id="p-kw" placeholder="Từ khoá Shopee, VD: máy xay sinh tố mini" style="flex:1">
+          <button class="btn" onclick="searchProducts()">🔍 Tìm</button></div>
+        <p class="small muted" style="margin:8px 0 4px">Hoặc dán link sản phẩm Shopee:</p>
+        <div class="row"><input id="p-url" placeholder="https://shopee.vn/..." style="flex:2">
+          <input id="p-name" placeholder="Tên sản phẩm" style="flex:1">
+          <button class="btn" onclick="manualProduct()">Dùng link này</button></div>
+      </div>
+      {% if job.product_item_id %}
+      <div class="prod card" style="margin-bottom:12px">
+        {% for c in candidates if c.item_id|string == job.product_item_id|string %}{% if loop.first and c.image_url %}<img src="{{ c.image_url }}">{% endif %}{% endfor %}
+        <div><b>{{ job.product_name }}</b><div class="small muted">ID {{ job.product_item_id }}</div>
+          {% if job.affiliate_link %}<a href="{{ job.affiliate_link }}" target="_blank" rel="noopener">{{ job.affiliate_link }}</a>{% endif %}</div>
+      </div>{% endif %}
+      {% if candidates %}
+      <h3>Ứng viên</h3>
+      {% for c in candidates %}
+      <div class="prod scene">
+        {% if c.image_url %}<img src="{{ c.image_url }}">{% endif %}
+        <div style="flex:1"><b>{{ c.name }}</b>
+          <div class="small muted">Điểm khớp {{ c.score or '-' }} · giá từ {{ c.price_min or '-' }} · hoa hồng {{ c.commission_rate or '-' }} {% if c.sales %}· đã bán {{ c.sales }}{% endif %}</div></div>
+        {% if c.item_id|string != job.product_item_id|string %}
+        <button class="btn sm" onclick="if(confirm('Chọn sản phẩm này và dựng lại video?'))api('/api/jobs/{{ job.id }}/select-product',{item_id:'{{ c.item_id }}'},{ok:'Đã chọn, đang dựng lại',reload:true})">Chọn</button>
+        {% else %}<span class="badge ok">Đang dùng</span>{% endif %}
+      </div>{% endfor %}
+      {% else %}<p class="muted">Chưa có ứng viên sản phẩm.</p>{% endif %}
+    </div>
+
+    <!-- Analysis -->
+    <div class="tab" id="t-info">
+      {% if brief %}<h3>Brief</h3><pre class="small" style="white-space:pre-wrap">{{ brief | tojson(indent=2) }}</pre>{% endif %}
+      <h3>Phân tích AI</h3><pre class="small" style="white-space:pre-wrap">{{ analysis | tojson(indent=2) }}</pre>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const JOB = "{{ job.id }}";
+const SCRIPT = {{ script | tojson }};
+tabs(document.getElementById("tabs-root"));
+pollJob(JOB);
+
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function drawScenes(){
+  const box=document.getElementById("scenes"); if(!box||!SCRIPT.scenes) return;
+  box.innerHTML=SCRIPT.scenes.map((s,i)=>`
+   <div class="scene" data-i="${i}">
+     <div class="head"><span>Cảnh ${i+1} · ${esc(s.kind)}${s.segment!=null?' · đoạn '+s.segment:''}${s.visual?' · '+esc(s.visual):''}</span>
+       <span><button class="btn sm" onclick="moveScene(${i},-1)">↑</button>
+       <button class="btn sm" onclick="moveScene(${i},1)">↓</button>
+       <button class="btn sm danger" onclick="delScene(${i})">✕</button></span></div>
+     <label>Lời thoại</label><textarea class="vo" rows="2">${esc(s.voiceover)}</textarea>
+     <div class="grid g2"><div><label>Chữ trên màn hình</label><input class="tx" value="${esc(s.text)}"></div>
+     <div><label>Thời lượng tối thiểu (giây)</label><input class="du" type="number" step="0.1" min="1" max="8" value="${s.duration??2.5}"></div></div>
+   </div>`).join("");
+}
+function collect(){
+  document.querySelectorAll("#scenes .scene").forEach(el=>{
+    const s=SCRIPT.scenes[+el.dataset.i];
+    s.voiceover=el.querySelector(".vo").value; s.text=el.querySelector(".tx").value;
+    s.duration=parseFloat(el.querySelector(".du").value)||2.5;
+  });
+}
+function moveScene(i,d){collect();const j=i+d;if(j<0||j>=SCRIPT.scenes.length)return;
+  [SCRIPT.scenes[i],SCRIPT.scenes[j]]=[SCRIPT.scenes[j],SCRIPT.scenes[i]];drawScenes();}
+function delScene(i){collect();if(SCRIPT.scenes.length<2)return toast("Cần ít nhất 1 cảnh",true);
+  SCRIPT.scenes.splice(i,1);drawScenes();}
+function caption(){return{title:document.getElementById("c-title").value,caption:document.getElementById("c-caption").value,
+  hashtags:document.getElementById("c-tags").value,facebook_description:document.getElementById("c-fb").value};}
+async function saveRender(){
+  collect();
+  const script={...SCRIPT,hook:document.getElementById("hook").value,cta:document.getElementById("cta").value,
+    music_mood:document.getElementById("mood").value}; delete script.render;
+  await api(`/api/jobs/${JOB}/render`,{script,content:caption()},{ok:"Đang dựng lại video…",reload:true});
+}
+async function saveCaption(){await api(`/api/jobs/${JOB}/content`,{content:caption()},{ok:"Đã lưu caption",reload:true});}
+async function approve(){
+  const platforms={};
+  document.querySelectorAll("input[name=pf]:checked").forEach(c=>{
+    platforms[c.value]=c.value==="shopee"?document.getElementById("shopee-action").value:"publish";});
+  if(!Object.keys(platforms).length) return toast("Chọn ít nhất 1 nền tảng",true);
+  const sched=document.getElementById("schedule").value;
+  if(!confirm("Xác nhận đăng lên: "+Object.keys(platforms).join(", ")+(sched?" lúc "+sched:" ngay")+"?")) return;
+  await api(`/api/jobs/${JOB}/approve`,{platforms,schedule_at:sched},{ok:"Đã duyệt, đang đưa vào hàng đợi đăng",reload:true});
+}
+async function searchProducts(){
+  const keyword=document.getElementById("p-kw").value.trim();
+  if(!keyword) return toast("Nhập từ khoá",true);
+  const r=await api(`/api/jobs/${JOB}/search-products`,{keyword});
+  toast(`Tìm thấy ${r.count} sản phẩm`); setTimeout(()=>location.reload(),600);
+}
+async function manualProduct(){
+  const url=document.getElementById("p-url").value.trim(), name=document.getElementById("p-name").value.trim();
+  await api(`/api/jobs/${JOB}/manual-product`,{url,name},{ok:"Đang tạo link và dựng video…",reload:true});
+}
+async function reconcile(platform,success){
+  await api(`/api/jobs/${JOB}/reconcile`,{platform,success},{ok:"Đã ghi nhận",reload:true});
+}
+drawScenes();
+</script>
+{% endblock %}

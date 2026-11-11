@@ -1,6 +1,7 @@
+import re
+import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-import sys
 from typing import Literal
 
 from playwright.sync_api import sync_playwright
@@ -10,6 +11,53 @@ from .media import probe_video
 
 class ShopeeVideoError(RuntimeError):
     pass
+
+
+SUCCESS_TEXT = re.compile(r"thành công|đã lưu|đã đăng|successfully|saved", re.IGNORECASE)
+BUTTON_NAMES = {
+    "draft": re.compile(r"^\s*lưu bản nháp\s*$|^\s*save (as )?draft\s*$", re.IGNORECASE),
+    "publish": re.compile(r"^\s*đăng( ngay)?\s*$|^\s*post\s*$|^\s*publish\s*$", re.IGNORECASE),
+}
+
+
+def submit_and_verify(page, action: Literal["draft", "publish"], timeout_ms: int = 60000) -> dict:
+    """Click the submit button and look for a real success signal.
+
+    Status is *_CONFIRMED only when Shopee shows a success toast or moves to the
+    post list; otherwise it stays *_UNCONFIRMED and must be reconciled by hand.
+    """
+    confirmed_status = "DRAFT_SAVED_CONFIRMED" if action == "draft" else "PUBLISHED_CONFIRMED"
+    unconfirmed_status = (
+        "DRAFT_SUBMITTED_UNCONFIRMED" if action == "draft" else "SUBMITTED_UNCONFIRMED"
+    )
+    start_url = page.url
+    button = page.get_by_role("button", name=BUTTON_NAMES[action]).first
+    try:
+        button.wait_for(state="visible", timeout=15000)
+        button.click(timeout=15000)
+    except Exception as exc:
+        return {"status": unconfirmed_status, "url": page.url,
+                "reason": f"Submit button not clickable: {exc}"}
+
+    deadline_steps = max(1, timeout_ms // 1000)
+    for _ in range(deadline_steps):
+        try:
+            if page.get_by_text(SUCCESS_TEXT).first.is_visible():
+                return {"status": confirmed_status, "url": page.url, "signal": "success_text"}
+        except Exception:
+            pass
+        url = page.url
+        if url != start_url and "/video-upload/upload" not in url and (
+            "video-list" in url or "/creator-center/video" in url or "manage" in url
+        ):
+            return {"status": confirmed_status, "url": url, "signal": "redirect_to_list"}
+        page.wait_for_timeout(1000)
+    return {
+        "status": unconfirmed_status,
+        "url": page.url,
+        "url_changed": page.url != start_url,
+        "reason": "No Shopee success signal seen; verify in Creator Center before retrying.",
+    }
 
 
 def load_upstream_uploader(settings):
@@ -35,6 +83,7 @@ def load_upstream_uploader(settings):
         spec.loader.exec_module(module)
 
     module.CONFIG.update({
+        "headless": False,
         "profile_dir": settings.project_root / "profiles" / "shopee",
         "log_csv": settings.project_root / "logs" / "shopee_upload_log.csv",
         "state_json": settings.project_root / "state" / "shopee_upload_state.json",
@@ -139,11 +188,7 @@ def upload_shopee_video(
             if schedule_date and schedule_time:
                 uploader.set_schedule(page, schedule_date, schedule_time)
 
-            result = (
-                uploader.save_draft(page)
-                if action == "draft"
-                else uploader.publish(page)
-            )
+            result = submit_and_verify(page, action)
             return {
                 "status": result.get(
                     "status",

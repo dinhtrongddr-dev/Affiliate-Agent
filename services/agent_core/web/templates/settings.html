@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Cài đặt</h1>
+<p class="sub">Lưu vào file .env trên máy này. Ô bí mật để trống = giữ nguyên giá trị cũ (không bao giờ hiển thị lại).</p>
+<div class="grid g2" style="align-items:start">
+  <div>
+  {% for group in fields|groupby('group') %}
+  <div class="card" style="margin-bottom:16px">
+    <h2>{{ group.grouper }}</h2>
+    {% for f in group.list %}
+      {% if f.kind == 'bool' %}
+      <label class="check"><input type="checkbox" data-key="{{ f.key }}" {{ 'checked' if f.value|string|lower in ('true','1','on') }}> {{ f.label }}</label>
+      {% elif f.kind == 'secret' %}
+      <label>{{ f.label }} {% if f.value %}<span class="badge ok">đã lưu</span>{% else %}<span class="badge warn">trống</span>{% endif %}</label>
+      <input type="password" data-key="{{ f.key }}" placeholder="{{ '••••••• (để trống = giữ nguyên)' if f.value else 'Dán giá trị' }}" autocomplete="off">
+      {% elif f.kind == 'voice' %}
+      <label>{{ f.label }}</label>
+      <select data-key="{{ f.key }}">{% for v, name in voices.items() %}<option value="{{ v }}" {{ 'selected' if f.value == v }}>{{ name }}</option>{% endfor %}</select>
+      {% else %}
+      <label>{{ f.label }}</label><input data-key="{{ f.key }}" value="{{ f.value }}">
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+  <button class="btn primary" onclick="save()">💾 Lưu cài đặt</button>
+  </div>
+  <div>
+    <div class="card" style="margin-bottom:16px">
+      <h2>Shopee Affiliate API {% if shopee_configured %}<span class="badge ok">đã cấu hình</span>{% else %}<span class="badge warn">chưa có</span>{% endif %}</h2>
+      <p class="small muted">Lấy App ID / Secret tại affiliate.shopee.vn → Open API. Lưu vào config/shopee-skill/credentials.json.</p>
+      <label>App ID</label><input id="sp-id" autocomplete="off">
+      <label>App Secret</label><input id="sp-secret" type="password" autocomplete="off">
+      <p></p><button class="btn" onclick="saveShopee()">Lưu Shopee</button>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h2>Nhạc nền ({{ tracks|length }})</h2>
+      <p class="small muted">Chép file nhạc <b>bạn có quyền dùng</b> (YouTube Audio Library, Pixabay Music…) vào:<br><code>{{ music_dir }}</code><br>
+        Đặt tên có mood để AI chọn đúng: <code>upbeat_*.mp3</code>, <code>chill_*.mp3</code>, <code>emotional_*.mp3</code>, <code>funny_*.mp3</code>, <code>epic_*.mp3</code>.
+        Nhạc trend TikTok nên gắn trong app TikTok lúc hoàn tất bài từ hộp thư.</p>
+      {% if tracks %}<ul class="small">{% for t in tracks[:20] %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+    <div class="card">
+      <h2>Đăng nhập Shopee Creator Center</h2>
+      <p class="small muted">Chạy <code>scripts\open-shopee-login.cmd</code>, đăng nhập (tự làm OTP/CAPTCHA), rồi đóng cửa sổ Chrome.</p>
+      <h2 style="margin-top:16px">Video AI (Muse hoặc dịch vụ khác)</h2>
+      <p class="small muted">Đặt nhà cung cấp = <code>http</code> và base URL. Adapter gọi <code>POST {base}/generations</code> và
+        <code>GET {base}/generations/{id}</code>; nếu API khác định dạng, sửa <code>agent_core/assets.py</code> (lớp VideoGenerator).</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script>
+async function save(){
+  const body={};
+  document.querySelectorAll("[data-key]").forEach(el=>{
+    body[el.dataset.key]=el.type==="checkbox"?el.checked:el.value;});
+  await api("/api/settings",body,{ok:"Đã lưu cài đặt",reload:true});
+}
+async function saveShopee(){
+  const app_id=document.getElementById("sp-id").value, secret=document.getElementById("sp-secret").value;
+  if(!app_id||!secret) return toast("Nhập đủ App ID và Secret",true);
+  await api("/api/settings/shopee",{app_id,secret},{ok:"Đã lưu Shopee credentials",reload:true});
+}
+</script>{% endblock %}

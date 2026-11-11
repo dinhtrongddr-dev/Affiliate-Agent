@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row space"><div><h1>Trend</h1>
+  <p class="sub">Lấy tín hiệu trend (chủ đề, hashtag, format) để AI làm video <b>mới</b> — không tải lại video của người khác.</p></div>
+  <button class="btn" onclick="api('/api/trends/fetch',undefined,{ok:'Đang lấy Google Trends VN…',reload:true,delay:4000})">⟳ Lấy Google Trends VN</button>
+</div>
+
+<div class="grid split2">
+  <div class="card">
+    <h2>Thêm trend TikTok / Facebook</h2>
+    <p class="small muted">Xem TikTok Creative Center, tab Explore/Reels… rồi dán link + ghi chú format (câu hook, nhạc, kiểu quay). AI sẽ bắt format đó.</p>
+    <label>Tiêu đề trend</label><input id="t-title" placeholder="VD: POV mở hộp đồ bếp mini">
+    <label>Nguồn</label>
+    <select id="t-source"><option value="tiktok">TikTok</option><option value="facebook">Facebook</option><option value="manual">Khác</option></select>
+    <label>Link tham khảo</label><input id="t-url" placeholder="https://www.tiktok.com/...">
+    <label>Ghi chú format / hook / nhạc</label><textarea id="t-notes" placeholder="Hook 'Đừng mua... nếu chưa xem', cắt nhanh 1s/cảnh, nhạc sôi động"></textarea>
+    <label>Từ khoá sản phẩm (tuỳ chọn, phẩy ngăn cách)</label><input id="t-kw" placeholder="máy xay mini, bình giữ nhiệt">
+    <p></p><button class="btn primary" onclick="addTrend()">+ Thêm trend</button>
+  </div>
+  <div class="card">
+    <h2>Danh sách trend</h2>
+    {% if trends %}
+    <table><tr><th>Trend</th><th>Nguồn</th><th></th></tr>
+    {% for t in trends %}
+    <tr><td><b>{{ t.title }}</b>{% if t.traffic %} <span class="badge info">{{ t.traffic }}</span>{% endif %}
+        {% if t.notes %}<div class="small muted">{{ t.notes[:160] }}</div>{% endif %}
+        {% if t.url %}<a class="small" href="{{ t.url }}" target="_blank" rel="noopener">link</a>{% endif %}</td>
+      <td class="small">{{ t.source }}</td>
+      <td style="white-space:nowrap">
+        {% if t.job_id %}<a class="btn sm" href="/jobs/{{ t.job_id }}">Xem video</a>{% endif %}
+        <button class="btn sm primary" onclick="api('/api/trends/{{ t.id }}/create-job',undefined,{ok:'AI đang làm video…',go:d=>'/jobs/'+d.job_id})">🎬 Làm video</button>
+        <button class="btn sm danger" onclick="api('/api/trends/{{ t.id }}/delete',undefined,{reload:true})">✕</button></td></tr>
+    {% endfor %}</table>
+    {% else %}<p class="muted">Chưa có trend. Bấm "Lấy Google Trends VN" hoặc thêm thủ công.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script>
+async function addTrend(){
+  const v=id=>document.getElementById(id).value;
+  if(!v("t-title").trim()) return toast("Nhập tiêu đề trend",true);
+  await api("/api/trends",{title:v("t-title"),source:v("t-source"),url:v("t-url"),notes:v("t-notes"),keywords:v("t-kw")},{ok:"Đã thêm",reload:true});
+}
+</script>{% endblock %}

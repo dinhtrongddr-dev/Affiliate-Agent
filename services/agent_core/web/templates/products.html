@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Sản phẩm hot</h1>
+<p class="sub">Tìm sản phẩm bán chạy / hoa hồng cao qua Shopee Affiliate API, rồi để AI làm video từ A–Z.</p>
+<form class="card row" method="get" style="margin-bottom:16px">
+  <input name="q" value="{{ q }}" placeholder="Từ khoá, VD: máy xay mini" style="flex:1;min-width:220px">
+  <select name="sort" style="width:200px">
+    <option value="sold" {{ 'selected' if sort=='sold' }}>Bán chạy nhất</option>
+    <option value="commission" {{ 'selected' if sort=='commission' }}>Hoa hồng cao</option>
+    <option value="relevance" {{ 'selected' if sort=='relevance' }}>Liên quan</option>
+  </select>
+  <button class="btn primary">Tìm</button>
+  <span class="small muted">Ngách:</span>
+  {% for s in seeds %}<a class="btn sm" href="/products?q={{ s|urlencode }}&sort=sold">{{ s }}</a>{% endfor %}
+</form>
+{% if error %}<div class="card" style="border-color:#f5c2be;background:#fff8f7">{{ error }} — <a href="/settings">kiểm tra cấu hình Shopee</a></div>{% endif %}
+<div class="offers">
+{% for o in offers %}
+  <div class="card offer">
+    {% if o.imageUrl %}<img src="{{ o.imageUrl }}" loading="lazy">{% endif %}
+    <div class="name" title="{{ o.productName }}">{{ o.productName }}</div>
+    <div class="small muted">Giá từ {{ o.priceMin }} · HH {{ o.commissionRate }}{% if o.sales %} · đã bán {{ o.sales }}{% endif %}</div>
+    <p></p>
+    <button class="btn sm primary" onclick='makeVideo({{ o | tojson }})'>🎬 Làm video</button>
+    {% if o.offerLink %}<a class="btn sm" href="{{ o.offerLink }}" target="_blank" rel="noopener">Xem</a>{% endif %}
+  </div>
+{% else %}
+  {% if not error %}<p class="muted">Nhập từ khoá hoặc chọn một ngách để xem sản phẩm.</p>{% endif %}
+{% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}<script>
+async function makeVideo(offer){
+  const notes=prompt("Ý tưởng/trend muốn bắt (tuỳ chọn):","");
+  if(notes===null) return;
+  await api("/api/products/create-job",{offer,notes},{ok:"AI đang làm video…",go:d=>"/jobs/"+d.job_id});
+}
+</script>{% endblock %}

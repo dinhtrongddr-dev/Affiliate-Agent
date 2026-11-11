@@ -16,30 +16,49 @@ from agent_core.workflow import WorkflowError, process_job, upload_shopee_draft
 
 
 class FakeAI:
+    """Answers by prompt type so the test does not depend on call order."""
+
     def __init__(self):
         self.calls = 0
+        self.kinds = []
 
     def chat(self, messages, **kwargs):
         self.calls += 1
-        if self.calls == 1:
+        content = messages[0]["content"]
+        prompt = content if isinstance(content, str) else content[0]["text"]
+        if "biên tập viên" in prompt:
+            self.kinds.append("review")
+            return {"content": json.dumps({"score": 8.5, "issues": [], "revised": None})}
+        if "đạo diễn" in prompt:
+            self.kinds.append("plan")
             return {"content": json.dumps({
-                "language": "vi",
-                "video_type": "product_demo",
-                "topic": "portable blender",
-                "visual_summary": "A person shows a portable mini blender cup.",
-                "product_category": "portable mini blender",
-                "visible_brand": "",
-                "product_search_keywords": ["portable mini blender", "mini blender cup"],
-                "video_hook": "Một chiếc máy xay mini gọn nhẹ.",
-                "observed_features": ["portable cup shape"],
-                "uncertainties": ["capacity not visible"],
+                "title": "Portable mini blender",
+                "hook": "Máy xay mini bỏ túi?",
+                "music_mood": "upbeat",
+                "scenes": [
+                    {"segment": 0, "start_offset": 0, "duration": 2,
+                     "voiceover": "Một chiếc máy xay mini gọn nhẹ.", "text": "Gọn nhẹ"},
+                    {"segment": 1, "start_offset": 0, "duration": 2,
+                     "voiceover": "Bấm giỏ hàng để xem nhé.", "text": ""},
+                ],
+                "cta": "Link ở giỏ hàng",
+                "caption": "Một chiếc máy xay mini nhỏ gọn, tiện mang theo.",
+                "hashtags": ["#portable_blender", "#kitchen"],
+                "facebook_description": "Video giới thiệu máy xay mini.",
+                "cover_ratio": 0.2,
             })}
+        self.kinds.append("analysis")
         return {"content": json.dumps({
-            "title": "Portable mini blender",
-            "caption": "Một chiếc máy xay mini nhỏ gọn, tiện mang theo.",
-            "hashtags": ["#portable_blender", "#kitchen"],
-            "cover_ratio": 0.2,
-            "facebook_description": "Video giới thiệu máy xay mini.",
+            "language": "vi",
+            "video_type": "product_demo",
+            "topic": "portable blender",
+            "visual_summary": "A person shows a portable mini blender cup.",
+            "product_category": "portable mini blender",
+            "visible_brand": "",
+            "product_search_keywords": ["portable mini blender", "mini blender cup"],
+            "video_hook": "Một chiếc máy xay mini gọn nhẹ.",
+            "observed_features": ["portable cup shape"],
+            "uncertainties": ["capacity not visible"],
         })}
 
 
@@ -95,6 +114,12 @@ class PipelineIntegrationTests(unittest.TestCase):
             settings.facebook_max_duration_seconds = 60
             settings.facebook_min_width = 540
             settings.facebook_min_height = 960
+            settings.tts_enabled = False
+            settings.render_width = 360
+            settings.render_height = 640
+            settings.facebook_min_width = 360
+            settings.facebook_min_height = 640
+            settings.music_dir = root / "no-music"
 
             metadata = probe_video(source, settings.ffprobe_path)
             digest = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -131,7 +156,10 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 (media / "outbox" / "shopee" / job_id / "review.html").is_file()
             )
-            self.assertEqual(fake_ai.calls, 2)
+            self.assertEqual(fake_ai.kinds, ["analysis", "plan", "review"])
+            rendered = probe_video(Path(result["output_path"]), settings.ffprobe_path)
+            self.assertEqual((rendered["width"], rendered["height"]), (360, 640))
+            self.assertTrue(json.loads(saved_job["script_json"])["scenes"])
 
             fake_upload_result = {
                 "status": "DRAFT_SUBMITTED_UNCONFIRMED",

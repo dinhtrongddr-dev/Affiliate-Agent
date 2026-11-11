@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_macros.html" import job_row %}
+{% block content %}
+<h1>Tổng quan</h1>
+<p class="sub">Thả video base để AI tự dựng, hoặc tạo video mới từ trend / sản phẩm hot.</p>
+
+<div class="grid g4" style="margin-bottom:16px">
+  {% for name, n in groups.items() %}
+  <div class="card stat"><div class="n">{{ n }}</div><div class="l">{{ name }}</div></div>
+  {% endfor %}
+</div>
+
+<div class="grid hero" style="margin-bottom:16px">
+  <div class="card">
+    <h2>1. Có video base</h2>
+    <div class="drop" id="drop"><input type="file" accept="video/*" multiple hidden>
+      <div style="font-size:30px">⬆</div>
+      <b>Kéo thả video vào đây</b> hoặc bấm để chọn file
+      <div class="small muted">Hoặc chép vào {{ inbox }} — app tự quét. Chỉ dùng video bạn sở hữu/có quyền.</div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">🔄 Quét inbox</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>2. Không có video</h2>
+    <p class="small muted">AI chọn trend + sản phẩm, viết kịch bản, tự dựng video.</p>
+    <a class="btn primary" href="/trends">🔥 Làm từ trend</a>
+    <p></p>
+    <a class="btn" href="/products">🛒 Làm từ sản phẩm hot</a>
+  </div>
+  <div class="card">
+    <h2>Tình trạng hệ thống</h2>
+    <ul class="health">
+      {% for h in health %}
+      <li><span><i class="dot {{ 'ok' if h.ok else ('opt' if h.optional else 'no') }}"></i>{{ h.name }}</span>
+        {% if not h.ok %}<span class="small muted" title="{{ h.hint }}">{{ 'tuỳ chọn' if h.optional else 'cần cấu hình' }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    <a class="small" href="/settings">Mở cài đặt →</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row space"><h2>Video gần đây</h2><a href="/jobs">Xem tất cả →</a></div>
+  {% if jobs %}
+  <table><tr><th>Video</th><th>Trạng thái</th><th>Điểm</th><th>Cập nhật</th></tr>
+    {% for job in jobs %}{{ job_row(job) }}{% endfor %}</table>
+  {% else %}<p class="muted">Chưa có video nào. Thả video base hoặc tạo từ trend để bắt đầu.</p>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>setupDrop(document.getElementById("drop"));
+setInterval(()=>{ if(document.querySelector(".badge.run")) location.reload(); }, 8000);</script>{% endblock %}

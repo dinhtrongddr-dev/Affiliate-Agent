@@ -1,0 +1,15 @@
+{% macro badge(status) -%}
+{% set l = label(status) %}<span class="badge {{ l[1] }}">{{ l[0] }}</span>
+{%- endmacro %}
+
+{% macro job_row(job) -%}
+<tr>
+  <td><a href="/jobs/{{ job.id }}"><b>{{ job.product_name or job.file_name }}</b></a>
+    <div class="small muted">{{ 'Từ trend' if job.mode == 'trend' else 'Video base' }} · {{ job.id }}</div></td>
+  <td>{{ badge(job.status) }}{% if job.last_error and label(job.status)[1] in ('warn','err') %}
+    <div class="small err-text">{{ job.last_error[:120] }}</div>{% endif %}</td>
+  <td class="small">{% if job.viral_score %}⭐ {{ '%.1f' % job.viral_score }}{% endif %}
+    {% if job.duration_sec %}<div class="muted">{{ '%.0f' % job.duration_sec }}s</div>{% endif %}</td>
+  <td class="small muted">{{ job.updated_at[:16].replace('T', ' ') }}</td>
+</tr>
+{%- endmacro %}
