@@ -144,3 +144,33 @@ class MetaReelsPublisher:
                 "meta_finish": finish_data,
                 "meta_status": last_status,
             }
+
+
+def exchange_for_page_token(graph_version: str, app_id: str, app_secret: str,
+                            short_user_or_page_token: str, page_id: str,
+                            transport: httpx.BaseTransport | None = None) -> str:
+    """Short-lived Explorer token -> long-lived user token -> non-expiring Page token.
+
+    Page tokens obtained from a long-lived user token do not expire (Meta docs:
+    "Long-Lived Access Tokens"). Nothing is logged or printed.
+    """
+    base = f"https://graph.facebook.com/{graph_version}"
+    with httpx.Client(timeout=30, transport=transport) as client:
+        resp = client.get(f"{base}/oauth/access_token", params={
+            "grant_type": "fb_exchange_token", "client_id": app_id,
+            "client_secret": app_secret, "fb_exchange_token": short_user_or_page_token,
+        })
+        MetaReelsPublisher._raise_for_meta(resp, "exchange_token")
+        long_user = resp.json().get("access_token")
+        if not long_user:
+            raise MetaReelsError("Meta returned no long-lived token")
+        resp = client.get(f"{base}/me/accounts", params={"fields": "id,name,access_token",
+                                                         "limit": 100},
+                          headers={"Authorization": f"Bearer {long_user}"})
+        MetaReelsPublisher._raise_for_meta(resp, "list_pages")
+        for page in resp.json().get("data") or []:
+            if str(page.get("id")) == str(page_id) and page.get("access_token"):
+                return page["access_token"]
+    raise MetaReelsError(
+        "Page not found for this token. Generate the token as the *user* "
+        "(Người dùng) in Graph API Explorer, not as the Page, and make sure the Page was granted.")

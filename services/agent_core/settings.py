@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     meta_page_id: str = ""
     meta_page_access_token: SecretStr = SecretStr("")
     meta_enabled: bool = False
+    meta_app_id: str = ""
 
     # TikTok Content Posting API
     tiktok_enabled: bool = False

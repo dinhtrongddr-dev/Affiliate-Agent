@@ -259,7 +259,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
         aff = ShopeeAffiliateClient(s).credentials_status()["sections"]["shopee_affiliate"]
         return render(request, "settings.html", fields=fields, voices=VOICES,
                       shopee_configured=aff["configured"], music_dir=str(s.music),
-                      tracks=[t.name for t in list_tracks(s.music)])
+                      tracks=[t.name for t in list_tracks(s.music)], meta_app_id=s.meta_app_id)
 
     @app.get("/logs", response_class=HTMLResponse)
     def logs_page(request: Request):
@@ -472,6 +472,41 @@ def create_app(start_worker: bool = True) -> FastAPI:
         if state["worker"]:
             state["worker"].settings = new_settings
         return {"saved": sorted(updates)}
+
+    @app.post("/api/settings/facebook-token")
+    async def api_facebook_token(request: Request):
+        """Exchange a short-lived Explorer token for a non-expiring Page token and save it."""
+        from ..meta_reels import exchange_for_page_token
+        body = await request.json()
+        s = S()
+        app_id = str(body.get("app_id") or "").strip()
+        app_secret = str(body.get("app_secret") or "").strip()
+        token = str(body.get("token") or "").strip()
+        if not (app_id and app_secret and token and s.meta_page_id and s.meta_graph_version):
+            raise HTTPException(400, "Cần App ID, App Secret, token và Page ID/Graph version")
+        try:
+            page_token = exchange_for_page_token(s.meta_graph_version, app_id, app_secret,
+                                                 token, s.meta_page_id)
+        except Exception as exc:  # noqa: BLE001
+            raise workflow.WorkflowError(f"Không đổi được token: {exc}") from exc
+        update_env(s.project_root / ".env", {"AA_META_PAGE_ACCESS_TOKEN": page_token,
+                                             "AA_META_APP_ID": app_id,
+                                             "AA_META_ENABLED": "true"})
+        state["settings"] = get_settings()
+        if state["worker"]:
+            state["worker"].settings = state["settings"]
+        return {"saved": True}
+
+    @app.post("/api/settings/facebook-check")
+    def api_facebook_check():
+        from ..meta_reels import MetaReelsPublisher
+        s = S()
+        try:
+            page = MetaReelsPublisher(s.meta_graph_version, s.meta_page_id,
+                                      s.meta_page_access_token.get_secret_value()).check_page()
+        except Exception as exc:  # noqa: BLE001
+            raise workflow.WorkflowError(f"Facebook chưa kết nối: {exc}") from exc
+        return {"ok": True, "page": page.get("name"), "id": page.get("id")}
 
     @app.post("/api/settings/shopee")
     async def api_shopee_credentials(request: Request):

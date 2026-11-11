@@ -225,3 +225,20 @@ class WebTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MetaTokenTests(unittest.TestCase):
+    def test_exchange_returns_matching_page_token(self):
+        from agent_core.meta_reels import MetaReelsError, exchange_for_page_token
+
+        def handler(request: httpx.Request):
+            if request.url.path.endswith("/oauth/access_token"):
+                return httpx.Response(200, json={"access_token": "LONG"})
+            assert request.headers["Authorization"] == "Bearer LONG"
+            return httpx.Response(200, json={"data": [
+                {"id": "1", "access_token": "P1"}, {"id": "2", "access_token": "P2"}]})
+
+        transport = httpx.MockTransport(handler)
+        self.assertEqual(exchange_for_page_token("v27.0", "a", "s", "short", "2", transport), "P2")
+        with self.assertRaises(MetaReelsError):
+            exchange_for_page_token("v27.0", "a", "s", "short", "9", transport)

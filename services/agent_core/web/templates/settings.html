@@ -39,6 +39,17 @@
         Nhạc trend TikTok nên gắn trong app TikTok lúc hoàn tất bài từ hộp thư.</p>
       {% if tracks %}<ul class="small">{% for t in tracks[:20] %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <h2>Facebook Page token (không hết hạn)</h2>
+      <p class="small muted">1) Graph API Explorer: chọn app, ô "Người dùng hoặc Trang" để <b>Mã người dùng</b>, bấm Generate Access Token và copy token.<br>
+        2) App Secret: developers.facebook.com → app → Cài đặt ứng dụng → Thông tin cơ bản → Khoá bí mật.<br>
+        App đổi sang token Page vĩnh viễn và lưu vào .env (không hiển thị lại).</p>
+      <label>App ID</label><input id="fb-app" autocomplete="off" value="{{ meta_app_id }}">
+      <label>App Secret</label><input id="fb-secret" type="password" autocomplete="off">
+      <label>Token từ Graph API Explorer</label><input id="fb-token" type="password" autocomplete="off">
+      <p></p><div class="row"><button class="btn primary" onclick="fbToken()">Đổi & lưu token</button>
+      <button class="btn" onclick="api('/api/settings/facebook-check',undefined).then(r=>toast('Đã kết nối Page: '+r.page))">Kiểm tra kết nối</button></div>
+    </div>
     <div class="card">
       <h2>Đăng nhập Shopee Creator Center</h2>
       <p class="small muted">Chạy <code>scripts\open-shopee-login.cmd</code>, đăng nhập (tự làm OTP/CAPTCHA), rồi đóng cửa sổ Chrome.</p>
@@ -55,6 +66,11 @@ async function save(){
   document.querySelectorAll("[data-key]").forEach(el=>{
     body[el.dataset.key]=el.type==="checkbox"?el.checked:el.value;});
   await api("/api/settings",body,{ok:"Đã lưu cài đặt",reload:true});
+}
+async function fbToken(){
+  const v=id=>document.getElementById(id).value.trim();
+  if(!v("fb-app")||!v("fb-secret")||!v("fb-token")) return toast("Nhập đủ App ID, App Secret và token",true);
+  await api("/api/settings/facebook-token",{app_id:v("fb-app"),app_secret:v("fb-secret"),token:v("fb-token")},{ok:"Đã lưu token Page vĩnh viễn",reload:true});
 }
 async function saveShopee(){
   const app_id=document.getElementById("sp-id").value, secret=document.getElementById("sp-secret").value;
