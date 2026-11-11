@@ -164,6 +164,12 @@ def exchange_for_page_token(graph_version: str, app_id: str, app_secret: str,
         long_user = resp.json().get("access_token")
         if not long_user:
             raise MetaReelsError("Meta returned no long-lived token")
+        auth = {"Authorization": f"Bearer {long_user}"}
+        me = client.get(f"{base}/me", params={"fields": "id"}, headers=auth)
+        MetaReelsPublisher._raise_for_meta(me, "whoami")
+        if str(me.json().get("id")) == str(page_id):
+            # A Page token was pasted: the exchanged token is already the Page's.
+            return long_user
         resp = client.get(f"{base}/me/accounts", params={"fields": "id,name,access_token",
                                                          "limit": 100},
                           headers={"Authorization": f"Bearer {long_user}"})

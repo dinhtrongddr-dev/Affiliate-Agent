@@ -235,6 +235,8 @@ class MetaTokenTests(unittest.TestCase):
             if request.url.path.endswith("/oauth/access_token"):
                 return httpx.Response(200, json={"access_token": "LONG"})
             assert request.headers["Authorization"] == "Bearer LONG"
+            if request.url.path.endswith("/me"):
+                return httpx.Response(200, json={"id": "user"})
             return httpx.Response(200, json={"data": [
                 {"id": "1", "access_token": "P1"}, {"id": "2", "access_token": "P2"}]})
 
@@ -242,3 +244,14 @@ class MetaTokenTests(unittest.TestCase):
         self.assertEqual(exchange_for_page_token("v27.0", "a", "s", "short", "2", transport), "P2")
         with self.assertRaises(MetaReelsError):
             exchange_for_page_token("v27.0", "a", "s", "short", "9", transport)
+
+    def test_exchange_accepts_page_token(self):
+        from agent_core.meta_reels import exchange_for_page_token
+
+        def handler(request: httpx.Request):
+            if request.url.path.endswith("/oauth/access_token"):
+                return httpx.Response(200, json={"access_token": "LONGPAGE"})
+            return httpx.Response(200, json={"id": "2"})
+
+        self.assertEqual(exchange_for_page_token("v27.0", "a", "s", "short", "2",
+                                                 httpx.MockTransport(handler)), "LONGPAGE")
