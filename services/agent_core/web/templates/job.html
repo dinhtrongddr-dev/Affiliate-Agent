@@ -138,10 +138,14 @@
         <h3>Tìm / đổi sản phẩm</h3>
         <div class="row"><input id="p-kw" placeholder="Từ khoá Shopee, VD: máy xay sinh tố mini" style="flex:1">
           <button class="btn" onclick="searchProducts()">🔍 Tìm</button></div>
-        <p class="small muted" style="margin:8px 0 4px">Hoặc dán link sản phẩm Shopee:</p>
-        <div class="row"><input id="p-url" placeholder="https://shopee.vn/..." style="flex:2">
-          <input id="p-name" placeholder="Tên sản phẩm" style="flex:1">
-          <button class="btn" onclick="manualProduct()">Dùng link này</button></div>
+        <p class="small muted" style="margin:10px 0 4px">Hoặc nhập tay (không cần Open API):
+          tạo link ở <a href="https://affiliate.shopee.vn/" target="_blank" rel="noopener">Shopee Affiliate</a> → menu Hoa hồng → Custom Link, rồi dán vào đây.</p>
+        <label>Link sản phẩm Shopee</label><input id="p-url" placeholder="https://shopee.vn/...">
+        <label>Tên sản phẩm (đúng như trên Shopee)</label><input id="p-name" placeholder="Máy xay sinh tố cầm tay mini...">
+        <label>Link affiliate (Custom Link)</label><input id="p-aff" placeholder="https://s.shopee.vn/...">
+        <label>Link ảnh sản phẩm (tuỳ chọn, chuột phải ảnh → Sao chép địa chỉ hình ảnh)</label>
+        <input id="p-img" placeholder="https://down-vn.img.susercontent.com/...">
+        <p></p><button class="btn primary" onclick="manualProduct()">Dùng sản phẩm này & dựng video</button>
       </div>
       {% if job.product_item_id %}
       <div class="prod card" style="margin-bottom:12px">
@@ -177,6 +181,8 @@
 const JOB = "{{ job.id }}";
 const SCRIPT = {{ script | tojson }};
 tabs(document.getElementById("tabs-root"));
+{% if job.status in ('NEEDS_PRODUCT_REVIEW','WAITING_FOR_SHOPEE_CREDENTIALS','WAITING_FOR_SHOPEE_API') %}
+document.querySelector('.tabs button[data-tab="t-product"]').click();{% endif %}
 pollJob(JOB);
 
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
@@ -229,8 +235,10 @@ async function searchProducts(){
   toast(`Tìm thấy ${r.count} sản phẩm`); setTimeout(()=>location.reload(),600);
 }
 async function manualProduct(){
-  const url=document.getElementById("p-url").value.trim(), name=document.getElementById("p-name").value.trim();
-  await api(`/api/jobs/${JOB}/manual-product`,{url,name},{ok:"Đang tạo link và dựng video…",reload:true});
+  const v=id=>document.getElementById(id).value.trim();
+  if(!v("p-url")) return toast("Dán link sản phẩm Shopee",true);
+  await api(`/api/jobs/${JOB}/manual-product`,{url:v("p-url"),name:v("p-name"),affiliate_link:v("p-aff"),image_url:v("p-img")},
+    {ok:"Đang viết kịch bản và dựng video…",reload:true});
 }
 async function reconcile(platform,success){
   await api(`/api/jobs/${JOB}/reconcile`,{platform,success},{ok:"Đã ghi nhận",reload:true});

@@ -33,7 +33,8 @@ class ShopeeAffiliateError(RuntimeError):
 def _is_shopee_vn(url: str) -> bool:
     parsed = urlparse(str(url))
     host = (parsed.hostname or "").lower()
-    return parsed.scheme == "https" and (host == "shopee.vn" or host.endswith(".shopee.vn"))
+    return parsed.scheme == "https" and (
+        host in {"shopee.vn", "shope.ee"} or host.endswith(".shopee.vn"))
 
 
 class ShopeeAffiliateClient:

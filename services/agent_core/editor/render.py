@@ -264,8 +264,11 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
             mix = [f"[{achain}]", "[mus]"]
     else:
         mix = [f"[{achain}]", "[voice]"] if has_voice else [f"[{achain}]"]
+    # loudnorm turns pure digital silence into NaN, so only normalise real audio.
+    has_sound = has_voice or bool(music) or settings.keep_source_audio
+    norm = "loudnorm=I=-14:TP=-1.5:LRA=11," if has_sound else ""
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0:dropout_transition=0,"
-                   "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]")
+                   f"{norm}aresample=44100[aout]")
     filters.append(f"[{vchain}]ass=subs.ass[vout]")
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

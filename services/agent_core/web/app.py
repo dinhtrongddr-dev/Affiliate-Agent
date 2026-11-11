@@ -161,8 +161,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
             {"name": "FFmpeg", "ok": bool(shutil.which(s.ffmpeg_path)), "hint": "Cài FFmpeg vào PATH"},
             {"name": "AI gateway", "ok": bool(s.ai_api_key.get_secret_value()),
              "hint": "Nhập AI API key trong Cài đặt"},
-            {"name": "Shopee Affiliate", "ok": s.shopee_affiliate_enabled and aff["configured"],
-             "hint": "Nhập App ID/Secret và bật Shopee Affiliate"},
+            {"name": "Shopee Open API", "ok": s.shopee_affiliate_enabled and aff["configured"],
+             "hint": "Chưa có thì dán link affiliate tạo tay (Custom Link) ở từng video",
+             "optional": True},
             {"name": "Đăng nhập Shopee Creator", "ok": (s.project_root / "profiles" / "shopee").exists(),
              "hint": "Chạy scripts/open-shopee-login.cmd"},
             {"name": f"Nhạc nền ({len(music)} bài)", "ok": bool(music),
@@ -373,7 +374,10 @@ def create_app(start_worker: bool = True) -> FastAPI:
         url = str(body.get("url") or "").strip()
         if not url.startswith("https://") or "shopee.vn" not in url:
             raise HTTPException(400, "Dán link sản phẩm Shopee Việt Nam (https://shopee.vn/...)")
-        return queue("manual_product", job_id, {"url": url, "name": str(body.get("name") or "")})
+        return queue("manual_product", job_id, {
+            "url": url, "name": str(body.get("name") or ""),
+            "affiliate_link": str(body.get("affiliate_link") or "").strip(),
+            "image_url": str(body.get("image_url") or "").strip()})
 
     @app.post("/api/jobs/{job_id}/approve")
     async def api_approve(job_id: str, request: Request):

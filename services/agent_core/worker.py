@@ -43,7 +43,9 @@ def handle_task(settings, task: dict):
     if kind == "select_product":
         return workflow.select_product_for_job(settings, job_id, payload["item_id"], confirmed=True)
     if kind == "manual_product":
-        return workflow.set_manual_product(settings, job_id, payload["url"], payload.get("name", ""))
+        return workflow.set_manual_product(settings, job_id, payload["url"], payload.get("name", ""),
+                                           payload.get("affiliate_link", ""),
+                                           payload.get("image_url", ""))
     if kind == "publish":
         return workflow.publish_platform(settings, job_id, payload["platform"],
                                          payload.get("action", "draft"))

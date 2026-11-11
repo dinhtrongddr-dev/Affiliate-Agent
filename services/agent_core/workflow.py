@@ -47,6 +47,8 @@ PENDING_STATUSES = [
     "WAITING_FOR_SHOPEE_CREDENTIALS", "WAITING_FOR_SHOPEE_API", "ANALYZED",
     "CONTENT_GENERATION_FAILED", "KEYFRAME_EXTRACTION_FAILED", "RENDER_FAILED",
 ]
+MANUAL_LINK_HINT = ("Chưa có Shopee Open API: vào tab Sản phẩm, dán link sản phẩm và link "
+                    "affiliate tạo ở Shopee Affiliate → Custom Link để tiếp tục.")
 RETRYABLE_STATUSES = {"WAITING_FOR_AI_SERVICE", "WAITING_FOR_SHOPEE_API"}
 ROTATE_MOTION = {"zoom_in": "pan_right", "pan_right": "zoom_out", "zoom_out": "pan_left",
                  "pan_left": "zoom_in"}
@@ -371,19 +373,6 @@ def _process(settings, job: dict) -> dict:
               review_status="NEEDS_PRODUCT", analysis=analysis)
 
     # 3) product + affiliate link ------------------------------------------
-    if not settings.shopee_affiliate_enabled:
-        _stop(settings, job_id, "WAITING_FOR_SHOPEE_CREDENTIALS",
-              "Enable Shopee Affiliate API after adding App ID and Secret.", analysis=analysis)
-    affiliate = ShopeeAffiliateClient(settings)
-    try:
-        if not _affiliate_configured(affiliate):
-            _stop(settings, job_id, "WAITING_FOR_SHOPEE_CREDENTIALS",
-                  "Shopee Affiliate App ID or Secret is missing.")
-    except _Stop:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        _stop(settings, job_id, "WAITING_FOR_SHOPEE_CREDENTIALS", exc)
-
     product, affiliate_link = None, str(job.get("affiliate_link") or "")
     saved_candidates = json.loads(job.get("product_candidates_json") or "[]")
     if job.get("product_item_id") and affiliate_link:
@@ -392,6 +381,17 @@ def _process(settings, job: dict) -> dict:
             "item_id": str(job["product_item_id"]), "name": job.get("product_name") or "",
             "offer_link": ""}
     if product is None:
+        if not settings.shopee_affiliate_enabled:
+            _stop(settings, job_id, "WAITING_FOR_SHOPEE_CREDENTIALS", MANUAL_LINK_HINT,
+                  analysis=analysis)
+        affiliate = ShopeeAffiliateClient(settings)
+        try:
+            if not _affiliate_configured(affiliate):
+                _stop(settings, job_id, "WAITING_FOR_SHOPEE_CREDENTIALS", MANUAL_LINK_HINT)
+        except _Stop:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _stop(settings, job_id, "WAITING_FOR_SHOPEE_CREDENTIALS", exc)
         if brief.get("offer"):
             product = offer_to_product(brief["offer"])
             candidates = [product]
@@ -854,20 +854,38 @@ def search_products_for_job(settings, job_id: str, keyword: str) -> list[dict]:
     return candidates
 
 
-def set_manual_product(settings, job_id: str, product_url: str, name: str) -> dict:
-    """Use a Shopee product URL the user pasted (when search cannot find it)."""
+def set_manual_product(settings, job_id: str, product_url: str, name: str,
+                       affiliate_link: str = "", image_url: str = "") -> dict:
+    """Use a Shopee product the user pasted.
+
+    With affiliate_link (made by hand in Shopee Affiliate -> Custom Link) no Open
+    API access is needed; otherwise the link is generated through the API.
+    """
+    from .affiliate_client import _is_shopee_vn
+
     job = get_job(settings.database_path, job_id)
     if not job:
         raise WorkflowError(f"Job not found: {job_id}")
+    if not _is_shopee_vn(product_url.strip()):
+        raise WorkflowError("Link sản phẩm phải là https://shopee.vn/...")
     match = re.search(r"i\.(\d+)\.(\d+)|/product/(\d+)/(\d+)", product_url)
     item_id = (match.group(2) or match.group(4)) if match else uuid.uuid4().hex[:10]
     product = {"item_id": str(item_id), "name": name.strip() or "Sản phẩm Shopee",
-               "offer_link": product_url.strip(), "image_url": ""}
+               "offer_link": product_url.strip(), "image_url": image_url.strip()}
     candidates = json.loads(job.get("product_candidates_json") or "[]")
     candidates = [product, *[c for c in candidates if str(c.get("item_id")) != product["item_id"]]]
     update_job(settings.database_path, job_id,
                product_candidates_json=json.dumps(candidates, ensure_ascii=False))
-    return select_product_for_job(settings, job_id, product["item_id"], confirmed=True)
+    affiliate_link = affiliate_link.strip()
+    if not affiliate_link:
+        return select_product_for_job(settings, job_id, product["item_id"], confirmed=True)
+    if not _is_shopee_vn(affiliate_link):
+        raise WorkflowError("Link affiliate phải là link Shopee (https://s.shopee.vn/... )")
+    update_job(settings.database_path, job_id, product_item_id=product["item_id"],
+               product_name=product["name"], affiliate_link=affiliate_link,
+               script_json=None, status="ANALYZED", review_status="PENDING")
+    result = process_job(settings, job_id, force=True)
+    return {**result, "selected_product": product}
 
 
 def regenerate_script(settings, job_id: str) -> dict:

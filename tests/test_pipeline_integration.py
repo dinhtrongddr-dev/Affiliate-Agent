@@ -181,6 +181,49 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertEqual(updated["status"], "DRAFT_SUBMITTED_UNCONFIRMED")
             self.assertEqual(posts[0]["status"], "DRAFT_SUBMITTED_UNCONFIRMED")
 
+    def test_manual_affiliate_link_without_open_api(self):
+        from agent_core.workflow import set_manual_product
+
+        ffmpeg = shutil.which("ffmpeg")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "input.mp4"
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=24", "-t", "9",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+            ], check=True, capture_output=True)
+            settings = get_settings()
+            settings.project_root = root / "project"
+            settings.media_root = root / "media"
+            settings.database_path = root / "state" / "test.sqlite3"
+            settings.shopee_affiliate_enabled = False
+            settings.ai_api_key = SecretStr("test-only")
+            settings.tts_enabled = False
+            settings.render_width, settings.render_height = 360, 640
+            settings.facebook_min_width, settings.facebook_min_height = 360, 640
+            settings.music_dir = root / "no-music"
+            metadata = probe_video(source, settings.ffprobe_path)
+            register_job(settings.database_path, {
+                "id": "manualjob", "source_path": str(source), "sha256": "b" * 64,
+                "file_name": source.name, **metadata,
+            })
+            fake_ai = FakeAI()
+            with patch("agent_core.workflow._client", return_value=fake_ai):
+                self.assertEqual(process_job(settings, "manualjob")["status"],
+                                 "WAITING_FOR_SHOPEE_CREDENTIALS")
+                with self.assertRaises(WorkflowError):
+                    set_manual_product(settings, "manualjob", "https://shopee.vn/x-i.1.2",
+                                       "X", "https://evil.example/aff")
+                result = set_manual_product(settings, "manualjob",
+                                            "https://shopee.vn/may-xay-i.123.456",
+                                            "Máy xay mini", "https://s.shopee.vn/abcd")
+            job = get_job(settings.database_path, "manualjob")
+            self.assertEqual(result["status"], "READY_FOR_REVIEW", job["last_error"])
+            self.assertEqual(job["affiliate_link"], "https://s.shopee.vn/abcd")
+            self.assertEqual(job["product_item_id"], "456")
+            self.assertIn("https://s.shopee.vn/abcd", json.loads(job["content_json"])["shopee_caption"])
+
 
 if __name__ == "__main__":
     unittest.main()
