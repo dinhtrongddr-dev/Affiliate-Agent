@@ -1,0 +1,28 @@
+# Secrets / local config
+.env
+.env.*
+!.env.example
+config/shopee-skill/credentials.json
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime state
+state/*
+!state/.gitkeep
+logs/*
+!logs/.gitkeep
+cache/
+profiles/
+media/
+backups/*
+!backups/.gitkeep
+
+# Upstream sparse clones (see vendor/UPSTREAMS.md)
+vendor/*
+!vendor/UPSTREAMS.md
