@@ -97,9 +97,16 @@ class Worker:
             self._start_watcher()
         self.thread = threading.Thread(target=self.run, name="affiliate-worker", daemon=True)
         self.thread.start()
+        from .videogen import gateway
+        if gateway.enabled(self.settings):
+            # Embedded Muse gateway: start in the background so the UI comes up at once.
+            threading.Thread(target=gateway.instance(self.settings).start,
+                             name="muse-gateway", daemon=True).start()
 
     def stop(self) -> None:
         self.stop_event.set()
+        from .videogen import gateway
+        gateway.instance(self.settings).stop()
         if self.observer:
             self.observer.stop()
         if self.thread:
@@ -140,7 +147,8 @@ class Worker:
         if now - self.last_run.get("_gen", -1e9) < 20:
             return
         self.last_run["_gen"] = now
-        from .videogen import engine
+        from .videogen import engine, gateway
+        gateway.instance(self.settings).ensure_alive()
         if engine.has_active(self.settings.database_path):
             engine.poll(self.settings)
 

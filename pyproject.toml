@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "affiliate-agent"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local-first affiliate video workflow for Shopee Video and Facebook Page Reels"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,6 +18,9 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "edge-tts>=7.0",
+    # embedded muse2api gateway (services/muse_gateway)
+    "requests>=2.32",
+    "websocket-client>=1.8",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +45,7 @@ pythonpath = ["services"]
 line-length = 100
 target-version = "py312"
 src = ["services", "tests"]
-extend-exclude = ["vendor", "cache", "profiles"]
+extend-exclude = ["vendor", "cache", "profiles", "services/muse_gateway"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B"]

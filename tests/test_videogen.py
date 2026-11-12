@@ -434,3 +434,41 @@ class MuseSessionTests(unittest.TestCase):
                 self.assertNotIn("FAKE-SESSION-VALUE", page)
                 bad = client.post("/api/muse/session", json={"json": "[]"}, headers=h)
                 self.assertEqual(bad.status_code, 400)
+
+
+class EmbeddedGatewayTests(unittest.TestCase):
+    """Starts the real bundled gateway as a child process (no Muse account, no generation)."""
+
+    def test_start_push_session_and_stop(self):
+        import socket
+
+        from agent_core.videogen import gateway, muse_session
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            s = settings_for(Path(tmp))
+            s.project_root.mkdir(parents=True)
+            s.videogen_api_key = SecretStr("")
+            s.muse_embedded = True
+            with socket.socket() as sock:  # a free port so the running app is not touched
+                sock.bind(("127.0.0.1", 0))
+                s.muse_gateway_port = sock.getsockname()[1]
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0))
+                s.muse_cdp_port = sock.getsockname()[1]
+            muse_session.save(s, FAKE_EXPORT, "main")
+            proc = gateway.GatewayProcess(s)
+            try:
+                self.assertTrue(proc.start(wait=60), proc.error)
+                self.assertTrue(s.videogen_api_key.get_secret_value().startswith("m2a_"))
+                self.assertEqual(s.videogen_base_url, f"http://127.0.0.1:{s.muse_gateway_port}")
+                self.assertIn("AA_VIDEOGEN_API_KEY=m2a_",
+                              (s.project_root / ".env").read_text(encoding="utf-8"))
+                status = gateway.account_status(s)
+                self.assertTrue(status["reachable"])
+                self.assertEqual([a["label"] for a in status["accounts"]], ["main"])  # auto-pushed
+                self.assertTrue((s.project_root / "state" / "muse2api" / "data").is_dir())
+                provider = providers.get_provider(s)
+                self.assertIn("muse-video", provider.check_connection()["models"])
+            finally:
+                proc.stop()
+            self.assertFalse(gateway.healthy(s, timeout=1))

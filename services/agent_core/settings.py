@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     videogen_clip_seconds: int = 6
     videogen_character: bool = True      # make one character reference image first
     videogen_task_timeout_minutes: int = 30
+    muse_embedded: bool = True           # app runs the bundled muse2api gateway itself
+    muse_gateway_port: int = 18620
+    muse_cdp_port: int = 19210
 
     # Trend Intelligence (all optional keys are the user's own; budgets cap requests)
     youtube_api_key: SecretStr = SecretStr("")

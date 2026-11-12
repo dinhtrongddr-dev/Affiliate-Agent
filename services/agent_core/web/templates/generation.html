@@ -11,6 +11,15 @@
     <h2>Cấu hình</h2>
     {% if provider %}
       <p>Nhà cung cấp: <b>{{ provider }}</b> · <code>{{ base_url }}</code></p>
+      {% if gateway %}
+        <p>Cổng muse2api tích hợp:
+          {% if gateway.healthy %}<span class="badge ok">Đang chạy</span>{% else %}<span class="badge err">Không chạy</span>{% endif %}
+          {% if gateway.healthy %} · tài khoản Muse: {{ (gateway.accounts or [])|length }}
+            {% for a in gateway.accounts or [] %}<span class="small muted"> {{ a.label }} ({{ a.status or ('bật' if a.enabled else 'tắt') }}{% if a.last_error or a.error %}: {{ (a.last_error or a.error)|string|truncate(80) }}{% endif %})</span>{% endfor %}
+          {% endif %}
+          <button class="btn sm" onclick="api('/api/muse/gateway/restart',undefined,{ok:'Đã khởi động lại cổng Muse',reload:true,delay:1500})">Khởi động lại</button></p>
+        {% if gateway.error %}<p class="small err-text">{{ gateway.error }}</p>{% endif %}
+      {% endif %}
       <p>Hôm nay còn <b>{{ remaining }}</b>/{{ daily }} clip + ảnh AI (giới hạn do bạn đặt trong Cài đặt).</p>
     {% else %}
       <p><span class="badge warn">Chưa cấu hình</span> Video vẫn được làm bằng clip của bạn, video stock và ảnh sản phẩm.</p>
@@ -74,7 +83,9 @@
 async function importSession(){
   const el=document.getElementById("ms-json");
   if(!el.value.trim()) return toast("Dán JSON cookie trước",true);
-  await api("/api/muse/session",{json:el.value,label:document.getElementById("ms-label").value},{ok:"Đã lưu phiên Muse (mã hoá)",reload:true});
+  const r=await api("/api/muse/session",{json:el.value,label:document.getElementById("ms-label").value});
+  toast(r.push_error?("Đã lưu phiên, nhưng chưa gửi được sang cổng Muse: "+r.push_error):(r.pushed?"Đã lưu phiên và nạp vào cổng Muse":"Đã lưu phiên Muse (mã hoá)"), !!r.push_error);
+  setTimeout(()=>location.reload(),1200);
   el.value="";
 }
 </script>{% endblock %}

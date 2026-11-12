@@ -88,6 +88,7 @@ EDITABLE_SETTINGS = [
     ("AA_PEXELS_API_KEY", "Pexels API key (video stock miễn phí)", "secret", "Nguồn hình"),
     ("AA_VIDEOGEN_PROVIDER", "Nhà cung cấp video AI (none | muse2api | http)", "text", "Nguồn hình"),
     ("AA_VIDEOGEN_BASE_URL", "Video AI base URL (muse2api: http://127.0.0.1:18610)", "text", "Nguồn hình"),
+    ("AA_MUSE_EMBEDDED", "Tự chạy cổng muse2api tích hợp trong app", "bool", "Nguồn hình"),
     ("AA_VIDEOGEN_MAX_CLIPS", "Số clip AI tối đa mỗi video", "text", "Nguồn hình"),
     ("AA_VIDEOGEN_DAILY_LIMIT", "Số clip + ảnh AI tối đa mỗi ngày", "text", "Nguồn hình"),
     ("AA_VIDEOGEN_CHARACTER", "Tạo ảnh nhân vật trước để các cảnh giống nhau", "bool", "Nguồn hình"),
@@ -269,7 +270,19 @@ def create_app(start_worker: bool = True) -> FastAPI:
         return render(request, "generation.html", tasks=gen_engine.list_tasks(s.database_path, job or None, 300),
                       provider=provider.name if provider else "", base_url=s.videogen_base_url,
                       remaining=gen_engine.remaining_today(s), daily=s.videogen_daily_limit,
-                      job_filter=job, active="generation", session=_muse_summary(s))
+                      job_filter=job, active="generation", session=_muse_summary(s),
+                      gateway=_gateway_info(s))
+
+    def _gateway_info(s):
+        from ..videogen import gateway
+        if not gateway.enabled(s):
+            return None
+        proc = gateway.instance(s)
+        info = {"url": gateway.base_url(s), "running": proc.running(), "error": proc.error,
+                "healthy": gateway.healthy(s, timeout=1.5)}
+        if info["healthy"]:
+            info.update(gateway.account_status(s))
+        return info
 
     def _muse_summary(s):
         from ..videogen import muse_session
@@ -290,7 +303,25 @@ def create_app(start_worker: bool = True) -> FastAPI:
             info = muse_session.save(S(), text, str(body.get("label") or ""))
         except muse_session.SessionError as exc:
             raise HTTPException(400, str(exc)) from exc
+        from ..videogen import gateway
+        if gateway.enabled(S()) and gateway.healthy(S()):
+            try:  # embedded gateway: hand the session over right away
+                info["pushed"] = muse_session.push_to_gateway(S())
+            except (muse_session.SessionError, httpx.HTTPError) as exc:
+                info["push_error"] = str(exc)[:300]
         return info
+
+    @app.post("/api/muse/gateway/restart")
+    def api_muse_gateway_restart():
+        from ..videogen import gateway
+        s = S()
+        if not gateway.enabled(s):
+            raise HTTPException(400, "Chưa bật muse2api (Cài đặt → Nguồn hình)")
+        proc = gateway.instance(s)
+        proc.stop()
+        if not proc.start():
+            raise HTTPException(502, proc.error or "Không khởi động được gateway")
+        return {"ok": True}
 
     @app.post("/api/muse/session/push")
     def api_muse_push():

@@ -38,16 +38,21 @@ Muse has no official video API. Every muse2api gateway reverse-engineers the mus
 
 The gateway runs as its own service, the same way ChatGPT2API does.
 
-## Setup (you do these steps)
+## Setup
 
-1. You need a muse.ai account. As of 10/2026, Muse was available in the US, Canada, Japan and Singapore, not Vietnam. Do not use the Meta account that administers your Facebook Page.
-2. Install and start a muse2api gateway outside this repo by following its README. Import your session with its browser extension. Its default address is `http://127.0.0.1:18610`.
-3. In **Cài đặt → Nguồn hình**, set:
-   - `AA_VIDEOGEN_PROVIDER=muse2api`
-   - `AA_VIDEOGEN_BASE_URL=http://127.0.0.1:18610`
-   - API key = the gateway's `MUSE2API_KEY`
-4. On **🎞 Video AI**, click **Kiểm tra kết nối**.
-5. Make one trend/product video and watch the queue.
+The muse2api gateway is **bundled in the app** (`services/muse_gateway`, MIT, see its `UPSTREAM.md`); there is nothing to install separately.
+- When `AA_VIDEOGEN_PROVIDER=muse2api` and `AA_MUSE_EMBEDDED=true` (the default), the app's worker starts the gateway as a hidden child process on `127.0.0.1:18620`.
+- The worker restarts the gateway if it crashes and stops it when the app exits.
+- On first start the app creates the gateway's API key and stores it in `.env`.
+- The gateway runs its own headless Chrome profile in `state/muse2api/profiles`.
+- The gateway keeps its account file, tasks and media in `state/muse2api`, which is git-ignored. That account file holds the session in plain text.
+
+Steps:
+1. Use your own muse.ai account. Do not use the Meta account that administers your Facebook Page.
+2. On **🎞 Video AI → Đăng nhập Muse bằng JSON**, paste a fresh cookie export. The app encrypts it and loads it into the bundled gateway; it does the same automatically every time the gateway starts.
+3. Check that **Cổng muse2api tích hợp** shows *Đang chạy* with 1 account, then make one trend/product video.
+
+The gateway's self-upgrade is disabled. To upgrade, review the upstream changes and copy the new files by hand.
 
 ## Limits
 
