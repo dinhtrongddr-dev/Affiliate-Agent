@@ -1,14 +1,105 @@
 {% extends "base.html" %}
 {% block content %}
+{% set LC = {'RISING':'ok','NEW':'info','PEAKING':'warn','SATURATED':'warn','STABLE':'info','DECLINING':'err','UNKNOWN':''} %}
 <div class="row space"><div><h1>Trend</h1>
-  <p class="sub">Lấy tín hiệu trend (chủ đề, hashtag, format) để AI làm video <b>mới</b> — không tải lại video của người khác.</p></div>
-  <button class="btn" onclick="api('/api/trends/fetch',undefined,{ok:'Đang lấy Google Trends VN…',reload:true,delay:4000})">⟳ Lấy Google Trends VN</button>
+  <p class="sub">App tự thu trend Việt Nam, chấm điểm, loại trend nhạy cảm/không bán được, rồi ghép với sản phẩm trong Kho. Chỉ lấy <b>tín hiệu</b>, không tải video của người khác.</p></div>
+  <div class="row">
+    <button class="btn primary" onclick="api('/api/trends/fetch',undefined,{ok:'Đang thu thập & phân tích trend… (vài phút)',reload:true,delay:6000})">⟳ Thu thập &amp; phân tích</button>
+    <button class="btn" onclick="api('/api/intel/analyse',undefined,{ok:'Đang phân tích lại…',reload:true,delay:5000})">Phân tích lại</button>
+  </div>
 </div>
 
-<div class="grid split2">
+<div class="grid g2" style="align-items:start;margin-bottom:16px">
   <div class="card">
-    <h2>Thêm trend TikTok / Facebook</h2>
-    <p class="small muted">Xem TikTok Creative Center, tab Explore/Reels… rồi dán link + ghi chú format (câu hook, nhạc, kiểu quay). AI sẽ bắt format đó.</p>
+    <h2>Nguồn dữ liệu</h2>
+    <table class="small">
+      <tr><td>Google Trends VN</td><td><span class="badge ok">Đang chạy</span></td><td class="muted">Feed công khai, 6 giờ/lần</td></tr>
+      <tr><td>Google News VN</td><td><span class="badge ok">Đang chạy</span></td><td class="muted">Số bài báo 24h / 7 ngày / 7 ngày trước</td></tr>
+      <tr><td>YouTube VN</td><td>{% if has_youtube %}<span class="badge ok">Đã có key</span>{% else %}<span class="badge warn">Chưa có key</span>{% endif %}</td>
+        <td class="muted">Lượt xem, like, bình luận 7 ngày · hôm nay dùng {{ usage.youtube_units }} unit</td></tr>
+      <tr><td>TikTok (Trends MCP)</td><td>{% if has_trendsmcp %}<span class="badge ok">Đã có key</span>{% else %}<span class="badge warn">Chưa có key</span>{% endif %}</td>
+        <td class="muted">Hashtag TikTok VN · tháng này {{ usage.trendsmcp }} request</td></tr>
+      <tr><td>TikTok dán tay</td><td><span class="badge info">Thủ công</span></td><td class="muted">Từ TikTok Creative Center (ô bên cạnh)</td></tr>
+    </table>
+    <p class="small muted">Thêm key YouTube / Trends MCP ở <a href="/settings">Cài đặt → Trend</a>. Điểm chỉ dùng để xếp hạng, không phải dự báo lượt xem hay doanh thu. Trend chưa đủ 2 lần ghi nhận được ghi là <b>Tạm tính</b>.</p>
+  </div>
+  <div class="card">
+    <h2>Dán trend TikTok</h2>
+    <p class="small muted">Mở <a href="https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/vi" target="_blank" rel="noopener">TikTok Creative Center</a> (chọn Việt Nam), chép hashtag. Mỗi dòng một trend: <code>#hashtag | lượt xem | link</code> (lượt xem và link không bắt buộc).</p>
+    <textarea id="m-text" rows="5" placeholder="#bepnhaminh | 12,5M&#10;#reviewdogiadung | 3,2M&#10;nồi chiên không dầu"></textarea>
+    <p></p><button class="btn primary" onclick="addManual()">+ Thêm &amp; phân tích</button>
+  </div>
+</div>
+
+<div class="row" style="margin-bottom:10px;gap:6px">
+  <a class="btn sm {{ 'primary' if view=='products' }}" href="/trends?view=products">Có sản phẩm khớp ({{ counts.products }})</a>
+  <a class="btn sm {{ 'primary' if view=='all' }}" href="/trends?view=all">Tất cả trend dùng được ({{ counts.all }})</a>
+  <a class="btn sm {{ 'primary' if view=='skipped' }}" href="/trends?view=skipped">Đã loại ({{ counts.skipped }})</a>
+</div>
+
+<div class="card">
+{% if topics %}
+<div style="overflow-x:auto"><table>
+  <tr><th>Trend</th><th>Điểm cơ hội</th><th>Giai đoạn</th><th>Nguồn</th><th>Sản phẩm phù hợp</th><th></th></tr>
+  {% for t in topics %}
+  {% set sc = t.scores or {} %}
+  <tr>
+    <td style="max-width:300px"><b>{{ t.keyword }}</b>
+      {% if t.intent and t.intent.angle %}<div class="small">💡 {{ t.intent.angle }}</div>{% endif %}
+      {% if t.notes %}<div class="small muted">{{ t.notes[:140] }}</div>{% endif %}
+      {% if t.safety == 'BLOCKED' %}<div class="small"><span class="badge err">Nhạy cảm</span> {{ t.safety_reason }}</div>
+      {% elif t.status == 'NOT_COMMERCIAL' %}<div class="small"><span class="badge warn">Không bán được</span> {{ (t.intent or {}).reason }}</div>
+      {% elif t.status == 'IGNORED' %}<div class="small"><span class="badge">Đã bỏ qua</span></div>{% endif %}
+      {% if t.url %}<a class="small" href="{{ t.url }}" target="_blank" rel="noopener">nguồn</a>{% endif %}
+      <details class="small" style="margin-top:4px"><summary>Chi tiết điểm &amp; dữ liệu</summary>
+        {% if sc.components %}<table class="small">
+          {% for k, v in sc.components.items() %}<tr><td>{{ labels[k] }}</td><td><b>{{ v if v is not none else '—' }}</b></td><td class="muted">{{ ('×%s'|format(sc.weights[k])) if k in sc.weights else 'hệ số' }}</td></tr>{% endfor %}
+        </table>
+        <div class="muted">Điểm cơ hội = điểm trend {{ sc.trend_score }} × hệ số affiliate {{ sc.affiliate_factor }} = <b>{{ sc.total }}</b></div>
+        <div class="muted">Tăng trưởng: {{ '%+.0f%%'|format(sc.metrics.growth*100) if sc.metrics.growth is not none else 'chưa đủ dữ liệu' }}
+          {% if sc.metrics.growth_method == 'news_window' %}(so số bài báo 7 ngày với 7 ngày trước){% endif %}
+          · z-score: {{ sc.metrics.z_score if sc.metrics.z_score is not none else '—' }}</div>
+        {% for n in sc.notes %}<div class="muted">• {{ n }}</div>{% endfor %}{% endif %}
+        <div style="margin-top:4px"><b>Ghi nhận gần nhất</b></div>
+        {% for o in t.observations %}<div class="muted">{{ o.observed_at[5:16].replace('T',' ') }} · {{ o.source }} · giá trị {{ '{:,.0f}'.format(o.value) if o.value is not none else '—' }}{% if o.rank %} · hạng {{ o.rank }}{% endif %}
+          {% if o.meta.last7d is defined %} · báo: {{ o.meta.last24h }}/24h, {{ o.meta.last7d }}/7d, {{ o.meta.prev7d }} tuần trước{% endif %}
+          {% if o.meta.views is defined %} · {{ o.meta.videos }} video, {{ '{:,}'.format(o.meta.views) }} view{% endif %}</div>{% endfor %}
+      </details>
+    </td>
+    <td><b style="font-size:18px">{{ '%.0f'|format(t.total_score) if t.total_score is not none else '—' }}</b>
+      <div class="small muted">{{ {'OBSERVED':'Đã quan sát','WINDOW':'Theo cửa sổ báo','PROVISIONAL':'Tạm tính'}.get(t.score_status or '', '') }}</div></td>
+    <td><span class="badge {{ LC.get(t.lifecycle or '', '') }}">{{ t.lifecycle_label or '—' }}</span></td>
+    <td class="small">{{ t.sources|join(', ') }}</td>
+    <td class="small" style="min-width:280px">
+      {% for m in t.matches %}
+      <div style="margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:4px">
+        <b>{{ m.product.name[:70] }}</b>
+        <div class="muted">{{ m.product.price_text or m.product.price or '' }} · HH {{ '%g'|format(m.product.commission_rate) if m.product.commission_rate is not none else '?' }}% · phù hợp {{ '%.0f'|format(m.score) }}{% if m.reason %} · {{ m.reason[:120] }}{% endif %}</div>
+        <button class="btn sm primary" onclick="makeJob('{{ t.key }}','{{ m.product_id }}')">🎬 Làm video</button>
+      </div>
+      {% else %}
+        {% if t.status == 'NO_MATCH' %}<span class="muted">Kho chưa có sản phẩm khớp{% if t.intent and t.intent.product_keywords %}: thử nhập CSV cho "{{ t.intent.product_keywords|join('", "') }}"{% endif %}</span>
+        {% elif not t.intent and t.safety != 'BLOCKED' %}<span class="muted">Chờ AI phân tích</span>{% endif %}
+      {% endfor %}
+    </td>
+    <td style="white-space:nowrap">
+      {% if t.job_id %}<a class="btn sm" href="/jobs/{{ t.job_id }}">Xem video</a>{% endif %}
+      {% if t.status in ('IGNORED','NOT_COMMERCIAL') or t.safety == 'BLOCKED' %}
+        <button class="btn sm" onclick="topic('{{ t.key }}','restore')">Mở lại</button>
+      {% else %}<button class="btn sm" onclick="topic('{{ t.key }}','ignore')">Bỏ qua</button>{% endif %}
+      <button class="btn sm danger" onclick="topic('{{ t.key }}','delete')">✕</button></td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}
+  <p class="muted">{% if view == 'products' %}Chưa có trend nào khớp sản phẩm. Nhập CSV ở <a href="/catalog">Kho sản phẩm</a>, rồi bấm "Phân tích lại", hoặc xem tab "Tất cả trend dùng được".{% else %}Chưa có trend. Bấm "Thu thập &amp; phân tích".{% endif %}</p>
+{% endif %}
+</div>
+
+<details class="card" style="margin-top:16px"><summary><b>Trend thêm tay (format / hook tham khảo)</b></summary>
+<div class="grid split2" style="margin-top:10px">
+  <div>
+    <p class="small muted">Dán link video TikTok/Facebook làm <b>tham khảo format</b> (câu hook, nhạc, kiểu quay). AI bắt format đó, không dùng lại video.</p>
     <label>Tiêu đề trend</label><input id="t-title" placeholder="VD: POV mở hộp đồ bếp mini">
     <label>Nguồn</label>
     <select id="t-source"><option value="tiktok">TikTok</option><option value="facebook">Facebook</option><option value="manual">Khác</option></select>
@@ -17,8 +108,7 @@
     <label>Từ khoá sản phẩm (tuỳ chọn, phẩy ngăn cách)</label><input id="t-kw" placeholder="máy xay mini, bình giữ nhiệt">
     <p></p><button class="btn primary" onclick="addTrend()">+ Thêm trend</button>
   </div>
-  <div class="card">
-    <h2>Danh sách trend</h2>
+  <div>
     {% if trends %}
     <table><tr><th>Trend</th><th>Nguồn</th><th></th></tr>
     {% for t in trends %}
@@ -31,9 +121,9 @@
         <button class="btn sm primary" onclick="api('/api/trends/{{ t.id }}/create-job',undefined,{ok:'AI đang làm video…',go:d=>'/jobs/'+d.job_id})">🎬 Làm video</button>
         <button class="btn sm danger" onclick="api('/api/trends/{{ t.id }}/delete',undefined,{reload:true})">✕</button></td></tr>
     {% endfor %}</table>
-    {% else %}<p class="muted">Chưa có trend. Bấm "Lấy Google Trends VN" hoặc thêm thủ công.</p>{% endif %}
+    {% else %}<p class="muted">Chưa có trend thêm tay.</p>{% endif %}
   </div>
-</div>
+</div></details>
 {% endblock %}
 {% block scripts %}<script>
 async function addTrend(){
@@ -41,4 +131,11 @@ async function addTrend(){
   if(!v("t-title").trim()) return toast("Nhập tiêu đề trend",true);
   await api("/api/trends",{title:v("t-title"),source:v("t-source"),url:v("t-url"),notes:v("t-notes"),keywords:v("t-kw")},{ok:"Đã thêm",reload:true});
 }
+async function addManual(){
+  const text=document.getElementById("m-text").value;
+  if(!text.trim()) return toast("Dán ít nhất 1 trend",true);
+  await api("/api/intel/manual",{text,source:"tiktok"},{ok:"Đã thêm, đang phân tích…",reload:true,delay:5000});
+}
+function topic(key,action){ api("/api/intel/topic",{key,action},{reload:true}); }
+function makeJob(key,product_id){ api("/api/intel/create-job",{key,product_id},{ok:"AI đang làm video…",go:d=>"/jobs/"+d.job_id}); }
 </script>{% endblock %}

@@ -66,3 +66,7 @@ def add_manual_trend(settings, title: str, url: str = "", notes: str = "",
     if not title.strip():
         raise ValueError("Trend title is required")
     upsert_trend(settings.database_path, source, title, url, "", notes, keywords)
+    from .trend_intel import store
+    store.record_signal(settings.database_path, {
+        "source": source if source in ("tiktok", "facebook") else "manual",
+        "keyword": title, "url": url, "notes": notes, "meta": {"entered_by": "user"}})

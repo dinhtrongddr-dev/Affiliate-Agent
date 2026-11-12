@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "affiliate-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first affiliate video workflow for Shopee Video and Facebook Page Reels"
 requires-python = ">=3.12"
 dependencies = [
@@ -29,7 +29,7 @@ shopee-login = "agent_core.shopee_login:main"
 
 [tool.setuptools]
 package-dir = { "" = "services" }
-packages = ["agent_core", "agent_core.editor", "agent_core.web", "agent_core.shopee_intelligence"]
+packages = ["agent_core", "agent_core.editor", "agent_core.web", "agent_core.shopee_intelligence", "agent_core.trend_intel"]
 
 [tool.setuptools.package-data]
 "agent_core.web" = ["templates/*.html", "static/*"]

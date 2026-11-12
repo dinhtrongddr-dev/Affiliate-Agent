@@ -83,6 +83,20 @@ class Settings(BaseSettings):
     videogen_timeout_seconds: int = 600
     videogen_max_clips: int = 3
 
+    # Trend Intelligence (all optional keys are the user's own; budgets cap requests)
+    youtube_api_key: SecretStr = SecretStr("")
+    youtube_daily_units: int = 3000
+    trend_youtube_searches_per_run: int = 8
+    trendsmcp_api_key: SecretStr = SecretStr("")
+    trendsmcp_monthly_budget: int = 90
+    trendsmcp_calls_per_run: int = 1
+    trendsmcp_boards: str = "TikTok Trending Hashtags"
+    trend_news_keywords_per_run: int = 15
+    trend_ai_topics_per_run: int = 20
+    trend_rerank_topics: int = 5
+    trend_min_purchase_intent: float = 30.0
+    trend_weights: str = ""  # JSON, e.g. {"affiliate": 0.3, "growth": 0.2}
+
     # Automation
     auto_process: bool = True
     auto_publish: bool = False

@@ -50,8 +50,11 @@ def handle_task(settings, task: dict):
         return workflow.publish_platform(settings, job_id, payload["platform"],
                                          payload.get("action", "draft"))
     if kind == "fetch_trends":
-        from .trends import fetch_google_trends
-        return {"google_trends": fetch_google_trends(settings)}
+        from .trend_intel import pipeline
+        return pipeline.run(settings, collect=True)
+    if kind == "trend_analyse":
+        from .trend_intel import pipeline
+        return pipeline.run(settings, collect=False)
     if kind == "sync_conversions":
         if not settings.shopee_affiliate_enabled:
             return {"skipped": "Shopee Affiliate API disabled"}

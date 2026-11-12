@@ -93,6 +93,12 @@ EDITABLE_SETTINGS = [
     ("AA_TIKTOK_MODE", "Chế độ (inbox = nháp | direct = đăng)", "text", "TikTok"),
     ("AA_TIKTOK_PRIVACY_LEVEL", "Quyền riêng tư khi direct", "text", "TikTok"),
     ("AA_TIKTOK_ACCESS_TOKEN", "TikTok access token", "secret", "TikTok"),
+    ("AA_YOUTUBE_API_KEY", "YouTube Data API key (miễn phí, Google Cloud)", "secret", "Trend"),
+    ("AA_YOUTUBE_DAILY_UNITS", "Quota YouTube dùng tối đa / ngày (mỗi lần tìm = 101)", "text", "Trend"),
+    ("AA_TRENDSMCP_API_KEY", "Trends MCP API key (trendsmcp.ai, gói Free 100 request/tháng)", "secret", "Trend"),
+    ("AA_TRENDSMCP_MONTHLY_BUDGET", "Trends MCP: số request tối đa / tháng", "text", "Trend"),
+    ("AA_TREND_MIN_PURCHASE_INTENT", "Bỏ trend có ý định mua dưới (0-100)", "text", "Trend"),
+    ("AA_TREND_WEIGHTS", "Trọng số điểm trend (JSON, để trống = mặc định)", "text", "Trend"),
     ("AA_AUTO_PUBLISH", "Cho phép đăng công khai (FB, Shopee publish, TikTok direct)",
      "bool", "An toàn"),
 ]
@@ -218,8 +224,103 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       clips=list_clips(s, job_id))
 
     @app.get("/trends", response_class=HTMLResponse)
-    def trends_page(request: Request):
-        return render(request, "trends.html", trends=db.list_trends(S().database_path, 150))
+    def trends_page(request: Request, view: str = "products"):
+        from ..trend_intel import analyzer, scoring, store as tstore
+        s = S()
+        topics = tstore.list_topics(s.database_path, 300)
+        counts = {"products": 0, "all": 0, "skipped": 0}
+        shown = []
+        for t in topics:
+            skipped = t["safety"] == "BLOCKED" or t["status"] in ("NOT_COMMERCIAL", "IGNORED")
+            counts["skipped" if skipped else "all"] += 1
+            if t["status"] == "MATCHED" and not skipped:
+                counts["products"] += 1
+            if (view == "products" and (skipped or t["status"] != "MATCHED")) or                (view == "all" and skipped) or (view == "skipped" and not skipped):
+                continue
+            t["matches"] = []
+            for m in tstore.matches_for(s.database_path, t["key"])[:5]:
+                product = catalog.get_product(s.database_path, m["product_id"])
+                if product:
+                    t["matches"].append({**m, "product": product})
+            t["observations"] = tstore.observations(s.database_path, t["key"], limit=8)
+            t["lifecycle_label"] = analyzer.LIFECYCLE_LABELS.get(t.get("lifecycle") or "", "")
+            shown.append(t)
+        usage = {"trendsmcp": tstore.usage(s.database_path, "trendsmcp"),
+                 "youtube_units": tstore.usage(s.database_path, "youtube_units", "day")}
+        return render(request, "trends.html", topics=shown, view=view, counts=counts,
+                      labels=scoring.LABELS, usage=usage,
+                      has_youtube=bool(s.youtube_api_key.get_secret_value()),
+                      has_trendsmcp=bool(s.trendsmcp_api_key.get_secret_value()),
+                      trends=db.list_trends(s.database_path, 150))
+
+    @app.post("/api/intel/analyse")
+    def api_intel_analyse():
+        return queue("trend_analyse")
+
+    @app.post("/api/intel/manual")
+    async def api_intel_manual(request: Request):
+        from ..trend_intel import pipeline
+        body = await request.json()
+        source = "tiktok_manual" if body.get("source", "tiktok") == "tiktok" else "manual"
+        count = pipeline.add_manual(S(), str(body.get("text") or ""), source)
+        if not count:
+            raise HTTPException(400, "Không đọc được trend nào (mỗi dòng 1 trend)")
+        queue("trend_analyse")
+        return {"added": count}
+
+    @app.post("/api/intel/topic")
+    async def api_intel_topic(request: Request):
+        """status change / delete for one topic: {key, action: ignore|restore|delete}"""
+        from ..trend_intel import store as tstore
+        body = await request.json()
+        s = S()
+        key = str(body.get("key") or "")
+        if not tstore.get_topic(s.database_path, key):
+            raise HTTPException(404, "Không có trend")
+        action = body.get("action")
+        if action == "delete":
+            tstore.delete_topic(s.database_path, key)
+        elif action == "ignore":
+            tstore.update_topic(s.database_path, key, status="IGNORED")
+        elif action == "restore":
+            tstore.update_topic(s.database_path, key, status="NEW", safety="OK",
+                                safety_reason="Người dùng mở lại")
+        else:
+            raise HTTPException(400, "Hành động không hợp lệ")
+        return {"ok": True}
+
+    @app.post("/api/intel/create-job")
+    async def api_intel_job(request: Request):
+        from ..trend_intel import store as tstore
+        body = await request.json()
+        s = S()
+        topic = tstore.get_topic(s.database_path, str(body.get("key") or ""))
+        if not topic:
+            raise HTTPException(404, "Không có trend")
+        if topic["safety"] == "BLOCKED":
+            raise HTTPException(400, "Trend nhạy cảm: không gắn sản phẩm")
+        product = catalog.get_product(s.database_path, str(body.get("product_id") or ""))
+        if not product:
+            raise HTTPException(400, "Chọn một sản phẩm đã khớp")
+        intent = topic.get("intent") or {}
+        offer = catalog.as_offer(product)
+        if not offer["affiliateLink"]:
+            offer["affiliateLink"] = product.get("tiktok_link") or ""
+        notes = " ".join(x for x in (
+            f"Trend đang hot ở VN: {topic['keyword']}.",
+            f"Góc nối: {intent['angle']}" if intent.get("angle") else "",
+            f"Khán giả: {intent['audience']}" if intent.get("audience") else "",
+            f"Bối cảnh: {topic['notes']}" if topic.get("notes") else "") if x)
+        try:
+            job_id = workflow.create_trend_job(s, topic["keyword"], notes,
+                                               intent.get("product_keywords") or [], offer=offer,
+                                               url=topic.get("url") or "")
+        except workflow.WorkflowError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        tstore.update_topic(s.database_path, topic["key"], status="USED", job_id=job_id)
+        catalog.update_product(s.database_path, product["id"], status="VIDEO_QUEUED", job_id=job_id)
+        db.enqueue_task(s.database_path, "process", job_id)
+        return {"job_id": job_id}
 
     @app.get("/products", response_class=HTMLResponse)
     def products_page(request: Request, q: str = "", sort: str = "sold"):
@@ -264,7 +365,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
             for p in products:
                 p["platform"] = "tiktok"
                 p["tiktok_link"] = p["tiktok_link"] or p["affiliate_link"] or p["product_link"]
-        return catalog.import_products(S().database_path, products)
+        result = catalog.import_products(S().database_path, products)
+        queue("trend_analyse")  # re-match open trends against the new catalog
+        return result
 
     @app.post("/api/catalog/update")
     async def api_catalog_update(request: Request):

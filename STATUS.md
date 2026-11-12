@@ -1,4 +1,26 @@
-# Deployment status — 2026-11-11 (v0.2.0)
+# Deployment status — 2026-11-12 (v0.3.0)
+
+## Upgrade tracker (P0–P7)
+
+States: **Có sẵn** (existed before), **Đã test thật** (ran against live services),
+**Đã code, chưa test thật** (unit/contract tests only), **Chỉ thiết kế** (not built).
+
+| Part | State | Evidence / blocker |
+|---|---|---|
+| P0 restore point | Đã test thật | git tag `pre-upgrade`, DB copy in `state/backups/`, 67 tests pass |
+| Shopee Product Intelligence | Có sẵn (committed in P0) | "Doanh thu" stored as revenue; ranking falls back to revenue / price |
+| Google Trends VN collector | Đã test thật | 10 topics on 2026-11-12 |
+| Google News VN collector | Đã test thật | 15 keyword probes on 2026-11-12 |
+| YouTube Data API collector | Đã code, chưa test thật | needs `AA_YOUTUBE_API_KEY` |
+| Trends MCP (TikTok hashtags VN) | Đã code, chưa test thật | needs `AA_TRENDSMCP_API_KEY`; response parser is defensive because the README does not document the JSON shape |
+| TikTok hashtags pasted by hand | Đã test thật (UI + API) | |
+| Analyzer, scoring, lifecycle | Đã test thật | real topics ranked; growth needs ≥2 observations or a news window |
+| Safety filter (rules + AI) | Đã test thật | lottery, crime, politics blocked on live data |
+| AI intent via ChatGPT2API | Đã test thật | 14 topics judged in one live run |
+| Trend → product matching | Đã code, chưa test thật on real catalog | catalog is empty: import a real bulk-link CSV |
+| Muse Video Engine (P4) | Chỉ thiết kế | needs a muse.ai account in a supported country + backend choice |
+| Autopilot, performance loop (P5–P6) | Chỉ thiết kế | |
+
 
 ## Working and verified locally
 
