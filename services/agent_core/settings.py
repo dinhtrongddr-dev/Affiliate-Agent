@@ -76,12 +76,16 @@ class Settings(BaseSettings):
 
     # Stock footage and AI video generation (optional)
     pexels_api_key: SecretStr = SecretStr("")
-    videogen_provider: str = "none"  # none | http
-    videogen_base_url: str = ""
+    videogen_provider: str = "none"  # none | muse2api | http
+    videogen_base_url: str = ""  # muse2api default: http://127.0.0.1:18610
     videogen_api_key: SecretStr = SecretStr("")
     videogen_model: str = ""
     videogen_timeout_seconds: int = 600
-    videogen_max_clips: int = 3
+    videogen_max_clips: int = 3          # AI clips per video
+    videogen_daily_limit: int = 15       # clips + reference images per day (Muse weekly quota)
+    videogen_clip_seconds: int = 6
+    videogen_character: bool = True      # make one character reference image first
+    videogen_task_timeout_minutes: int = 30
 
     # Trend Intelligence (all optional keys are the user's own; budgets cap requests)
     youtube_api_key: SecretStr = SecretStr("")

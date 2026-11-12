@@ -97,8 +97,20 @@ Trả về DUY NHẤT 1 JSON object, không markdown:
 """.strip()
 
 
+GEN_BLOCK = """
+Video AI (Muse): mỗi cảnh visual=generate là 1 clip AI 5-10 giây, dọc 9:16, khoảng 720p.
+Tối đa {limit} cảnh generate; dành cho cảnh hook và cảnh sản phẩm được dùng/biến đổi trong đời thực.
+gen_prompt viết tiếng Anh, 1-3 câu: chủ thể, hành động cụ thể, bối cảnh Việt Nam đời thường,
+góc máy và chuyển động camera. Sản phẩm phải giống ảnh sản phẩm đính kèm; không bịa chữ/nhãn.
+Nhân vật: nếu cần người xuất hiện, mô tả MỘT nhân vật cố định trong trường "character"
+(tiếng Anh: tuổi, giới, tóc, trang phục) để mọi cảnh cùng một người; kiểu "chỉ thấy đôi tay review"
+thì để "character" rỗng và ghi "only hands visible" trong gen_prompt.
+Cảnh generate dài 5-8 giây; lời thoại do giọng đọc của app đọc (khoảng 4 từ/giây).
+"""
+
+
 def trend_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock: bool,
-                      clips_text: str = "", first_clip_image: int = 1) -> str:
+                      clips_text: str = "", first_clip_image: int = 1, gen_limit: int = 3) -> str:
     visuals = []
     if clips_text:
         visuals.append('user_clip (clip người dùng thêm, chọn bằng trường "clip")')
@@ -107,7 +119,13 @@ def trend_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock:
     if has_stock:
         visuals.append("stock (video stock theo stock_query tiếng Anh: bối cảnh, con người, tình huống)")
     if can_generate:
-        visuals.append("generate (AI tạo clip theo gen_prompt tiếng Anh; dùng cho 1-3 cảnh đắt giá nhất)")
+        visuals.append("generate (AI tạo clip theo gen_prompt tiếng Anh; dùng cho cảnh đắt giá nhất)")
+    gen_block = GEN_BLOCK.format(limit=max(1, gen_limit)) if can_generate else ""
+    schema = PLAN_SCHEMA.replace('SCENE_FIELDS', TREND_SCENE_FIELDS)
+    if can_generate:
+        schema = schema.replace(
+            '"music_mood":',
+            '"character": "fixed on-screen person in English, or empty",\n  "music_mood":', 1)
     return f"""
 Bạn là đạo diễn video ngắn viral (TikTok/Reels/Shopee Video) tại Việt Nam.
 Tạo 1 video affiliate 9:16 hoàn toàn mới (không dùng video của người khác) dựa trên trend:
@@ -118,7 +136,7 @@ Sản phẩm (dữ liệu thật từ Shopee): {json.dumps(_product_facts(produc
 Nguồn hình ảnh có sẵn cho mỗi cảnh (trường "visual"):
 - {chr(10).join('- ' + v for v in visuals)[2:]}
 Không lặp product_image quá 2 cảnh liền nhau; xen kẽ card/stock để đa dạng.
-{_clips_block(clips_text, first_clip_image)}
+{_clips_block(clips_text, first_clip_image)}{gen_block}
 Bắt trend: dùng đúng tinh thần/format của trend (câu nói, tình huống, nhịp), nhưng nội dung là của mình.
 
 Công thức hook gợi ý:
@@ -127,7 +145,7 @@ Công thức hook gợi ý:
 {RULES}
 
 Trả về DUY NHẤT 1 JSON object, không markdown:
-{PLAN_SCHEMA.replace('SCENE_FIELDS', TREND_SCENE_FIELDS)}
+{schema}
 """.strip()
 
 
@@ -178,7 +196,9 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
         if not isinstance(raw, dict):
             continue
         scene: dict[str, Any] = {
-            "duration": _num(raw.get("duration"), 2.5, 1.2, 6.0),
+            # AI clips are generated as 5-10 s shots; other scenes stay snappy.
+            "duration": _num(raw.get("duration"), 2.5, 1.2,
+                             8.0 if raw.get("visual") == "generate" and mode != "base" else 6.0),
             "voiceover": _text(raw.get("voiceover"), 160),
             "text": _text(raw.get("text"), 48),
             "motion": raw.get("motion") if raw.get("motion") in
@@ -220,6 +240,7 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
         "hashtags": plan.get("hashtags") if isinstance(plan.get("hashtags"), list) else [],
         "facebook_description": _text(plan.get("facebook_description"), 600),
         "cover_ratio": _num(plan.get("cover_ratio"), 0.1, 0.0, 1.0),
+        "character": _text(plan.get("character"), 300),
     }
 
 

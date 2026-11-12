@@ -23,7 +23,7 @@ async function api(path, body, opts = {}) {
     toast(msg, true);
     throw new Error(msg);
   }
-  if (opts.ok) toast(opts.ok);
+  if (opts.ok) toast(typeof opts.ok === "function" ? opts.ok(data) : opts.ok);
   if (opts.reload) setTimeout(() => location.reload(), opts.delay || 600);
   if (opts.go) setTimeout(() => (location.href = opts.go(data)), 500);
   return data;

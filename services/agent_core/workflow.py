@@ -14,7 +14,9 @@ from zoneinfo import ZoneInfo
 from . import creative
 from .ai_client import AIClient, AIClientError
 from .affiliate_client import ShopeeAffiliateClient, ShopeeAffiliateError
-from .assets import VideoGenerator, pexels_video, product_image
+from .assets import pexels_video, product_image
+from .videogen import engine as gen_engine
+from .videogen.providers import get_provider
 from .clips import clip_dir, describe_for_ai, is_allowed_source, list_clips
 from .db import (
     JOB_FIELDS,
@@ -474,8 +476,10 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     clip_thumbs = [t for t in (_clip_thumb(settings, job_id, c) for c in user_clips) if t]
     clips_text = describe_for_ai(user_clips)
     n_clips = len(user_clips)
-    generator = VideoGenerator(settings)
-    if (mode == "trend" and not product_img and not user_clips and not generator.available
+    provider = get_provider(settings) if mode == "trend" else None
+    gen_limit = (min(settings.videogen_max_clips, gen_engine.remaining_today(settings))
+                 if provider and provider.supports("video") else 0)
+    if (mode == "trend" and not product_img and not user_clips and not gen_limit
             and not settings.pexels_api_key.get_secret_value()):
         # Nothing to show on screen: ask for visuals before spending AI calls.
         _stop(settings, job_id, "NEEDS_MEDIA_REVIEW",
@@ -506,8 +510,8 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         else:
             prompt = creative.trend_plan_prompt(
                 {**brief, **{k: analysis.get(k) for k in ("topic", "angle")}}, product,
-                generator.available, bool(settings.pexels_api_key.get_secret_value()),
-                clips_text, 2 if product_img else 1)
+                bool(gen_limit), bool(settings.pexels_api_key.get_secret_value()),
+                clips_text, 2 if product_img else 1, gen_limit)
             images = ([product_img] if product_img else []) + clip_thumbs
             raw = _ask_json(client, settings, prompt, images or None, temperature=0.7)
             plan = creative.normalise_plan(raw, "trend", None, n_clips)
@@ -535,17 +539,70 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     except Exception as exc:  # noqa: BLE001
         _stop(settings, job_id, "CONTENT_GENERATION_FAILED", exc)
 
-    # 5) visual assets -> timeline -------------------------------------------
+    # 5) AI clips (Muse): submit and wait without blocking the worker -------
+    _save_plan_state(settings, job_id, {"plan": plan, "score": score, "product": product,
+                                        "affiliate_link": affiliate_link, "analysis": analysis,
+                                        "clip_ids": [c["id"] for c in user_clips]})
+    if gen_limit:
+        waiting = gen_engine.plan_job(settings, job_id, plan, product_img, provider)
+        if waiting:
+            _stop(settings, job_id, gen_engine.WAIT_STATUS, None, viral_score=score,
+                  generation_tasks=waiting)
+    else:
+        gen_engine.cancel_job_tasks(db, job_id)
+    return _finish_timeline(settings, job, plan, score, product, affiliate_link, analysis,
+                            product_img, asset_dir, user_clips, {}, frame_paths)
+
+
+def _plan_state_path(settings, job_id: str) -> Path:
+    return settings.work_dir / job_id / "plan_state.json"
+
+
+def _save_plan_state(settings, job_id: str, state: dict) -> None:
+    path = _plan_state_path(settings, job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, default=str), encoding="utf-8")
+
+
+def _finish_timeline(settings, job, plan, score, product, affiliate_link, analysis, product_img,
+                     asset_dir, user_clips, generated, frame_paths=None) -> dict:
+    job_id = job["id"]
     try:
-        timeline = build_timeline(settings, job, plan, product_img, generator, asset_dir,
+        timeline = build_timeline(settings, job, plan, product_img, generated, asset_dir,
                                   user_clips)
     except WorkflowError as exc:
         _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", exc)
     content = _content_from_plan(plan, affiliate_link, str(product.get("tiktok_link") or ""))
-    update_job(db, job_id, script_json=json.dumps(timeline, ensure_ascii=False),
+    update_job(settings.database_path, job_id,
+               script_json=json.dumps(timeline, ensure_ascii=False),
                content_json=json.dumps(content, ensure_ascii=False), viral_score=score)
     return render_job(settings, job_id, analysis=analysis, product=product,
                       frame_paths=frame_paths)
+
+
+def resume_after_generation(settings, job_id: str) -> dict:
+    """Continue a job once its AI clips are downloaded (or failed: those scenes fall back)."""
+    job = get_job(settings.database_path, job_id)
+    if not job:
+        raise WorkflowError(f"Job not found: {job_id}")
+    path = _plan_state_path(settings, job_id)
+    if not path.is_file():
+        raise WorkflowError("Không còn kịch bản đã lưu: bấm Viết lại kịch bản")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    asset_dir = settings.work_dir / job_id / "assets"
+    product = state.get("product") or {}
+    generated = gen_engine.results_for_job(settings.database_path, job_id)
+    # Same clips, same order as when the plan was written (plan "clip" fields are indexes).
+    by_id = {c["id"]: c for c in list_clips(settings, job_id)}
+    user_clips = [by_id[i] for i in state.get("clip_ids") or [] if i in by_id]
+    update_job(settings.database_path, job_id, status="RENDERING")
+    try:
+        return _finish_timeline(settings, job, state["plan"], state.get("score"), product,
+                                state.get("affiliate_link") or job.get("affiliate_link") or "",
+                                state.get("analysis") or {}, product_image(product, asset_dir),
+                                asset_dir, user_clips, generated)
+    except _Stop as stop:
+        return stop.result
 
 
 def _clip_thumb(settings, job_id: str, clip: dict) -> Path | None:
@@ -568,15 +625,16 @@ def _clip_scene(settings, job_id: str, clip: dict, start: float = 0.0) -> dict:
 
 
 def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
-                   generator: VideoGenerator, asset_dir: Path,
+                   generated_clips: dict[int, Path] | None, asset_dir: Path,
                    user_clips: list[dict] | None = None) -> dict:
+    """generated_clips: scene index -> downloaded AI clip (see videogen.engine)."""
+    generated_clips = generated_clips or {}
     mode = job.get("mode") or "base"
     user_clips = user_clips or []
     scenes: list[dict] = []
     used_stock: set[str] = set()
     used_clips = {s["clip"] for s in plan["scenes"] if s.get("clip") is not None}
     spare_clips = [i for i in range(len(user_clips)) if i not in used_clips]
-    generated = 0
     for i, scene in enumerate(plan["scenes"]):
         item = {k: scene.get(k) for k in ("duration", "voiceover", "text", "motion")}
         if scene.get("clip") is not None and scene["clip"] < len(user_clips):
@@ -588,13 +646,8 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
         else:
             visual = scene.get("visual")
             path, kind = None, "image"
-            if visual == "generate" and generated < settings.videogen_max_clips:
-                path = generator.generate(scene.get("gen_prompt") or "",
-                                          asset_dir / f"gen_{i:02d}.mp4",
-                                          float(scene.get("duration") or 4))
-                if path:
-                    generated += 1
-                    kind = "video"
+            if visual == "generate" and generated_clips.get(i):
+                path, kind = generated_clips[i], "video"
             if path is None and visual in {"stock", "generate"} and spare_clips:
                 # Hand-added clips beat stock footage for "stock"/"generate" scenes.
                 item.update(_clip_scene(settings, job["id"], user_clips[spare_clips.pop(0)]))

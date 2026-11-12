@@ -18,7 +18,7 @@ States: **Có sẵn** (existed before), **Đã test thật** (ran against live s
 | Safety filter (rules + AI) | Đã test thật | lottery, crime, politics blocked on live data |
 | AI intent via ChatGPT2API | Đã test thật | 14 topics judged in one live run |
 | Trend → product matching | Đã test thật | 300-product CSV: son môi → 3CE lipsticks, ốp lưng → iPhone cases; job created from a match (stops at NEEDS_MEDIA_REVIEW: CSV has no images) |
-| Muse Video Engine (P4) | Chỉ thiết kế | needs a muse.ai account in a supported country + backend choice |
+| Muse Video Engine (P4): provider interface, muse2api client, gen_tasks queue, character reference, clip QC, retry, daily limit, restart resume, async render | Đã code, chưa test thật | 11 contract/integration tests with a fake gateway (incl. trend job -> wait -> render with AI clips). Live test needs: a muse.ai account + a running muse2api gateway (docs/muse-video-engine.md) |
 | Autopilot, performance loop (P5–P6) | Chỉ thiết kế | |
 
 

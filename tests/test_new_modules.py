@@ -321,7 +321,6 @@ class ClipLibraryTests(unittest.TestCase):
                 update_script(settings, job_id, {"scenes": [{"clip_id": "nope"}]})
 
     def test_plan_clip_field_and_timeline(self):
-        from agent_core.assets import VideoGenerator
         from agent_core.workflow import build_timeline
 
         plan = normalise_plan({"scenes": [
@@ -339,8 +338,7 @@ class ClipLibraryTests(unittest.TestCase):
             job = {"id": "job12345", "mode": "trend", "source_path": ""}
             product = Path(tmp) / "p.jpg"
             product.write_bytes(b"x")
-            tl = build_timeline(settings, job, plan, product, VideoGenerator(settings),
-                                Path(tmp), clips)
+            tl = build_timeline(settings, job, plan, product, {}, Path(tmp), clips)
         kinds = [(s["kind"], s.get("clip_id")) for s in tl["scenes"]]
         self.assertEqual(kinds, [("video", "a"), ("image", "b"), ("card", None)])
         self.assertEqual(tl["scenes"][0]["start"], 1.0)

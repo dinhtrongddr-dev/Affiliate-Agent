@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+{% set ST = {'DOWNLOADED':('Xong','ok'),'FAILED':('Lỗi','err'),'CANCELLED':('Đã huỷ',''),'SUBMITTED':('Đang tạo','run'),'SUBMITTING':('Đang gửi','run'),'PENDING':('Chờ','info')} %}
+<div class="row space"><div><h1>Video AI</h1>
+  <p class="sub">Clip AI (Muse) cho các cảnh "generate" trong kịch bản. Mỗi clip chỉ được gửi một lần; tắt app rồi mở lại, app dò tiếp, không tạo trùng.</p></div>
+  <button class="btn" onclick="api('/api/videogen/check',undefined,{ok:d=>'Kết nối OK'+(d.models&&d.models.length?' · '+d.models.slice(0,3).join(', '):'')})">Kiểm tra kết nối</button>
+</div>
+
+<div class="grid g2" style="align-items:start;margin-bottom:16px">
+  <div class="card">
+    <h2>Cấu hình</h2>
+    {% if provider %}
+      <p>Nhà cung cấp: <b>{{ provider }}</b> · <code>{{ base_url }}</code></p>
+      <p>Hôm nay còn <b>{{ remaining }}</b>/{{ daily }} clip + ảnh AI (giới hạn do bạn đặt trong Cài đặt).</p>
+    {% else %}
+      <p><span class="badge warn">Chưa cấu hình</span> Video vẫn được làm bằng clip của bạn, video stock và ảnh sản phẩm.</p>
+    {% endif %}
+    <p class="small muted">Đổi ở <a href="/settings">Cài đặt → Nguồn hình</a>: AA_VIDEOGEN_PROVIDER=<code>muse2api</code>, base URL <code>http://127.0.0.1:18610</code>, API key là MUSE2API_KEY của gateway.</p>
+  </div>
+  <div class="card">
+    <h2>Cách hoạt động</h2>
+    <ol class="small" style="padding-left:18px;margin:0">
+      <li>AI viết kịch bản; cảnh hook / cảnh dùng sản phẩm được đánh dấu "generate" kèm prompt tiếng Anh.</li>
+      <li>Nếu kịch bản có nhân vật, app tạo trước 1 ảnh nhân vật rồi dùng làm ảnh tham chiếu cho mọi cảnh, cùng ảnh sản phẩm, để các cảnh giống nhau.</li>
+      <li>Clip về được kiểm tra: có hình, đủ dài, không đen/đứng hình. Lỗi thì tạo lại 1 lần.</li>
+      <li>Xong hết, app dựng video: giọng đọc, phụ đề, nhạc, chuyển cảnh. Clip AI cũng xuất hiện ở tab "Clip & hình" để dùng lại.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="card">
+  {% if job_filter %}<p class="small">Đang lọc video <a href="/jobs/{{ job_filter }}">{{ job_filter }}</a> · <a href="/generation">bỏ lọc</a></p>{% endif %}
+  {% if tasks %}
+  <div style="overflow-x:auto"><table>
+    <tr><th>Video</th><th>Cảnh</th><th>Trạng thái</th><th>Prompt</th><th>Ghi chú</th><th></th></tr>
+    {% for t in tasks %}
+    <tr>
+      <td class="small"><a href="/jobs/{{ t.job_id }}">{{ t.job_id[:10] }}</a><div class="muted">{{ t.created_at[5:16].replace('T',' ') }}</div></td>
+      <td class="small">{{ 'Ảnh nhân vật' if t.scene_index < 0 else 'Cảnh %d'|format(t.scene_index + 1) }}{% if t.attempt > 1 %}<div class="muted">lần {{ t.attempt }}</div>{% endif %}</td>
+      <td><span class="badge {{ ST.get(t.status, ('', ''))[1] }}">{{ ST.get(t.status, (t.status, ''))[0] }}</span></td>
+      <td class="small" style="max-width:380px">{{ t.prompt[:220] }}</td>
+      <td class="small muted" style="max-width:260px">{{ (t.error or '')[:200] }}
+        {% if t.qc and t.qc.warnings %}<div>{{ t.qc.warnings|join('; ') }}</div>{% endif %}</td>
+      <td style="white-space:nowrap">
+        {% if t.status in ('FAILED','CANCELLED') %}<button class="btn sm" onclick="api('/api/videogen/{{ t.id }}/retry',undefined,{ok:'Đã đưa vào hàng đợi',reload:true})">Thử lại</button>{% endif %}
+        {% if t.status in ('PENDING','SUBMITTING','SUBMITTED') %}<button class="btn sm danger" onclick="api('/api/videogen/{{ t.id }}/cancel',undefined,{reload:true})">Huỷ</button>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">Chưa có clip AI nào.</p>{% endif %}
+</div>
+{% endblock %}

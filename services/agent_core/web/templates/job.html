@@ -15,6 +15,17 @@
   </div>
 </div>
 
+{% if gen_tasks %}
+<div class="card" style="margin-bottom:16px">
+  <div class="row space"><b>🎞 Clip AI (Muse) cho video này</b><a class="btn sm" href="/generation?job={{ job.id }}">Xem hàng đợi</a></div>
+  <table class="small">{% for t in gen_tasks %}
+    <tr><td>{{ 'Ảnh nhân vật' if t.scene_index < 0 else 'Cảnh %d'|format(t.scene_index + 1) }}{% if t.attempt > 1 %} · lần {{ t.attempt }}{% endif %}</td>
+      <td><span class="badge {{ {'DOWNLOADED':'ok','FAILED':'err','CANCELLED':'','SUBMITTED':'run','SUBMITTING':'run','PENDING':'info'}.get(t.status,'') }}">{{ {'DOWNLOADED':'Xong','FAILED':'Lỗi','CANCELLED':'Đã huỷ','SUBMITTED':'Đang tạo','SUBMITTING':'Đang gửi','PENDING':'Chờ'}.get(t.status, t.status) }}</span></td>
+      <td class="muted">{{ (t.error or '')[:140] }}</td></tr>{% endfor %}</table>
+  {% if job.status == 'WAITING_FOR_GENERATION' %}<p class="small muted">Muse đang tạo clip (mỗi clip vài phút). Clip lỗi sẽ tự thử lại 1 lần; nếu vẫn lỗi, cảnh đó dùng clip của bạn / video stock / ảnh sản phẩm. Có thể tắt app, khi mở lại app sẽ dò tiếp, không tạo trùng.</p>{% endif %}
+</div>
+{% endif %}
+
 {% if job.last_error and label(job.status)[1] in ('warn','err') %}
 <div class="card" style="border-color:#f5c2be;background:#fff8f7;margin-bottom:16px">
   <b>Cần chú ý:</b> {{ job.last_error }}

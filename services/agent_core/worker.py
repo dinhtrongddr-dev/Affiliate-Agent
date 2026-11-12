@@ -49,6 +49,8 @@ def handle_task(settings, task: dict):
     if kind == "publish":
         return workflow.publish_platform(settings, job_id, payload["platform"],
                                          payload.get("action", "draft"))
+    if kind == "render_generated":
+        return workflow.resume_after_generation(settings, job_id)
     if kind == "fetch_trends":
         from .trend_intel import pipeline
         return pipeline.run(settings, collect=True)
@@ -132,11 +134,22 @@ class Worker:
                 self.last_run[kind] = now
                 enqueue_task(self.settings.database_path, kind)
 
+    def _poll_generation(self) -> None:
+        """Advance AI clip tasks every ~20 s (only when some are active)."""
+        now = time.monotonic()
+        if now - self.last_run.get("_gen", -1e9) < 20:
+            return
+        self.last_run["_gen"] = now
+        from .videogen import engine
+        if engine.has_active(self.settings.database_path):
+            engine.poll(self.settings)
+
     def run(self) -> None:
         log.info("Worker started")
         while not self.stop_event.is_set():
             try:
                 self._periodic()
+                self._poll_generation()
                 task = claim_task(self.settings.database_path)
             except Exception:  # noqa: BLE001
                 log.exception("Queue error")

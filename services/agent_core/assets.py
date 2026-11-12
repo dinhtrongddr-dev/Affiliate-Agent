@@ -1,6 +1,5 @@
 """Visual assets: product images, licensed stock footage and AI-generated clips."""
 import logging
-import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -85,57 +84,3 @@ def pexels_video(settings, query: str, out_dir: Path, used: set[str]) -> Path | 
     except Exception as exc:  # noqa: BLE001
         log.warning("Pexels search failed for %r: %s", query, exc)
     return None
-
-
-# ---------------------------------------------------------------- AI video generation
-
-class VideoGenerator:
-    """Pluggable text/image-to-video adapter (e.g. Muse or any HTTP service).
-
-    'http' provider contract (configure AA_VIDEOGEN_BASE_URL / _API_KEY / _MODEL):
-      POST {base}/generations  {"prompt", "aspect_ratio": "9:16", "duration", "model",
-                                "image_url"?}            -> {"id": "..."}
-      GET  {base}/generations/{id}                       -> {"status": "queued|running|
-                                                             succeeded|failed", "video_url": "..."}
-    Adapt this class if your provider uses another schema.
-    """
-
-    def __init__(self, settings):
-        self.settings = settings
-        self.provider = (settings.videogen_provider or "none").lower()
-        self.base = settings.videogen_base_url.rstrip("/")
-        self.key = settings.videogen_api_key.get_secret_value()
-
-    @property
-    def available(self) -> bool:
-        return self.provider == "http" and bool(self.base)
-
-    def generate(self, prompt: str, out: Path, duration: float = 4.0) -> Path | None:
-        if not self.available or not prompt:
-            return None
-        headers = {"Authorization": f"Bearer {self.key}"} if self.key else {}
-        try:
-            with httpx.Client(timeout=60, headers=headers) as client:
-                resp = client.post(f"{self.base}/generations", json={
-                    "prompt": prompt, "aspect_ratio": "9:16",
-                    "duration": round(duration), "model": self.settings.videogen_model or None,
-                })
-                resp.raise_for_status()
-                job_id = resp.json().get("id")
-                if not job_id:
-                    raise AssetError(f"Video generator returned no id: {resp.text[:200]}")
-                deadline = time.monotonic() + self.settings.videogen_timeout_seconds
-                while time.monotonic() < deadline:
-                    status = client.get(f"{self.base}/generations/{job_id}").json()
-                    state = str(status.get("status", "")).lower()
-                    if state in {"succeeded", "completed", "success", "done"}:
-                        url = status.get("video_url") or (status.get("output") or {}).get("url")
-                        if not url:
-                            raise AssetError("Generator finished without a video URL")
-                        return download(url, out, None, headers=None, timeout=300)
-                    if state in {"failed", "error", "cancelled"}:
-                        raise AssetError(f"Generation failed: {status}")
-                    time.sleep(5)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("AI video generation failed: %s", exc)
-        return None

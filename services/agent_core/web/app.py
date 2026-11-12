@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import catalog, db, shopee_intelligence, workflow
+from ..videogen import engine as gen_engine
+from ..videogen.providers import ProviderError, get_provider
 from ..affiliate_client import SORT_COMMISSION, SORT_ITEM_SOLD, SORT_RELEVANCE, ShopeeAffiliateClient
 from ..clips import ClipError, add_clip, clip_dir, delete_clip, list_clips, update_clip
 from ..editor.music import list_tracks
@@ -37,6 +39,8 @@ STATUS_LABELS = {
     "APPROVED": ("Đã duyệt - chờ đăng", "ok"),
     "NEEDS_PRODUCT_REVIEW": ("Cần chọn sản phẩm", "warn"),
     "NEEDS_MEDIA_REVIEW": ("Cần kiểm tra video", "warn"),
+    "WAITING_FOR_GENERATION": ("Đang tạo clip AI", "run"),
+    "GENERATION_DONE": ("Clip AI xong, chờ dựng", "run"),
     "WAITING_FOR_SHOPEE_CREDENTIALS": ("Thiếu key Shopee", "warn"),
     "WAITING_FOR_AI_CREDENTIALS": ("Thiếu key AI", "warn"),
     "WAITING_FOR_AI_SERVICE": ("AI chưa sẵn sàng", "warn"),
@@ -59,7 +63,7 @@ STATUS_LABELS = {
 }
 PLATFORM_LABELS = {"shopee": "Shopee Video", "facebook_reels": "Facebook Reels",
                    "tiktok": "TikTok"}
-BUSY = {"ANALYZING", "SCRIPTING", "RENDERING"}
+BUSY = {"ANALYZING", "SCRIPTING", "RENDERING", "WAITING_FOR_GENERATION", "GENERATION_DONE"}
 
 EDITABLE_SETTINGS = [
     # key, label, kind, group
@@ -81,8 +85,11 @@ EDITABLE_SETTINGS = [
     ("AA_VIRAL_REVIEW", "AI tự chấm & viết lại kịch bản yếu", "bool", "Dựng video"),
     ("AA_VIRAL_MIN_SCORE", "Điểm viral tối thiểu (0-10)", "text", "Dựng video"),
     ("AA_PEXELS_API_KEY", "Pexels API key (video stock miễn phí)", "secret", "Nguồn hình"),
-    ("AA_VIDEOGEN_PROVIDER", "Nhà cung cấp tạo video AI (none | http)", "text", "Nguồn hình"),
-    ("AA_VIDEOGEN_BASE_URL", "Video AI base URL (vd Muse)", "text", "Nguồn hình"),
+    ("AA_VIDEOGEN_PROVIDER", "Nhà cung cấp video AI (none | muse2api | http)", "text", "Nguồn hình"),
+    ("AA_VIDEOGEN_BASE_URL", "Video AI base URL (muse2api: http://127.0.0.1:18610)", "text", "Nguồn hình"),
+    ("AA_VIDEOGEN_MAX_CLIPS", "Số clip AI tối đa mỗi video", "text", "Nguồn hình"),
+    ("AA_VIDEOGEN_DAILY_LIMIT", "Số clip + ảnh AI tối đa mỗi ngày", "text", "Nguồn hình"),
+    ("AA_VIDEOGEN_CHARACTER", "Tạo ảnh nhân vật trước để các cảnh giống nhau", "bool", "Nguồn hình"),
     ("AA_VIDEOGEN_MODEL", "Video AI model", "text", "Nguồn hình"),
     ("AA_VIDEOGEN_API_KEY", "Video AI API key", "secret", "Nguồn hình"),
     ("AA_META_ENABLED", "Bật Facebook Page", "bool", "Facebook"),
@@ -179,7 +186,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
              "hint": "Bật TTS trong Cài đặt"},
             {"name": "Video stock (Pexels)", "ok": bool(s.pexels_api_key.get_secret_value()),
              "hint": "Tuỳ chọn: thêm Pexels API key", "optional": True},
-            {"name": "Video AI (Muse/khác)", "ok": s.videogen_provider == "http" and bool(s.videogen_base_url),
+            {"name": "Video AI (Muse/khác)", "ok": s.videogen_provider in ("muse2api", "http") and bool(s.videogen_base_url),
              "hint": "Tuỳ chọn: cấu hình nhà cung cấp video AI", "optional": True},
             {"name": "Facebook Page", "ok": s.meta_enabled, "hint": "Tuỳ chọn", "optional": True},
             {"name": "TikTok", "ok": s.tiktok_enabled, "hint": "Tuỳ chọn", "optional": True},
@@ -221,7 +228,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       candidates=json.loads(job.get("product_candidates_json") or "[]"),
                       brief=json.loads(job.get("brief_json") or "{}"),
                       busy=job["status"] in BUSY, active="jobs",
-                      clips=list_clips(s, job_id))
+                      clips=list_clips(s, job_id),
+                      gen_tasks=gen_engine.list_tasks(s.database_path, job_id, 50))
 
     @app.get("/trends", response_class=HTMLResponse)
     def trends_page(request: Request, view: str = "products"):
@@ -252,6 +260,38 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       has_youtube=bool(s.youtube_api_key.get_secret_value()),
                       has_trendsmcp=bool(s.trendsmcp_api_key.get_secret_value()),
                       trends=db.list_trends(s.database_path, 150))
+
+    @app.get("/generation", response_class=HTMLResponse)
+    def generation_page(request: Request, job: str = ""):
+        s = S()
+        provider = get_provider(s)
+        return render(request, "generation.html", tasks=gen_engine.list_tasks(s.database_path, job or None, 300),
+                      provider=provider.name if provider else "", base_url=s.videogen_base_url,
+                      remaining=gen_engine.remaining_today(s), daily=s.videogen_daily_limit,
+                      job_filter=job, active="generation")
+
+    @app.post("/api/videogen/check")
+    def api_videogen_check():
+        provider = get_provider(S())
+        if not provider:
+            raise HTTPException(400, "Chưa cấu hình: đặt AA_VIDEOGEN_PROVIDER=muse2api và base URL")
+        try:
+            return provider.check_connection()
+        except ProviderError as exc:
+            raise HTTPException(502, str(exc)) from exc
+
+    @app.post("/api/videogen/{task_id}/retry")
+    def api_videogen_retry(task_id: str):
+        new = gen_engine.retry_task(S(), task_id)
+        if not new:
+            raise HTTPException(400, "Chỉ thử lại được task lỗi/đã huỷ")
+        return {"task_id": new}
+
+    @app.post("/api/videogen/{task_id}/cancel")
+    def api_videogen_cancel(task_id: str):
+        if not gen_engine.cancel_task(S(), task_id):
+            raise HTTPException(400, "Task không còn chạy")
+        return {"ok": True}
 
     @app.post("/api/intel/analyse")
     def api_intel_analyse():
