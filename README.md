@@ -4,6 +4,7 @@ Local-first app that turns videos into affiliate shorts for Shopee Video, Facebo
 
 - **Có video base:** thả video vào inbox (hoặc kéo thả trên web). AI xem video, tìm sản phẩm Shopee, lấy link affiliate, viết kịch bản viral, tự cắt và sắp lại cảnh, thêm hook, phụ đề karaoke, giọng đọc, nhạc nền, chuyển cảnh và CTA, rồi xuất video 9:16.
 - **Không có video base:** chọn một trend (Google Trends VN, hoặc trend TikTok/Facebook bạn dán vào) hoặc một sản phẩm bán chạy. AI chọn sản phẩm, viết kịch bản bắt trend và tự dựng video từ ảnh sản phẩm, video stock (Pexels) hoặc clip AI (Muse/khác, qua adapter).
+- **Kho sản phẩm (không cần Open API):** ở Shopee Affiliate → Hoa hồng Sản phẩm (tab Bán chạy nhất…), tick sản phẩm, chọn "Lấy link hàng loạt", rồi kéo file CSV vào trang *Kho sản phẩm*. App xếp hạng theo hoa hồng × lượt bán và làm video hàng loạt với link affiliate có sẵn. Facebook dùng link Shopee; TikTok dùng giỏ hàng TikTok Shop (dán link sản phẩm TikTok cho từng sản phẩm).
 - **Clip của bạn:** tab *Clip & hình* của mỗi video nhận clip quay thật, clip AI (Muse trong Meta AI, CapCut, Veo…) hoặc ảnh sản phẩm. AI ưu tiên dùng các clip này khi viết kịch bản, và bạn có thể gán clip cho từng cảnh. Clip đánh dấu "do AI tạo" sẽ được gắn nhãn nội dung AI khi đăng TikTok.
 - **Một click duyệt:** xem video, sửa kịch bản/caption nếu muốn, rồi bấm *Duyệt & đăng* (có thể lên lịch).
 - **Đo lường:** báo cáo hoa hồng Shopee được gắn về từng video (sub_id = mã job).
@@ -87,6 +88,7 @@ Tests:
 - Shopee uploads default to **draft**. Public posting (Facebook, Shopee publish, TikTok direct) also requires `AA_AUTO_PUBLISH=true`.
 - TikTok defaults to **inbox** mode: the video lands in your TikTok drafts, where you add a trending sound and post.
 - Trends are used as *signals* (topic, format, hook). The app never downloads or reposts other creators' videos.
+- Product data comes only from official exports/APIs you download or authorise (Shopee Affiliate CSV, Affiliate Open API). The app does not crawl Shopee or TikTok.
 - Music must be tracks you own or license. Use platform sounds inside the TikTok/Facebook apps for trending audio.
 - Videos with AI-generated clips are flagged `is_aigc` on TikTok. Every caption carries an affiliate disclosure.
 - Content prompts forbid invented prices, specs, claims or fake first-hand experience.

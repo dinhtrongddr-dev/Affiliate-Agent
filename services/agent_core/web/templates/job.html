@@ -159,10 +159,16 @@
       <label>Tiêu đề</label><input id="c-title" value="{{ content.title }}">
       <label>Caption</label><textarea id="c-caption" rows="4">{{ content.caption }}</textarea>
       <label>Hashtag</label><input id="c-tags" value="{{ (content.hashtags or [])|join(' ') }}">
-      <label>Mô tả Facebook</label><textarea id="c-fb" rows="3">{{ content.facebook_description }}</textarea>
+      <label>Mô tả Facebook (đăng kèm link Shopee)</label><textarea id="c-fb" rows="3">{{ content.facebook_description }}</textarea>
+      <label>Link sản phẩm TikTok Shop (gắn giỏ hàng khi hoàn tất bài trong app TikTok)</label>
+      <input id="c-tt" value="{{ content.tiktok_link or '' }}" placeholder="https://www.tiktok.com/... hoặc https://vt.tiktok.com/...">
       <p></p><button class="btn primary" onclick="saveCaption()">💾 Lưu caption</button>
-      <h3 style="margin-top:18px">Bản xem trước Shopee</h3>
-      <pre style="white-space:pre-wrap;background:#f5f6f8;padding:12px;border-radius:8px">{{ content.shopee_caption }}</pre>
+      <h3 style="margin-top:18px">Xem trước theo nền tảng</h3>
+      <div class="grid g3">
+        <div><b class="small">Shopee Video</b><pre class="small" style="white-space:pre-wrap;background:#f5f6f8;padding:10px;border-radius:8px">{{ content.shopee_caption }}</pre></div>
+        <div><b class="small">Facebook Reels</b><pre class="small" style="white-space:pre-wrap;background:#f5f6f8;padding:10px;border-radius:8px">{{ content.facebook_post }}</pre></div>
+        <div><b class="small">TikTok</b><pre class="small" style="white-space:pre-wrap;background:#f5f6f8;padding:10px;border-radius:8px">{{ content.tiktok_caption }}</pre></div>
+      </div>
     </div>
 
     <!-- Product -->
@@ -218,6 +224,8 @@ setupClipDrop(document.getElementById("clip-drop"));
 tabs(document.getElementById("tabs-root"));
 {% if job.status in ('NEEDS_PRODUCT_REVIEW','WAITING_FOR_SHOPEE_CREDENTIALS','WAITING_FOR_SHOPEE_API') %}
 document.querySelector('.tabs button[data-tab="t-product"]').click();{% endif %}
+{% if job.status == 'NEEDS_MEDIA_REVIEW' and not script.scenes %}
+document.querySelector('.tabs button[data-tab="t-clips"]').click();{% endif %}
 pollJob(JOB);
 
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
@@ -282,7 +290,8 @@ function setupClipDrop(el){
   }
 }
 function caption(){return{title:document.getElementById("c-title").value,caption:document.getElementById("c-caption").value,
-  hashtags:document.getElementById("c-tags").value,facebook_description:document.getElementById("c-fb").value};}
+  hashtags:document.getElementById("c-tags").value,facebook_description:document.getElementById("c-fb").value,
+  tiktok_link:document.getElementById("c-tt").value.trim()};}
 async function saveRender(){
   collect();
   const script={...SCRIPT,hook:document.getElementById("hook").value,cta:document.getElementById("cta").value,

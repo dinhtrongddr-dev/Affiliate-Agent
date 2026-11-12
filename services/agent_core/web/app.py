@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import db, workflow
+from .. import catalog, db, workflow
 from ..affiliate_client import SORT_COMMISSION, SORT_ITEM_SOLD, SORT_RELEVANCE, ShopeeAffiliateClient
 from ..clips import ClipError, add_clip, clip_dir, delete_clip, list_clips, update_clip
 from ..editor.music import list_tracks
@@ -233,6 +233,78 @@ def create_app(start_worker: bool = True) -> FastAPI:
                 error = str(exc)
         return render(request, "products.html", offers=offers, q=q, sort=sort, error=error,
                       seeds=s.seed_keywords)
+
+    @app.get("/catalog", response_class=HTMLResponse)
+    def catalog_page(request: Request, sort: str = "score", q: str = "", status: str = ""):
+        rows = catalog.list_products(S().database_path, sort, q, status)
+        return render(request, "catalog.html", products=rows, sort=sort, q=q, status=status)
+
+    @app.post("/api/catalog/import")
+    async def api_catalog_import(file: UploadFile = File(...), tiktok: str = Form("false")):
+        data = await file.read()
+        if len(data) > 20 * 1024 * 1024:
+            raise HTTPException(400, "File quá lớn")
+        try:
+            products = catalog.parse_csv(data)
+        except catalog.CatalogError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if tiktok in ("true", "1", "on"):
+            for p in products:
+                p["platform"] = "tiktok"
+                p["tiktok_link"] = p["tiktok_link"] or p["affiliate_link"] or p["product_link"]
+        return catalog.import_products(S().database_path, products)
+
+    @app.post("/api/catalog/update")
+    async def api_catalog_update(request: Request):
+        body = await request.json()
+        pid = str(body.get("id") or "")
+        if not catalog.get_product(S().database_path, pid):
+            raise HTTPException(404, "Không có sản phẩm")
+        fields = {k: str(body[k]).strip() for k in ("image_url", "tiktok_link", "notes", "status")
+                  if k in body}
+        for key in ("image_url", "tiktok_link"):
+            if fields.get(key) and not fields[key].startswith("https://"):
+                raise HTTPException(400, "Link phải bắt đầu bằng https://")
+        catalog.update_product(S().database_path, pid, **fields)
+        return {"ok": True}
+
+    @app.post("/api/catalog/delete")
+    async def api_catalog_delete(request: Request):
+        body = await request.json()
+        for pid in body.get("ids") or []:
+            catalog.delete_product(S().database_path, str(pid))
+        return {"ok": True}
+
+    @app.post("/api/catalog/make-videos")
+    async def api_catalog_make(request: Request):
+        """Create one trend job per selected product (link already known -> no Open API)."""
+        body = await request.json()
+        s = S()
+        ids = [str(i) for i in body.get("ids") or []][:30]
+        if not ids:
+            raise HTTPException(400, "Chọn ít nhất 1 sản phẩm")
+        created, errors = [], []
+        for pid in ids:
+            product = catalog.get_product(s.database_path, pid)
+            if not product:
+                continue
+            if not (product.get("affiliate_link") or product.get("tiktok_link")):
+                errors.append(f"{product['name'][:40]}: thiếu link affiliate")
+                continue
+            offer = catalog.as_offer(product)
+            if not offer["affiliateLink"]:
+                offer["affiliateLink"] = product["tiktok_link"]
+            try:
+                job_id = workflow.create_trend_job(s, str(body.get("topic") or product["name"]),
+                                                   str(body.get("notes") or product.get("notes") or ""),
+                                                   offer=offer)
+            except workflow.WorkflowError as exc:
+                errors.append(f"{product['name'][:40]}: {exc}")
+                continue
+            catalog.update_product(s.database_path, pid, status="VIDEO_QUEUED", job_id=job_id)
+            db.enqueue_task(s.database_path, "process", job_id)
+            created.append(job_id)
+        return {"created": created, "errors": errors}
 
     @app.get("/analytics", response_class=HTMLResponse)
     def analytics_page(request: Request):

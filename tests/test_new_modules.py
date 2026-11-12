@@ -210,7 +210,7 @@ class WebTests(unittest.TestCase):
             with TestClient(app) as client:
                 job_id = create_trend_job(settings, "Trend thử")
                 for path in ["/", "/jobs", f"/jobs/{job_id}", "/trends", "/tasks",
-                             "/settings", "/logs", "/analytics", "/products"]:
+                             "/settings", "/logs", "/analytics", "/products", "/catalog"]:
                     response = client.get(path)
                     self.assertEqual(response.status_code, 200, path)
                 self.assertEqual(client.post("/api/scan").status_code, 403)
@@ -345,3 +345,75 @@ class ClipLibraryTests(unittest.TestCase):
         self.assertEqual(kinds, [("video", "a"), ("image", "b"), ("card", None)])
         self.assertEqual(tl["scenes"][0]["start"], 1.0)
         self.assertTrue(tl["scenes"][1]["generated"])
+
+
+SHOPEE_EXPORT = (
+    "﻿Mã sản phẩm,Tên sản phẩm,Giá,Doanh thu,Tên cửa hàng,Tỉ lệ hoa hồng,Hoa hồng,"
+    "Link sản phẩm,Link ưu đãi\n"
+    '48311630420,Bao cao su hộp 3,"49,0k",391,True Love Store,7%,₫3.430,'
+    "https://shopee.vn/product/1737629625/48311630420,https://s.shopee.vn/AbCd123\n"
+    '555,Máy xay mini,"129,0k",15200,Shop B,12%,₫15.480,'
+    "https://shopee.vn/product/1/555,https://s.shopee.vn/Xyz\n"
+)
+
+
+class CatalogTests(unittest.TestCase):
+    def test_parse_shopee_bulk_link_export(self):
+        from agent_core.catalog import parse_csv
+
+        rows = parse_csv(SHOPEE_EXPORT.encode("utf-8"))
+        self.assertEqual(len(rows), 2)
+        first = rows[0]
+        self.assertEqual(first["item_id"], "48311630420")
+        self.assertEqual(first["price"], 49000)
+        self.assertEqual(first["sold"], 391)
+        self.assertEqual(first["commission_rate"], 7)
+        self.assertEqual(first["commission"], 3430)
+        self.assertEqual(first["affiliate_link"], "https://s.shopee.vn/AbCd123")
+        self.assertEqual(first["platform"], "shopee")
+
+    def test_number_parsing(self):
+        from agent_core.catalog import _number
+
+        for raw, want in [("49,0k", 49000), ("₫3.430", 3430), ("12,5%", 12.5),
+                          ("1,2tr", 1_200_000), ("129.000", 129000), ("0.5", 0.5), ("", None)]:
+            self.assertEqual(_number(raw), want, raw)
+
+    def test_rejects_unknown_columns(self):
+        from agent_core.catalog import CatalogError, parse_csv
+
+        with self.assertRaises(CatalogError):
+            parse_csv(b"a,b\n1,2\n")
+
+    def test_import_sort_and_make_job_without_api(self):
+        from agent_core import catalog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = temp_settings(Path(tmp))
+            result = catalog.import_products(settings.database_path,
+                                             catalog.parse_csv(SHOPEE_EXPORT.encode()))
+            self.assertEqual(result, {"inserted": 2, "updated": 0, "total": 2})
+            again = catalog.import_products(settings.database_path,
+                                            catalog.parse_csv(SHOPEE_EXPORT.encode()))
+            self.assertEqual(again["updated"], 2)
+            top = catalog.list_products(settings.database_path, "score")
+            self.assertEqual(top[0]["item_id"], "555")
+            catalog.update_product(settings.database_path, top[0]["id"],
+                                   tiktok_link="https://vt.tiktok.com/abc")
+            offer = catalog.as_offer(catalog.get_product(settings.database_path, top[0]["id"]))
+            job_id = create_trend_job(settings, offer["productName"], offer=offer)
+            job = db.get_job(settings.database_path, job_id)
+            self.assertEqual(job["affiliate_link"], "https://s.shopee.vn/Xyz")
+            self.assertEqual(job["product_item_id"], "555")
+            product = json.loads(job["product_candidates_json"])[0]
+            self.assertEqual(product["tiktok_link"], "https://vt.tiktok.com/abc")
+            with self.assertRaises(WorkflowError):
+                create_trend_job(settings, "x", offer={**offer, "affiliateLink": "https://evil.example/a"})
+
+    def test_platform_captions(self):
+        content = finalise_content({"caption": "Hay", "hashtags": ["#a"],
+                                    "tiktok_link": "https://vt.tiktok.com/x"},
+                                   "https://s.shopee.vn/x")
+        self.assertIn("https://s.shopee.vn/x", content["facebook_post"])
+        self.assertNotIn("shopee", content["tiktok_caption"].lower())
+        self.assertIn("giỏ hàng", content["tiktok_caption"])

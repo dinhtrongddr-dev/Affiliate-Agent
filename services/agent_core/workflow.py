@@ -212,6 +212,8 @@ def offer_to_product(offer: dict) -> dict:
         "rating_star": offer.get("ratingStar") or offer.get("rating_star"),
         "shop_name": offer.get("shopName") or offer.get("shop_name"),
         "score": offer.get("score"),
+        "tiktok_link": offer.get("tiktokLink") or offer.get("tiktok_link") or "",
+        "catalog_id": offer.get("catalogId") or offer.get("catalog_id"),
     }
 
 
@@ -286,7 +288,25 @@ def create_trend_job(settings, topic: str, notes: str = "", keywords: list[str] 
         "id": job_id, "source_path": "", "sha256": f"trend:{job_id}",
         "file_name": (brief["topic"] or "trend")[:120], "mode": "trend", "brief": brief,
     })
+    link = str((offer or {}).get("affiliateLink") or "").strip()
+    if offer and link:
+        if not _is_affiliate_link(link):
+            raise WorkflowError("Link affiliate phải là link Shopee hoặc TikTok")
+        product = offer_to_product(offer)
+        update_job(settings.database_path, job_id, product_item_id=product["item_id"],
+                   product_name=product["name"], affiliate_link=link,
+                   product_candidates_json=json.dumps([product], ensure_ascii=False))
     return job_id
+
+
+def _is_affiliate_link(url: str) -> bool:
+    from .affiliate_client import _is_shopee_vn
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    tiktok = parsed.scheme == "https" and (host == "tiktok.com" or host.endswith(".tiktok.com"))
+    return _is_shopee_vn(url) or tiktok
 
 
 # ---------------------------------------------------------------- pipeline
@@ -454,11 +474,17 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     clip_thumbs = [t for t in (_clip_thumb(settings, job_id, c) for c in user_clips) if t]
     clips_text = describe_for_ai(user_clips)
     n_clips = len(user_clips)
+    generator = VideoGenerator(settings)
+    if (mode == "trend" and not product_img and not user_clips and not generator.available
+            and not settings.pexels_api_key.get_secret_value()):
+        # Nothing to show on screen: ask for visuals before spending AI calls.
+        _stop(settings, job_id, "NEEDS_MEDIA_REVIEW",
+              "Chưa có hình ảnh: thêm ảnh/clip ở tab Clip & hình (hoặc link ảnh sản phẩm), "
+              "rồi bấm \"AI dựng video với các clip này\".")
 
     # 4) creative plan ---------------------------------------------------------
     update_job(db, job_id, status="SCRIPTING")
     segments: list[dict] = []
-    generator = VideoGenerator(settings)
     try:
         if mode == "base":
             source = Path(job["source_path"])
@@ -515,7 +541,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                                   user_clips)
     except WorkflowError as exc:
         _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", exc)
-    content = _content_from_plan(plan, affiliate_link)
+    content = _content_from_plan(plan, affiliate_link, str(product.get("tiktok_link") or ""))
     update_job(db, job_id, script_json=json.dumps(timeline, ensure_ascii=False),
                content_json=json.dumps(content, ensure_ascii=False), viral_score=score)
     return render_job(settings, job_id, analysis=analysis, product=product,
@@ -600,7 +626,7 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
             "music_mood": plan.get("music_mood", "upbeat"), "scenes": scenes}
 
 
-def _content_from_plan(plan: dict, affiliate_link: str) -> dict:
+def _content_from_plan(plan: dict, affiliate_link: str, tiktok_link: str = "") -> dict:
     caption = str(plan.get("caption") or plan.get("title") or plan.get("hook") or "").strip()
     content = {
         "title": plan.get("title") or plan.get("hook") or "",
@@ -609,6 +635,7 @@ def _content_from_plan(plan: dict, affiliate_link: str) -> dict:
         "hashtags": _normalise_hashtags(plan.get("hashtags")),
         "cover_ratio": float(plan.get("cover_ratio") or 0.1),
         "facebook_description": plan.get("facebook_description") or caption,
+        "tiktok_link": tiktok_link,
     }
     return finalise_content(content, affiliate_link)
 
@@ -620,9 +647,12 @@ def finalise_content(content: dict, affiliate_link: str) -> dict:
         f"{str(content.get('facebook_description') or caption).strip()}\n\n"
         f"👉 Link sản phẩm: {affiliate_link}\n{DISCLOSURE}\n{' '.join(content.get('hashtags') or [])}"
     )
+    # TikTok: no external (Shopee) link in the caption; the product is attached
+    # from the TikTok Shop showcase (tiktok_link) when finishing the post in the app.
+    where = "giỏ hàng (TikTok Shop)" if content.get("tiktok_link") else "bio"
     content["tiktok_caption"] = (
         f"{caption} {' '.join(content.get('hashtags') or [])}\n"
-        "Link sản phẩm ở bio/giỏ hàng. #affiliate #lienkettiepthi"
+        f"Sản phẩm ở {where}. #affiliate #lienkettiepthi"
     )[:2200]
     content["affiliate_link"] = affiliate_link
     return content
@@ -860,9 +890,11 @@ def update_script(settings, job_id: str, timeline: dict | None = None,
         fields["script_json"] = json.dumps({**timeline, "scenes": scenes}, ensure_ascii=False)
     if content_updates:
         content = json.loads(job.get("content_json") or "{}")
-        for key in ("title", "caption", "facebook_description"):
+        for key in ("title", "caption", "facebook_description", "tiktok_link"):
             if key in content_updates:
                 content[key] = str(content_updates[key]).strip()
+        if content.get("tiktok_link") and not _is_affiliate_link(content["tiktok_link"]):
+            raise WorkflowError("Link TikTok phải là https://...tiktok.com/...")
         if "hashtags" in content_updates:
             raw = content_updates["hashtags"]
             raw = raw.split() if isinstance(raw, str) else raw
@@ -977,6 +1009,8 @@ def _local_to_utc(value: str, tz_name: str) -> str | None:
 def publish_blockers(settings, job: dict, platform: str, action: str = "draft") -> list[str]:
     issues = []
     if platform == "shopee":
+        if "tiktok" in str(job.get("affiliate_link") or ""):
+            issues.append("Sản phẩm TikTok Shop: không đăng lên Shopee Video")
         if not job.get("shopee_ready"):
             issues.append("Video chưa qua QA Shopee")
         if action == "publish" and not settings.auto_publish:

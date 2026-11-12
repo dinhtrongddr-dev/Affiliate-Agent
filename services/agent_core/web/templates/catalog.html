@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row space"><div><h1>Kho sản phẩm</h1>
+  <p class="sub">Sản phẩm hot, hoa hồng cao, đã có sẵn link affiliate. Chọn sản phẩm rồi bấm "Làm video", AI làm từ A–Z.</p></div></div>
+
+<div class="grid g2" style="align-items:start;margin-bottom:16px">
+  <div class="card">
+    <h2>1. Lấy dữ liệu từ Shopee Affiliate</h2>
+    <ol class="small" style="padding-left:18px;margin:0 0 10px">
+      <li>Mở <a href="https://affiliate.shopee.vn/offer/product_offer" target="_blank" rel="noopener">Shopee Affiliate → Hoa hồng Sản phẩm</a>, chọn tab <b>Bán chạy nhất</b> hoặc một ngành hàng.</li>
+      <li>Tick sản phẩm (hoặc "Chọn tất cả sản phẩm trên trang này"), tối đa 100.</li>
+      <li>Bấm <b>Lấy link hàng loạt</b> → <b>Lấy link</b>. Chrome sẽ tải về một file CSV.</li>
+      <li>Kéo thả file CSV vào ô bên dưới.</li>
+    </ol>
+    <div class="drop" id="csv-drop"><input type="file" accept=".csv,text/csv" hidden>
+      <b>Kéo thả file CSV vào đây</b> hoặc bấm để chọn
+      <div class="small muted">CSV xuất từ Shopee Affiliate, hoặc bảng tính có cột Tên sản phẩm / Link sản phẩm / Link ưu đãi / Hoa hồng</div></div>
+    <label class="check" style="margin-top:8px"><input type="checkbox" id="csv-tiktok"> Đây là danh sách sản phẩm TikTok Shop</label>
+  </div>
+  <div class="card">
+    <h2>2. TikTok Shop</h2>
+    <p class="small muted">TikTok không cho gắn link ngoài vào video. Hãy thêm sản phẩm vào <b>Showcase</b> trong TikTok Shop của bạn,
+      rồi dán link sản phẩm TikTok vào cột "Link TikTok" bên dưới. App gửi video vào <b>hộp thư nháp TikTok</b>, bạn gắn sản phẩm
+      (giỏ hàng) và nhạc trend trong app TikTok rồi đăng.</p>
+    <p class="small muted">Facebook dùng link Shopee (Link ưu đãi). TikTok dùng giỏ hàng TikTok Shop.</p>
+    <p class="small muted">Video viral của người khác: chỉ dùng làm <b>tham khảo format</b> (dán link ở trang Trend). App không tải hay đăng lại video của người khác.</p>
+  </div>
+</div>
+
+<form class="card row" method="get" style="margin-bottom:12px">
+  <input name="q" value="{{ q }}" placeholder="Tìm tên sản phẩm" style="flex:1;min-width:200px">
+  <select name="sort" style="width:220px">
+    <option value="score" {{ 'selected' if sort=='score' }}>Tiềm năng (hoa hồng × lượt bán)</option>
+    <option value="commission" {{ 'selected' if sort=='commission' }}>Hoa hồng / đơn cao nhất</option>
+    <option value="rate" {{ 'selected' if sort=='rate' }}>Tỉ lệ hoa hồng cao nhất</option>
+    <option value="sold" {{ 'selected' if sort=='sold' }}>Bán chạy nhất</option>
+    <option value="new" {{ 'selected' if sort=='new' }}>Mới nhập</option>
+  </select>
+  <select name="status" style="width:170px">
+    <option value="" {{ 'selected' if not status }}>Mọi trạng thái</option>
+    <option value="NEW" {{ 'selected' if status=='NEW' }}>Chưa làm video</option>
+    <option value="VIDEO_QUEUED" {{ 'selected' if status=='VIDEO_QUEUED' }}>Đã làm video</option>
+  </select>
+  <button class="btn">Lọc</button>
+</form>
+
+<div class="card">
+  <div class="row space" style="margin-bottom:10px">
+    <label class="check"><input type="checkbox" id="all" onchange="document.querySelectorAll('.pick').forEach(c=>c.checked=this.checked)"> Chọn tất cả ({{ products|length }})</label>
+    <div class="row">
+      <input id="notes" placeholder="Ý tưởng / trend muốn bắt (tuỳ chọn)" style="width:300px">
+      <button class="btn primary" onclick="makeVideos()">🎬 Làm video cho sản phẩm đã chọn</button>
+      <button class="btn danger" onclick="delSelected()">Xoá</button>
+    </div>
+  </div>
+  {% if products %}
+  <table>
+    <tr><th></th><th>Sản phẩm</th><th>Giá</th><th>Đã bán</th><th>Hoa hồng</th><th>Link</th><th>Ảnh / TikTok</th><th></th></tr>
+    {% for p in products %}
+    <tr>
+      <td><input type="checkbox" class="pick" value="{{ p.id }}" style="width:auto"></td>
+      <td style="max-width:320px"><b>{{ p.name }}</b><div class="small muted">{{ p.shop_name }} · {{ 'TikTok' if p.platform == 'tiktok' else 'Shopee' }} · {{ p.item_id }}</div></td>
+      <td class="small">{{ p.price_text or p.price or '-' }}</td>
+      <td class="small">{{ p.sold or '-' }}</td>
+      <td class="small"><b>{{ '%g' % p.commission_rate if p.commission_rate is not none else '-' }}%</b>
+        {% if p.commission %}<div class="muted">₫{{ '{:,.0f}'.format(p.commission) }}/đơn</div>{% endif %}</td>
+      <td class="small">{% if p.affiliate_link %}<a href="{{ p.affiliate_link }}" target="_blank" rel="noopener">affiliate</a>{% endif %}
+        {% if p.product_link %}<div><a href="{{ p.product_link }}" target="_blank" rel="noopener">sản phẩm</a></div>{% endif %}</td>
+      <td class="small" style="min-width:220px">
+        <input placeholder="Link ảnh sản phẩm (https://...)" value="{{ p.image_url or '' }}" onchange="upd('{{ p.id }}',{image_url:this.value})">
+        <input placeholder="Link TikTok Shop (https://...)" value="{{ p.tiktok_link or '' }}" style="margin-top:4px" onchange="upd('{{ p.id }}',{tiktok_link:this.value})"></td>
+      <td>{% if p.job_id %}<a class="btn sm" href="/jobs/{{ p.job_id }}">Xem video</a>{% else %}<span class="badge info">Mới</span>{% endif %}</td>
+    </tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">Chưa có sản phẩm. Nhập file CSV từ Shopee Affiliate ở trên.</p>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>
+(function(){
+  const el=document.getElementById("csv-drop"), input=el.querySelector("input");
+  el.addEventListener("click",()=>input.click());
+  ["dragenter","dragover"].forEach(e=>el.addEventListener(e,ev=>{ev.preventDefault();el.classList.add("over");}));
+  ["dragleave","drop"].forEach(e=>el.addEventListener(e,ev=>{ev.preventDefault();el.classList.remove("over");}));
+  el.addEventListener("drop",ev=>send(ev.dataTransfer.files[0]));
+  input.addEventListener("change",()=>send(input.files[0]));
+  async function send(file){
+    if(!file) return;
+    const fd=new FormData(); fd.append("file",file);
+    fd.append("tiktok",document.getElementById("csv-tiktok").checked?"true":"false");
+    const r=await api("/api/catalog/import",fd);
+    toast(`Đã nhập ${r.total} sản phẩm (${r.inserted} mới, ${r.updated} cập nhật)`);
+    setTimeout(()=>location.reload(),800);
+  }
+})();
+function picked(){return [...document.querySelectorAll(".pick:checked")].map(c=>c.value);}
+async function upd(id,fields){await api("/api/catalog/update",{id,...fields},{ok:"Đã lưu"});}
+async function makeVideos(){
+  const ids=picked(); if(!ids.length) return toast("Chọn sản phẩm",true);
+  if(ids.length>30) return toast("Tối đa 30 sản phẩm mỗi lần",true);
+  if(!confirm(`AI sẽ làm ${ids.length} video (mỗi video vài phút). Tiếp tục?`)) return;
+  const r=await api("/api/catalog/make-videos",{ids,notes:document.getElementById("notes").value});
+  if(r.errors.length) toast(r.errors.join("; "),true);
+  toast(`Đã đưa ${r.created.length} video vào hàng đợi`);
+  setTimeout(()=>location.href=r.created.length===1?"/jobs/"+r.created[0]:"/jobs",900);
+}
+async function delSelected(){
+  const ids=picked(); if(!ids.length) return;
+  if(!confirm(`Xoá ${ids.length} sản phẩm khỏi kho?`)) return;
+  await api("/api/catalog/delete",{ids},{reload:true});
+}
+</script>{% endblock %}
