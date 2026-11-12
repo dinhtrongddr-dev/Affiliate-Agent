@@ -54,3 +54,20 @@ The gateway runs as its own service, the same way ChatGPT2API does.
 - Muse clips are about 10 s and about 720p. The renderer scales them to 1080×1920, so they look slightly soft.
 - On Muse's free plan, one clip uses about 2–3% of the weekly allowance (useapi.net's measurement).
 - muse2api has no quota or cancel API that this app can read, so quota is enforced only through the local daily limit. Cancelling a clip only stops waiting for it; the remote job still finishes.
+
+## Logging in with a cookie JSON
+
+On **🎞 Video AI → Đăng nhập Muse bằng JSON**:
+
+1. Paste a cookie export of your own muse.ai session. Two shapes are accepted:
+   - a browser extension's JSON array, for example from Cookie-Editor;
+   - muse2api's `{cookies, expires}` object.
+2. The app keeps only `*.muse.ai` cookies and requires `hatch_sess`. It rejects an expired session.
+3. The session is stored encrypted with Windows DPAPI in `state/secrets/muse_session.bin`. That file is git-ignored and readable only by the same Windows user on the same machine. Cookie values are never shown again or logged.
+4. **Gửi sang muse2api** posts the session to your gateway with `POST /admin/accounts`, using the same payload as the gateway's own extension. Only one account is ever sent.
+
+## Proxy / VPN
+
+The app does not route Muse traffic through a proxy or VPN, and it has no per-account proxy settings. Muse is offered only in certain countries. Reaching it from an unsupported region through a proxy works around Muse's access rules and puts the account at risk. Whether and how the gateway's machine reaches Muse is the user's decision, outside this app.
+
+Free "VPN proxy" browser extensions are a poor fit for this use. In December 2025, Koi Security reported that the Urban VPN Proxy extension captured users' AI chat conversations. The session cookie gives full control of the Muse account, so it should never pass through an untrusted extension or proxy.

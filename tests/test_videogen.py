@@ -358,3 +358,79 @@ class TrendJobWithMuseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FAKE_EXPORT = json.dumps([
+    {"domain": ".muse.ai", "name": "hatch_sess", "value": "FAKE-SESSION-VALUE",
+     "expirationDate": 4102444800.5, "httpOnly": True},
+    {"domain": ".muse.ai", "name": "hatch_vml", "value": "FAKE-VML", "expirationDate": 4102444800},
+    {"domain": "muse.ai", "name": "__Host-hatch_one_tap", "value": "x"},
+    {"domain": ".facebook.com", "name": "c_user", "value": "should-be-dropped"},
+])
+
+
+class MuseSessionTests(unittest.TestCase):
+    def test_parse_formats_and_validation(self):
+        from agent_core.videogen import muse_session as ms
+
+        parsed = ms.parse(FAKE_EXPORT)
+        self.assertEqual(sorted(parsed["cookies"]), ["__Host-hatch_one_tap", "hatch_sess", "hatch_vml"])
+        self.assertEqual(parsed["expires"]["hatch_sess"], 4102444800)
+        again = ms.parse(json.dumps({"cookies": {"hatch_sess": "a"}, "expires": {"hatch_sess": 4102444800}}))
+        self.assertEqual(again["cookies"], {"hatch_sess": "a"})
+        for bad in ["not json", "[]", json.dumps([{"domain": ".muse.ai", "name": "datr", "value": "x"}]),
+                    json.dumps([{"domain": ".muse.ai", "name": "hatch_sess", "value": "x",
+                                 "expirationDate": 1000}])]:
+            with self.assertRaises(ms.SessionError, msg=bad):
+                ms.parse(bad)
+
+    def test_encrypted_store_and_push(self):
+        from agent_core.videogen import muse_session as ms
+
+        with tempfile.TemporaryDirectory() as tmp:
+            s = settings_for(Path(tmp))
+            info = ms.save(s, FAKE_EXPORT, "main")
+            self.assertEqual(info["useful"], ["hatch_sess", "hatch_vml"])
+            self.assertGreater(info["days_left"], 1000)
+            raw = (s.project_root / "state" / "secrets" / "muse_session.bin").read_bytes()
+            self.assertNotIn(b"FAKE-SESSION-VALUE", raw)  # encrypted at rest
+            self.assertEqual(ms.load(s)["cookies"]["hatch_sess"], "FAKE-SESSION-VALUE")
+            seen = []
+
+            def handler(request):
+                seen.append(request)
+                return httpx.Response(200, json={"id": "acc1", "label": "main", "cookies": "x"})
+
+            result = ms.push_to_gateway(s, transport=httpx.MockTransport(handler))
+            self.assertEqual(result, {"id": "acc1", "label": "main"})  # secret fields dropped
+            req = seen[0]
+            self.assertEqual(str(req.url), "http://127.0.0.1:18610/admin/accounts")
+            self.assertEqual(req.headers["Authorization"], "Bearer m2a_test")
+            body = json.loads(req.content)
+            self.assertEqual(body["cookies"]["hatch_sess"], "FAKE-SESSION-VALUE")
+            self.assertEqual(body["label"], "main")
+            s.videogen_provider = "none"
+            with self.assertRaises(ms.SessionError):
+                ms.push_to_gateway(s)
+            self.assertTrue(ms.delete(s))
+            self.assertIsNone(ms.load(s))
+
+    def test_web_import_never_echoes_values(self):
+        from fastapi.testclient import TestClient
+
+        from agent_core.web.app import create_app
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            app = create_app(start_worker=False)
+            app.state.ctx["settings"] = settings_for(Path(tmp))
+            h = {"X-Requested-With": "affiliate-agent"}
+            with TestClient(app) as client:
+                res = client.post("/api/muse/session", json={"json": FAKE_EXPORT, "label": "main"},
+                                  headers=h)
+                self.assertEqual(res.status_code, 200, res.text)
+                self.assertNotIn("FAKE-SESSION-VALUE", res.text)
+                page = client.get("/generation").text
+                self.assertIn("Đã nhập", page)
+                self.assertNotIn("FAKE-SESSION-VALUE", page)
+                bad = client.post("/api/muse/session", json={"json": "[]"}, headers=h)
+                self.assertEqual(bad.status_code, 400)

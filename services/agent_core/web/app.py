@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from importlib.util import find_spec
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -268,7 +269,43 @@ def create_app(start_worker: bool = True) -> FastAPI:
         return render(request, "generation.html", tasks=gen_engine.list_tasks(s.database_path, job or None, 300),
                       provider=provider.name if provider else "", base_url=s.videogen_base_url,
                       remaining=gen_engine.remaining_today(s), daily=s.videogen_daily_limit,
-                      job_filter=job, active="generation")
+                      job_filter=job, active="generation", session=_muse_summary(s))
+
+    def _muse_summary(s):
+        from ..videogen import muse_session
+        try:
+            return muse_session.summary(muse_session.load(s))
+        except Exception:  # noqa: BLE001 - unreadable store: show as not imported
+            return None
+
+    @app.post("/api/muse/session")
+    async def api_muse_session(request: Request):
+        """Import the user's own muse.ai cookie export (JSON). Values are never returned."""
+        from ..videogen import muse_session
+        body = await request.json()
+        text = str(body.get("json") or "")
+        if len(text) > 200_000:
+            raise HTTPException(400, "Nội dung quá lớn")
+        try:
+            info = muse_session.save(S(), text, str(body.get("label") or ""))
+        except muse_session.SessionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return info
+
+    @app.post("/api/muse/session/push")
+    def api_muse_push():
+        from ..videogen import muse_session
+        try:
+            return muse_session.push_to_gateway(S())
+        except muse_session.SessionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, f"Không kết nối được gateway: {exc}") from exc
+
+    @app.post("/api/muse/session/delete")
+    def api_muse_delete():
+        from ..videogen import muse_session
+        return {"deleted": muse_session.delete(S())}
 
     @app.post("/api/videogen/check")
     def api_videogen_check():

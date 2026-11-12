@@ -28,6 +28,25 @@
   </div>
 </div>
 
+<div class="card" style="margin-bottom:16px">
+  <h2>Đăng nhập Muse bằng JSON</h2>
+  {% if session %}
+    <p><span class="badge ok">Đã nhập</span> {{ session.label }} · cookie: {{ session.useful|join(', ') }}
+      {% if session.session_expires %} · phiên hết hạn {{ session.session_expires }} (còn {{ session.days_left }} ngày){% endif %}</p>
+    <p class="small muted">Lưu mã hoá Windows (DPAPI) trong máy này, không hiển thị lại giá trị cookie.
+      {% if session.pushed_at %}Đã gửi sang muse2api lúc {{ session.pushed_at[:16].replace('T',' ') }}.{% endif %}</p>
+    <div class="row">
+      <button class="btn primary" onclick="api('/api/muse/session/push',undefined,{ok:'Đã gửi phiên sang muse2api',reload:true})">Gửi sang muse2api</button>
+      <button class="btn danger" onclick="api('/api/muse/session/delete',undefined,{ok:'Đã xoá phiên',reload:true})">Xoá phiên</button>
+    </div>
+  {% endif %}
+  <p class="small muted" style="margin-top:10px">Trên trình duyệt đã đăng nhập muse.ai, dùng extension export cookie (vd Cookie-Editor → Export → JSON), dán vào đây.
+    Cần cookie <code>hatch_sess</code>. Đây là chìa khoá vào tài khoản: chỉ dán vào app này, không gửi cho ai.</p>
+  <input id="ms-label" placeholder="Tên tài khoản (vd muse-main)" style="max-width:260px">
+  <textarea id="ms-json" rows="4" placeholder='[{"domain": ".muse.ai", "name": "hatch_sess", "value": "...", ...}]' style="margin-top:6px"></textarea>
+  <p></p><button class="btn" onclick="importSession()">{{ 'Thay phiên' if session else 'Nhập phiên' }}</button>
+</div>
+
 <div class="card">
   {% if job_filter %}<p class="small">Đang lọc video <a href="/jobs/{{ job_filter }}">{{ job_filter }}</a> · <a href="/generation">bỏ lọc</a></p>{% endif %}
   {% if tasks %}
@@ -51,3 +70,11 @@
   {% else %}<p class="muted">Chưa có clip AI nào.</p>{% endif %}
 </div>
 {% endblock %}
+{% block scripts %}<script>
+async function importSession(){
+  const el=document.getElementById("ms-json");
+  if(!el.value.trim()) return toast("Dán JSON cookie trước",true);
+  await api("/api/muse/session",{json:el.value,label:document.getElementById("ms-label").value},{ok:"Đã lưu phiên Muse (mã hoá)",reload:true});
+  el.value="";
+}
+</script>{% endblock %}
