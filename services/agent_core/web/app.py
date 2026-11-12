@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import catalog, db, workflow
+from .. import catalog, db, shopee_intelligence, workflow
 from ..affiliate_client import SORT_COMMISSION, SORT_ITEM_SOLD, SORT_RELEVANCE, ShopeeAffiliateClient
 from ..clips import ClipError, add_clip, clip_dir, delete_clip, list_clips, update_clip
 from ..editor.music import list_tracks
@@ -235,8 +235,20 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       seeds=s.seed_keywords)
 
     @app.get("/catalog", response_class=HTMLResponse)
-    def catalog_page(request: Request, sort: str = "score", q: str = "", status: str = ""):
-        rows = catalog.list_products(S().database_path, sort, q, status)
+    def catalog_page(request: Request, sort: str = "win", q: str = "", status: str = ""):
+        s = S()
+        db_path = s.database_path
+        rows = catalog.list_products(db_path, "new" if sort == "win" else sort, q, status)
+        for product in rows:
+            intel = (shopee_intelligence.get_product(db_path, product["item_id"])
+                     if product.get("platform") == "shopee" else None)
+            product["intel"] = intel or {}
+            product["win_score"] = intel.get("win_score") if intel else None
+            product["score_status"] = intel.get("score_status", "PROVISIONAL") if intel else "PROVISIONAL"
+            product["daily_sales_velocity"] = intel.get("daily_sales_velocity") if intel else None
+            product["commission_total_rate"] = intel.get("commission_total_rate") if intel else product.get("commission_rate")
+        if sort == "win":
+            rows.sort(key=lambda p: (p.get("win_score") or -1, p.get("commission_total_rate") or 0), reverse=True)
         return render(request, "catalog.html", products=rows, sort=sort, q=q, status=status)
 
     @app.post("/api/catalog/import")
@@ -257,15 +269,57 @@ def create_app(start_worker: bool = True) -> FastAPI:
     @app.post("/api/catalog/update")
     async def api_catalog_update(request: Request):
         body = await request.json()
+        s = S()
         pid = str(body.get("id") or "")
-        if not catalog.get_product(S().database_path, pid):
+        product = catalog.get_product(s.database_path, pid)
+        if not product:
             raise HTTPException(404, "Không có sản phẩm")
-        fields = {k: str(body[k]).strip() for k in ("image_url", "tiktok_link", "notes", "status")
-                  if k in body}
-        for key in ("image_url", "tiktok_link"):
+        fields = {k: str(body[k]).strip() for k in
+                  ("image_url", "tiktok_link", "notes", "status", "affiliate_link") if k in body}
+        for key in ("image_url", "tiktok_link", "affiliate_link"):
             if fields.get(key) and not fields[key].startswith("https://"):
                 raise HTTPException(400, "Link phải bắt đầu bằng https://")
-        catalog.update_product(S().database_path, pid, **fields)
+        catalog.update_product(s.database_path, pid, **fields)
+
+        intel_keys = {
+            "base_commission_rate", "xtra_commission_rate", "commission_total_rate",
+            "rating_star", "rating_count", "total_sold", "current_price",
+            "view_count", "like_count", "video_url", "media_usage_rights",
+        }
+        if intel_keys.intersection(body) or "image_url" in body or "affiliate_link" in body:
+            if not product.get("product_link"):
+                raise HTTPException(400, "Sản phẩm chưa có link sản phẩm Shopee hợp lệ để ghi snapshot.")
+            existing = shopee_intelligence.get_product(s.database_path, product["item_id"]) or {}
+            data = {
+                "product_name": product["name"], "product_url": product["product_link"],
+                "item_id": product["item_id"], "shop_name": product.get("shop_name"),
+                "current_price": existing.get("current_price", product.get("price")),
+                "total_sold": existing.get("total_sold", product.get("sold")),
+                "rating_star": existing.get("rating_star"), "rating_count": existing.get("rating_count"),
+                "view_count": existing.get("view_count"), "like_count": existing.get("like_count"),
+                "base_commission_rate": existing.get("base_commission_rate"),
+                "xtra_commission_rate": existing.get("xtra_commission_rate"),
+                "commission_total_rate": existing.get("commission_total_rate", product.get("commission_rate")),
+                "commission_amount": product.get("commission"),
+                "affiliate_link": fields.get("affiliate_link", product.get("affiliate_link") or ""),
+                "image_url": fields.get("image_url", product.get("image_url") or ""),
+                "video_url": existing.get("video_url"),
+                "media_usage_rights": existing.get("media_usage_rights") or "unknown",
+            }
+            for key in intel_keys:
+                if key in body:
+                    data[key] = body[key]
+            if any(body.get(key) not in (None, "") for key in
+                   ("base_commission_rate", "xtra_commission_rate")):
+                base = float(data.get("base_commission_rate") or 0)
+                xtra = float(data.get("xtra_commission_rate") or 0)
+                data["commission_total_rate"] = base + xtra
+            try:
+                shopee_intelligence.save_product(
+                    s.database_path, data, source_type="manual_snapshot"
+                )
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
         return {"ok": True}
 
     @app.post("/api/catalog/delete")
@@ -294,6 +348,12 @@ def create_app(start_worker: bool = True) -> FastAPI:
             offer = catalog.as_offer(product)
             if not offer["affiliateLink"]:
                 offer["affiliateLink"] = product["tiktok_link"]
+            if product.get("platform") == "shopee":
+                intel = shopee_intelligence.get_product(s.database_path, product["item_id"])
+                if not intel or intel.get("media_usage_rights") not in {"owned", "licensed", "permission", "official"}:
+                    offer["imageUrl"] = ""
+                elif intel.get("image_url"):
+                    offer["imageUrl"] = intel["image_url"]
             try:
                 job_id = workflow.create_trend_job(s, str(body.get("topic") or product["name"]),
                                                    str(body.get("notes") or product.get("notes") or ""),

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS products (
     price REAL,
     price_text TEXT,
     sold INTEGER,
+    revenue REAL,
     shop_name TEXT,
     commission_rate REAL,
     commission REAL,
@@ -46,7 +47,8 @@ HEADER_MAP = {
     "id san pham": "item_id",
     "ten san pham": "name", "product name": "name", "productname": "name", "ten": "name",
     "gia": "price", "price": "price", "gia ban": "price",
-    "doanh thu": "sold", "luot ban": "sold", "da ban": "sold", "sold": "sold", "sales": "sold",
+    "doanh thu": "revenue", "so luong da ban": "sold", "luot ban": "sold",
+    "da ban": "sold", "sold": "sold", "sales": "sold",
     "ten cua hang": "shop_name", "shop name": "shop_name", "cua hang": "shop_name",
     "ti le hoa hong": "commission_rate", "ty le hoa hong": "commission_rate",
     "commission rate": "commission_rate",
@@ -67,6 +69,9 @@ def ensure_schema(db_path) -> None:
     init_db(db_path)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(products)")}
+        if "revenue" not in columns:
+            conn.execute("ALTER TABLE products ADD COLUMN revenue REAL")
 
 
 def _norm(text: str) -> str:
@@ -146,6 +151,7 @@ def parse_csv(data: bytes) -> list[dict]:
             "price": _number(record.get("price")),
             "price_text": record.get("price", "")[:40],
             "sold": int(_number(record.get("sold")) or 0) or None,
+            "revenue": _number(record.get("revenue")),
             "shop_name": record.get("shop_name", "")[:120],
             "commission_rate": _number(record.get("commission_rate")),
             "commission": _number(record.get("commission")),
@@ -167,13 +173,14 @@ def import_products(db_path, products: list[dict]) -> dict:
             exists = conn.execute("SELECT 1 FROM products WHERE id=?", (pid,)).fetchone()
             conn.execute(
                 """
-                INSERT INTO products (id, platform, item_id, name, price, price_text, sold,
+                INSERT INTO products (id, platform, item_id, name, price, price_text, sold, revenue,
                     shop_name, commission_rate, commission, product_link, affiliate_link,
                     image_url, tiktok_link, imported_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     name=excluded.name, price=excluded.price, price_text=excluded.price_text,
                     sold=COALESCE(excluded.sold, products.sold),
+                    revenue=COALESCE(excluded.revenue, products.revenue),
                     shop_name=excluded.shop_name,
                     commission_rate=COALESCE(excluded.commission_rate, products.commission_rate),
                     commission=COALESCE(excluded.commission, products.commission),
@@ -184,7 +191,7 @@ def import_products(db_path, products: list[dict]) -> dict:
                     updated_at=excluded.updated_at
                 """,
                 (pid, p["platform"], p["item_id"], p["name"], p["price"], p["price_text"],
-                 p["sold"], p["shop_name"], p["commission_rate"], p["commission"],
+                 p["sold"], p.get("revenue"), p["shop_name"], p["commission_rate"], p["commission"],
                  p["product_link"], p["affiliate_link"], p["image_url"], p["tiktok_link"],
                  stamp, stamp),
             )
@@ -192,11 +199,37 @@ def import_products(db_path, products: list[dict]) -> dict:
                 updated += 1
             else:
                 inserted += 1
-    return {"inserted": inserted, "updated": updated, "total": len(products)}
+    # Keep a timestamped intelligence observation alongside the existing video catalog.
+    from .shopee_intelligence.catalog import save_product as save_intel_product
+    intel_saved = 0
+    for p in products:
+        if p.get("platform") != "shopee" or not p.get("product_link"):
+            continue
+        try:
+            save_intel_product(db_path, {
+                "product_name": p["name"],
+                "product_url": p["product_link"],
+                "item_id": p["item_id"],
+                "shop_name": p.get("shop_name"),
+                "current_price": p.get("price"),
+                "total_sold": p.get("sold"),
+                "commission_total_rate": p.get("commission_rate"),
+                "commission_amount": p.get("commission"),
+                "affiliate_link": p.get("affiliate_link"),
+                "image_url": p.get("image_url"),
+                "media_usage_rights": "unknown",
+                "source_url": p["product_link"],
+            }, source_type="affiliate_bulk_csv")
+            intel_saved += 1
+        except ValueError:
+            continue
+    return {"inserted": inserted, "updated": updated, "total": len(products),
+            "intelligence_snapshots": intel_saved}
 
 
 SORTS = {
-    "score": "(COALESCE(commission,0) * (1 + ln(1 + COALESCE(sold,0)))) DESC",
+    # "Doanh thu" is revenue; revenue / price approximates units when no sold column exists.
+    "score": "(COALESCE(commission,0) * (1 + ln(1 + COALESCE(sold, revenue / NULLIF(price, 0), 0)))) DESC",
     "commission": "COALESCE(commission,0) DESC",
     "rate": "COALESCE(commission_rate,0) DESC",
     "sold": "COALESCE(sold,0) DESC",

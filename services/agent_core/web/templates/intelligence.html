@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Shopee Product Intelligence · Affiliate Agent{% endblock %}
+{% block content %}
+<h1>Shopee Product Intelligence</h1>
+<p class="sub">Kho dữ liệu sản phẩm, hoa hồng KOC/KOL, lịch sử bán và điểm cơ hội Affiliate.</p>
+<div class="grid g4" style="margin-bottom:16px">
+  <div class="card stat"><div class="n">{{ summary.products }}</div><div class="l">Sản phẩm</div></div>
+  <div class="card stat"><div class="n">{{ summary.linked }}</div><div class="l">Đã có Custom Link</div></div>
+  <div class="card stat"><div class="n">{{ summary.high_commission }}</div><div class="l">Hoa hồng từ 10%</div></div>
+  <div class="card stat"><div class="n">{{ summary.rights_cleared }}</div><div class="l">Media đã xác nhận quyền</div></div>
+</div>
+<div class="grid hero" style="margin-bottom:16px">
+  <section class="card">
+    <h2>1. Nhập dữ liệu sản phẩm</h2>
+    <p class="small muted">Dùng CSV do bạn xuất/cung cấp hoặc file theo mẫu. Mỗi lần nhập sẽ tạo một mốc quan sát để tính tốc độ tăng trưởng.</p>
+    <form id="csvImport" class="stack">
+      <input type="file" name="file" accept=".csv,text/csv" required>
+      <div class="row"><button class="btn primary" type="submit">Nhập CSV</button><a class="btn" href="/intelligence/template">Tải CSV mẫu</a></div>
+    </form>
+    <p id="importResult" class="small muted"></p>
+  </section>
+  <section class="card">
+    <h2>2. Lấy hoa hồng và link</h2>
+    <p class="small muted">Mở Shopee Affiliate bằng tài khoản KOC/KOL của bạn. Chọn sản phẩm, kiểm tra Hoa hồng Shopee/Xtra và tự tạo Custom Link.</p>
+    <a class="btn primary" href="https://affiliate.shopee.vn/dashboard" target="_blank" rel="noopener">Mở Shopee Affiliate Dashboard ↗</a>
+    <p class="small muted" style="margin-top:10px">Nhập link đã tạo vào form bên dưới hoặc cột affiliate_link trong CSV.</p>
+  </section>
+</div>
+<section class="card" style="margin-bottom:16px">
+  <h2>Thêm / cập nhật sản phẩm</h2>
+  <form id="productForm" class="grid g3">
+    <label class="field">Tên sản phẩm<input name="product_name" required placeholder="Tên sản phẩm"></label>
+    <label class="field">Link sản phẩm Shopee<input name="product_url" required placeholder="https://shopee.vn/..."></label>
+    <label class="field">Custom Link Affiliate<input name="affiliate_link" placeholder="https://s.shopee.vn/..."></label>
+    <label class="field">Giá hiện tại (VND)<input name="current_price" type="number" min="0" step="1"></label>
+    <label class="field">Tổng đã bán<input name="total_sold" type="number" min="0" step="1"></label>
+    <label class="field">Điểm đánh giá<input name="rating_star" type="number" min="0" max="5" step="0.1"></label>
+    <label class="field">Số lượt đánh giá<input name="rating_count" type="number" min="0" step="1"></label>
+    <label class="field">Hoa hồng Shopee (%)<input name="base_commission_rate" type="number" min="0" step="0.01"></label>
+    <label class="field">Hoa hồng Xtra (%)<input name="xtra_commission_rate" type="number" min="0" step="0.01"></label>
+    <label class="field">Tên shop<input name="shop_name"></label>
+    <label class="field">Danh mục<input name="category"></label>
+    <label class="field">URL ảnh sản phẩm<input name="image_url" placeholder="https://..."></label>
+    <label class="field">URL video sản phẩm<input name="video_url" placeholder="https://..."></label>
+    <label class="field">Quyền sử dụng media
+      <select name="media_usage_rights">
+        <option value="unknown">Chưa xác nhận</option>
+        <option value="official">Tài liệu chính thức được phép dùng</option>
+        <option value="permission">Đã được chủ sở hữu cho phép</option>
+        <option value="licensed">Đã có giấy phép</option>
+        <option value="owned">Do tôi sở hữu/tự tạo</option>
+      </select>
+    </label>
+    <div class="field" style="align-self:end"><button class="btn primary" type="submit">Lưu sản phẩm / ghi nhận snapshot</button></div>
+  </form>
+  <p id="productResult" class="small muted"></p>
+</section>
+<section class="card">
+  <div class="row space">
+    <div><h2>Kho sản phẩm</h2><p class="small muted">Điểm Win là thang tham khảo 100 điểm; sản phẩm chưa có hai mốc dữ liệu sẽ được đánh dấu tạm tính.</p></div>
+    <form class="row" method="get" action="/intelligence">
+      <input name="q" value="{{ q }}" placeholder="Tìm tên / shop / danh mục">
+      <select name="sort">
+        <option value="score" {{ 'selected' if sort=='score' }}>Win Score</option>
+        <option value="commission" {{ 'selected' if sort=='commission' }}>Hoa hồng cao</option>
+        <option value="sales" {{ 'selected' if sort=='sales' }}>Tăng trưởng bán</option>
+        <option value="recent" {{ 'selected' if sort=='recent' }}>Mới cập nhật</option>
+      </select>
+      <button class="btn">Lọc</button>
+    </form>
+  </div>
+  {% if products %}
+  <div style="overflow-x:auto">
+    <table>
+      <tr><th>Sản phẩm</th><th>Giá</th><th>Đã bán</th><th>HH Shopee + Xtra</th><th>Tăng/ngày</th><th>Win Score</th><th>Media</th><th>Thao tác</th></tr>
+      {% for p in products %}
+      <tr>
+        <td><b>{{ p.product_name }}</b><div class="small muted">{{ p.shop_name or 'Chưa có shop' }} · ID {{ p.item_id or p.product_id }}</div><div class="small"><a href="{{ p.product_url }}" target="_blank" rel="noopener">Mở sản phẩm ↗</a></div></td>
+        <td class="small">{{ "{:,.0f}".format(p.current_price or 0) }}đ</td>
+        <td class="small">{{ "{:,}".format(p.total_sold or 0) }}</td>
+        <td class="small">{{ "%.2f"|format(p.base_commission_rate or 0) }}% + {{ "%.2f"|format(p.xtra_commission_rate or 0) }}%</td>
+        <td class="small">{{ "%.1f"|format(p.daily_sales_velocity) if p.daily_sales_velocity is not none else 'Chờ snapshot' }}</td>
+        <td><b>{{ "%.1f"|format(p.win_score) }}</b><div class="small muted">{{ 'Đã quan sát' if p.score_status=='OBSERVED' else 'Tạm tính' }}</div></td>
+        <td class="small">{{ p.media_usage_rights }}{% if p.image_url %}<div><a href="{{ p.image_url }}" target="_blank" rel="noopener">Ảnh ↗</a></div>{% endif %}{% if p.video_url %}<div><a href="{{ p.video_url }}" target="_blank" rel="noopener">Video ↗</a></div>{% endif %}</td>
+        <td class="small">
+          {% if p.affiliate_link %}<button class="btn sm primary" onclick="makeVideo('{{ p.product_id }}')">Làm video</button><div><a href="{{ p.affiliate_link }}" target="_blank" rel="noopener">Mở Affiliate Link ↗</a></div>{% else %}<span class="muted">Cần tạo Custom Link</span>{% endif %}
+          {% if p.score_notes %}<details><summary>Chi tiết điểm</summary><ul>{% for note in p.score_notes %}<li>{{ note }}</li>{% endfor %}</ul></details>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}<p class="muted">Chưa có sản phẩm. Hãy nhập CSV hoặc thêm sản phẩm từ Dashboard Affiliate.</p>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("csvImport").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const out = document.getElementById("importResult");
+  out.textContent = "Đang nhập dữ liệu...";
+  try {
+    const response = await fetch("/api/intelligence/import-csv", {
+      method: "POST", headers: {"X-Requested-With": "affiliate-agent"}, body: form
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Không nhập được CSV");
+    out.textContent = "Đã nhập " + data.imported + "/" + data.rows_read + " dòng; bỏ qua " + data.skipped + ".";
+    location.reload();
+  } catch (error) { out.textContent = error.message; }
+});
+document.getElementById("productForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+  for (const key of ["current_price","total_sold","rating_star","rating_count","base_commission_rate","xtra_commission_rate"]) {
+    body[key] = body[key] === "" ? null : Number(body[key]);
+  }
+  const out = document.getElementById("productResult");
+  out.textContent = "Đang lưu...";
+  try {
+    const data = await api("/api/intelligence/products", body, {ok:"Đã lưu sản phẩm và snapshot", reload:true});
+    out.textContent = data.error || "Đã lưu.";
+  } catch (error) { out.textContent = error.message; }
+});
+async function makeVideo(productId) {
+  const notes = prompt("Trend / góc nội dung muốn khai thác (tuỳ chọn):", "");
+  if (notes === null) return;
+  await api("/api/intelligence/products/" + encodeURIComponent(productId) + "/create-job",
+    {notes}, {ok:"Đã đưa sản phẩm vào pipeline tạo video", go:data=>"/jobs/"+data.job_id});
+}
+</script>
+{% endblock %}

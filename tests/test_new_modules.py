@@ -366,7 +366,8 @@ class CatalogTests(unittest.TestCase):
         first = rows[0]
         self.assertEqual(first["item_id"], "48311630420")
         self.assertEqual(first["price"], 49000)
-        self.assertEqual(first["sold"], 391)
+        self.assertIsNone(first["sold"])
+        self.assertEqual(first["revenue"], 391)
         self.assertEqual(first["commission_rate"], 7)
         self.assertEqual(first["commission"], 3430)
         self.assertEqual(first["affiliate_link"], "https://s.shopee.vn/AbCd123")
@@ -392,7 +393,8 @@ class CatalogTests(unittest.TestCase):
             settings = temp_settings(Path(tmp))
             result = catalog.import_products(settings.database_path,
                                              catalog.parse_csv(SHOPEE_EXPORT.encode()))
-            self.assertEqual(result, {"inserted": 2, "updated": 0, "total": 2})
+            self.assertEqual(result, {"inserted": 2, "updated": 0, "total": 2,
+                                      "intelligence_snapshots": 2})
             again = catalog.import_products(settings.database_path,
                                             catalog.parse_csv(SHOPEE_EXPORT.encode()))
             self.assertEqual(again["updated"], 2)
