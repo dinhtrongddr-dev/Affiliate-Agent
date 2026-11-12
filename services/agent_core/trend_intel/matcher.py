@@ -9,6 +9,7 @@ No Shopee API calls: price/commission/link come from the user's latest CSV impor
 import json
 import logging
 import math
+import unicodedata
 from datetime import datetime, timezone
 
 from rapidfuzz import fuzz
@@ -19,11 +20,21 @@ from .store import hours_since, strip_accents
 log = logging.getLogger("affiliate_agent.trend_intel")
 
 MIN_RELEVANCE = 60.0
+MIN_AI_FIT = 40.0  # AI re-rank veto: below this the product is dropped, not just demoted
 STALE_HOURS = 7 * 24
 
 
-def _plain(text: str) -> str:
-    return " ".join("".join(c if c.isalnum() else " " for c in strip_accents(text).lower()).split())
+def _plain(text: str, accents: bool = True) -> str:
+    """Lowercase words. Accents are kept by default: stripped Vietnamese collides
+    ("giá đỡ đứng" -> "gia do dung" == "đồ gia dụng")."""
+    text = unicodedata.normalize("NFC", str(text or "")).lower()
+    if not accents:
+        text = strip_accents(text)
+    return " ".join("".join(c if c.isalnum() else " " for c in text).split())
+
+
+def _has_accents(text: str) -> bool:
+    return strip_accents(text) != text
 
 
 def intent_prompt(topics: list[dict]) -> str:
@@ -94,15 +105,30 @@ def analyse_intents(settings, topics: list[dict], ask=None) -> dict[str, dict]:
     return results
 
 
+def _term_matches(words: list[str], target: str, tokens: set[str]) -> bool:
+    """The product must contain the term's head phrase (first two syllables, e.g. "may xay",
+    "binh giu"), or the term's first word plus two thirds of its words. Sharing filler words
+    ("mini", "sac", "giu nhiet") alone is not a match."""
+    if len(words) == 1:
+        return len(words[0]) >= 4 and words[0] in tokens
+    if f" {words[0]} {words[1]} " in f" {target} ":
+        return True
+    coverage = sum(1 for w in words if w in tokens) / len(words)
+    return words[0] in tokens and coverage >= 0.66
+
+
 def _relevance(terms: list[tuple[str, float]], name: str) -> float:
-    target = _plain(name)
+    accents = _has_accents(name)  # unaccented product names fall back to accent-free matching
+    target = _plain(name, accents)
     tokens = set(target.split())
     best = 0.0
     for term, weight in terms:
-        plain = _plain(term)
+        plain = _plain(term, accents)
         if not plain:
             continue
         words = plain.split()
+        if not _term_matches(words, target, tokens):
+            continue
         coverage = sum(1 for w in words if w in tokens) / len(words)
         score = (0.5 * fuzz.token_set_ratio(plain, target) + 50 * coverage) * weight
         best = max(best, score)
@@ -145,8 +171,9 @@ def product_score(p: dict, relevance: float, win_score: float | None = None) -> 
 def match_products(settings, topic: dict, limit: int = 10, products: list[dict] | None = None,
                    win_scores: dict | None = None) -> list[dict]:
     intent = topic.get("intent") or {}
+    # Categories ("Đồ gia dụng") are too broad to create a match; only product keywords and
+    # the trend itself do.
     terms = [(k, 1.0) for k in intent.get("product_keywords") or []]
-    terms += [(c, 0.75) for c in intent.get("categories") or []]
     terms.append((topic["keyword"], 0.9))
     if products is None:
         products = catalog.list_products(settings.database_path, "score", limit=2000)
@@ -180,7 +207,7 @@ Trả về DUY NHẤT JSON: {{"ranking": [{{"product_id": "...", "fit": 0, "reas
 
 
 def rerank(settings, topic: dict, matches: list[dict], ask=None) -> list[dict]:
-    if len(matches) < 2:
+    if not matches:
         return matches
     if ask is None:
         from ..workflow import _ask_json, _client
@@ -201,6 +228,8 @@ def rerank(settings, topic: dict, matches: list[dict], ask=None) -> list[dict]:
     for m in matches:
         if m["product_id"] in fits:
             fit, why = fits[m["product_id"]]
+            if fit < MIN_AI_FIT:
+                continue
             m = {**m, "score": round(0.6 * m["score"] + 0.4 * fit, 1),
                  "reason": "; ".join(x for x in (f"AI: {why}" if why else "", m["reason"]) if x)}
         out.append(m)

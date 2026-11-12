@@ -222,6 +222,34 @@ class MatcherTests(unittest.TestCase):
         self.assertEqual([m["product_id"] for m in found], ["shopee:1"])
         self.assertGreater(found[0]["relevance"], 90)
 
+    def test_filler_words_do_not_match(self):
+        products = [
+            {"id": "a", "name": "Cáp sạc USB mini Micro", "affiliate_link": "https://s.shopee.vn/a"},
+            {"id": "b", "name": "Áo giữ nhiệt lót nỉ nữ", "affiliate_link": "https://s.shopee.vn/b"},
+            {"id": "c", "name": "Máy xay sinh tố cầm tay mini sạc USB",
+             "affiliate_link": "https://s.shopee.vn/c"},
+            {"id": "d", "name": "Son Bóng 3CE Glazy Lip", "affiliate_link": "https://s.shopee.vn/d"},
+        ]
+        fryer = {"keyword": "máy xay mini", "intent": {
+            "product_keywords": ["máy xay sạc USB", "bình giữ nhiệt mini"]}}
+        self.assertEqual([m["product_id"] for m in matcher.match_products(None, fryer, products=products)],
+                         ["c"])
+        broad = {"keyword": "bình giữ nhiệt", "intent": {"product_keywords": ["bình giữ nhiệt"],
+                                                         "categories": ["Đồ gia dụng"]}}
+        stand = [{"id": "e", "name": "Giá đỡ đứng điện thoại", "affiliate_link": "https://s.shopee.vn/e"}]
+        self.assertEqual(matcher.match_products(None, broad, products=stand), [])
+        lips = {"keyword": "son môi", "intent": {"product_keywords": ["son tint bóng"]}}
+        self.assertEqual([m["product_id"] for m in matcher.match_products(None, lips, products=products)],
+                         ["d"])
+
+    def test_rerank_veto(self):
+        matches = [{"product_id": "a", "name": "A", "score": 80, "reason": ""},
+                   {"product_id": "b", "name": "B", "score": 70, "reason": ""}]
+        reply = {"ranking": [{"product_id": "a", "fit": 10, "reason": "không liên quan"},
+                             {"product_id": "b", "fit": 90}]}
+        out = matcher.rerank(None, {"keyword": "x"}, matches, ask=lambda p: reply)
+        self.assertEqual([m["product_id"] for m in out], ["b"])
+
     def test_intents_are_validated(self):
         topics = [{"key": "a", "keyword": "A"}, {"key": "b", "keyword": "B"}]
         reply = {"topics": [

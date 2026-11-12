@@ -160,7 +160,21 @@ def parse_csv(data: bytes) -> list[dict]:
             "image_url": record.get("image_url", ""),
             "tiktok_link": record.get("tiktok_link", ""),
         })
+    _fix_sales_column(products)
     return products
+
+
+def _fix_sales_column(products: list[dict]) -> None:
+    """Shopee's bulk-link export labels the units-sold count "Doanh thu". Real exports
+    (2026-11-12, 300 rows) hold 0-982 for products priced 14,500-1,290,000 VND, so the
+    values cannot be money. If no row's value reaches its price, treat the column as units sold."""
+    rows = [p for p in products if p.get("revenue") is not None]
+    if not rows or any(p.get("price") and p["revenue"] >= p["price"] for p in rows):
+        return
+    for p in rows:
+        if not p.get("sold"):
+            p["sold"] = int(p["revenue"]) or None
+        p["revenue"] = None
 
 
 def import_products(db_path, products: list[dict]) -> dict:

@@ -8,7 +8,7 @@ States: **Có sẵn** (existed before), **Đã test thật** (ran against live s
 | Part | State | Evidence / blocker |
 |---|---|---|
 | P0 restore point | Đã test thật | git tag `pre-upgrade`, DB copy in `state/backups/`, 67 tests pass |
-| Shopee Product Intelligence | Có sẵn (committed in P0) | "Doanh thu" stored as revenue; ranking falls back to revenue / price |
+| Shopee Product Intelligence | Có sẵn (committed in P0) | Real export: "Doanh thu" holds units sold (0–982, always below price); the importer detects this and stores it as sold |
 | Google Trends VN collector | Đã test thật | 10 topics on 2026-11-12 |
 | Google News VN collector | Đã test thật | 15 keyword probes on 2026-11-12 |
 | YouTube Data API collector | Đã code, chưa test thật | needs `AA_YOUTUBE_API_KEY` |
@@ -17,7 +17,7 @@ States: **Có sẵn** (existed before), **Đã test thật** (ran against live s
 | Analyzer, scoring, lifecycle | Đã test thật | real topics ranked; growth needs ≥2 observations or a news window |
 | Safety filter (rules + AI) | Đã test thật | lottery, crime, politics blocked on live data |
 | AI intent via ChatGPT2API | Đã test thật | 14 topics judged in one live run |
-| Trend → product matching | Đã code, chưa test thật on real catalog | catalog is empty: import a real bulk-link CSV |
+| Trend → product matching | Đã test thật | 300-product CSV: son môi → 3CE lipsticks, ốp lưng → iPhone cases; job created from a match (stops at NEEDS_MEDIA_REVIEW: CSV has no images) |
 | Muse Video Engine (P4) | Chỉ thiết kế | needs a muse.ai account in a supported country + backend choice |
 | Autopilot, performance loop (P5–P6) | Chỉ thiết kế | |
 
