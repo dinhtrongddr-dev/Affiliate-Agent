@@ -44,6 +44,9 @@ def plan_metrics(settings, plan: dict) -> dict:
     plan = json.loads(json.dumps(plan))
     if plan.get("creation_branch"):
         brief = {"creation_branch": plan["creation_branch"]}
+        if plan["creation_branch"] == "template_series" and not plan.get("characters"):
+            from agent_core.creation_branches import normalise_brief
+            brief = normalise_brief("template_series")
         if not plan.get("reference_manifest"):
             try:
                 attach_references(plan, brief, [])
@@ -54,8 +57,9 @@ def plan_metrics(settings, plan: dict) -> dict:
                     character.pop("reference_id", None)
                 attach_references(plan, brief, [])
         try:
+            from agent_core.muse_prompt import strip_internal
             compiled = engine._compile_storyboard(settings, plan)
-            prompts = [c[1] for c in compiled]
+            prompts = [strip_internal(c[1]) for c in compiled]   # what Muse actually receives
             refs = [len(c[2]) for c in compiled]
         except Exception as exc:  # noqa: BLE001
             prompts, refs = [], []
@@ -83,7 +87,9 @@ def plan_metrics(settings, plan: dict) -> dict:
         "planned_duration_s": round(duration, 1),
         "muse_prompt_chars_max": max((len(p) for p in prompts), default=0),
         "muse_prompt_chars_avg": round(statistics.mean(len(p) for p in prompts), 0) if prompts else 0,
-        "banned_terms": sorted({b for p in prompts for b in BANNED if b.lower() in p.lower()}),
+        # the "Avoid: no cinematic look ..." list is an instruction, not a use of the word
+        "banned_terms": sorted({b for p in prompts for b in BANNED
+                                if b.lower() in p.split("Avoid:")[0].lower()}),
         "scenes_with_refs": sum(1 for r in refs if r),
         "scenes_voice_overfull": overfull,
         "text_layers": text_layers,

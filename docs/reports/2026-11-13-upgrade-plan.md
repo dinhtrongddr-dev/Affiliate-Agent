@@ -471,3 +471,43 @@ services/agent_core/
 | H1 chưa nối học, H2 không có số liệu | P3.1–P3.3 |
 | I mã nguồn | P0.1, mục 7, mục 8 |
 | 9 lỗi bước 1 | P0.2 |
+
+---
+
+## 13. Trạng thái thực hiện (cập nhật 14/11/2026)
+
+**Giai đoạn 0: xong.**
+- Commit theo cụm, ruff 0 lỗi, sửa 9 lỗi bước 1.
+- Có bộ đo chuẩn (`scripts/bench_content.py`).
+
+**Giai đoạn 1: xong**, kiểm bằng 2 video Muse thật và bộ đo chuẩn.
+
+Đã có:
+- storyboard v2 (người nói theo câu, nhân vật theo cảnh, nhóm địa điểm);
+- một hệ prompt duy nhất;
+- prompt Muse ≤ 1.500 ký tự, phong cách quay điện thoại;
+- Muse tự tạo ảnh nhân vật trước;
+- nối cảnh theo nhóm địa điểm;
+- dàn giọng VieNeu theo người nói, có nâng cao độ cho giọng trẻ em;
+- lồng tiếng theo nhịp miệng;
+- một lớp chữ, phụ đề không chồng;
+- QA xem hình thật;
+- nhạc Mixkit theo tâm trạng, không lặp.
+
+| Chỉ số (5 brief) | Mốc 13/11 | Sau giai đoạn 1 |
+|---|---|---|
+| Prompt Muse dài nhất | 8.922 ký tự | 1.500 |
+| Brief có từ cấm trong prompt | 5/5 | 0/5 |
+| Cảnh có ảnh tham chiếu | 0/38 | 29/42 (cảnh không có người thì không cần) |
+| Thời lượng | 38–56 s | 23–36 s |
+| Cảnh lời dài hơn hình | 10 | 0 |
+
+**Video thật** "Ai là người hiểu mẹ nhất":
+- dài 27,5 s (trước là 48,8 s), có 4 ảnh nhân vật;
+- QA hình: khuôn mặt 9/10, trang phục 10/10, giống quay điện thoại 9/10.
+
+**Còn lại cho giai đoạn 2:**
+- ghép sản phẩm: độ chính xác 66,7%;
+- hook A/B;
+- lời review vẫn dè dặt khi chưa có trải nghiệm thật;
+- series Suri chưa chạy thử với Muse thật.
