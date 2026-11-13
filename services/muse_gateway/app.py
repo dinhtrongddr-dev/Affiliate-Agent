@@ -149,7 +149,7 @@ class AccountPoolManager:
 
                 if account_id:
                     acc = self.store.get_account(account_id)
-                    if not acc or not acc.get("enabled", True):
+                    if not acc or acc not in self.store.eligible_accounts():
                         raise MuseAuthError(f"指定账号 {account_id} 不存在或已禁用")
                     if account_id not in self.busy_accounts:
                         self.busy_accounts.add(account_id)
@@ -167,7 +167,7 @@ class AccountPoolManager:
                         self.busy_accounts.add(acc["id"])
                         return acc
 
-                live = [a for a in self.store.accounts if a.get("enabled", True) and a.get("cookies")]
+                live = self.store.eligible_accounts()
                 if not live:
                     raise MuseAuthError("没有可用账号，请先在管理页面导入 cookie")
 
@@ -215,6 +215,9 @@ def _account_operation(aid: str):
         account = store.get_account(aid)
         if not account:
             raise HTTPException(404, "账号不存在")
+        if any(a.get("profile_id") for a in store.accounts) and not (
+                account.get("profile_id") and (account.get("proxy") or {}).get("server")):
+            raise HTTPException(409, "Managed profile mode requires a profile-bound proxy")
         if aid in ACCOUNT_POOL.busy_accounts:
             raise HTTPException(409, "账号正在执行任务或检测，请稍后再试")
         ACCOUNT_POOL.busy_accounts.add(aid)
@@ -607,6 +610,32 @@ class AccountPatch(BaseModel):
     label: str | None = None
     enabled: bool | None = None
     proxy: AccountProxy | None = None
+
+
+class ManagedProfile(BaseModel):
+    profile_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    label: str = Field(default="", max_length=100)
+    revision: str | None = Field(default=None, min_length=1, max_length=64)
+    proxy: AccountProxy
+    cookies: dict[str, str]
+    expires: dict[str, int] = Field(default_factory=dict)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_profile(self):
+        if any(value < 0 or value > 253402300799 for value in self.expires.values()):
+            raise ValueError("Cookie expiration is out of range")
+        password = self.proxy.password.get_secret_value() if self.proxy.password else ""
+        if any(ord(c) < 32 for c in password):
+            raise ValueError("Proxy password cannot contain control characters")
+        if self.proxy.server.startswith(("socks5://", "socks5h://")) and (
+                len(self.proxy.username.encode("latin-1")) > 255 or len(password.encode("latin-1")) > 255):
+            raise ValueError("SOCKS5 credentials must not exceed 255 bytes")
+        return self
+
+
+class ProfileImport(BaseModel):
+    profiles: list[ManagedProfile] = Field(min_length=1, max_length=500)
 
 
 class ProxyTestRequest(BaseModel):
@@ -1896,6 +1925,19 @@ def add_account(req: AccountRequest, _=Depends(auth)):
                         if missing else "")}
 
 
+@app.post("/admin/accounts/profiles")
+def import_profiles(req: ProfileImport, _=Depends(auth)):
+    profiles = [p.model_dump(exclude={"proxy"}) | {"proxy": p.proxy.configuration()}
+                for p in req.profiles]
+    with ACCOUNT_POOL.cond:
+        try:
+            imported = store.upsert_profiles(profiles, ACCOUNT_POOL.busy_accounts)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        ACCOUNT_POOL.cond.notify_all()
+    return {"profiles": imported}
+
+
 # One short-lived receipt per account; credentials are represented only by a hash.
 _PROXY_TEST_RECEIPTS: dict[str, dict] = {}
 _PROXY_TEST_RECEIPT_TTL = 300
@@ -1915,6 +1957,8 @@ def patch_account(aid: str, req: AccountPatch, _=Depends(auth)):
             raise HTTPException(404, "账号不存在")
         changes = {"label": req.label, "enabled": req.enabled}
         if "proxy" in req.model_fields_set:
+            if existing.get("profile_id"):
+                raise HTTPException(409, "Update managed profiles through the profile import endpoint")
             if aid in ACCOUNT_POOL.busy_accounts:
                 raise HTTPException(409, "账号正在执行任务或检测，请稍后再修改代理")
             proxy = req.proxy.configuration(existing.get("proxy")) if req.proxy else {}
@@ -2045,6 +2089,8 @@ async def relogin_account(aid: str, _=Depends(auth)):
 @app.post("/admin/accounts/{aid}/cookies")
 def update_cookies(aid: str, payload: dict = Body(...), _=Depends(auth)):
     """更新某个账号的 cookie（用于会话过期后补新 cookie）。"""
+    if (store.get_account(aid) or {}).get("profile_id"):
+        raise HTTPException(409, "Update managed profiles through the profile import endpoint")
     cookies = dict(payload.get("cookies") or {})
     if payload.get("cookie_header"):
         cookies.update(parse_cookie_text(payload["cookie_header"]))
@@ -2400,7 +2446,10 @@ async def run_keepalive_all(force: bool = False) -> dict:
 
         try:
             include_disabled = getattr(CFG, "keepalive_disabled_accounts", False)
-            accounts = [a for a in store.list_accounts() if include_disabled or a.get("enabled", True)]
+            eligible_ids = {a["id"] for a in store.eligible_accounts()}
+            managed = any(a.get("profile_id") for a in store.accounts)
+            accounts = [a for a in store.list_accounts()
+                        if a["id"] in eligible_ids or (include_disabled and not managed)]
             for a in accounts:
                 aid = a["id"]
                 label = a.get("label", aid)

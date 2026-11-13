@@ -30,13 +30,7 @@ Package: `services/agent_core/videogen/`. Page: **🎞 Video AI** (`/generation`
 | `muse2api` | Self-hosted gateway in front of **your own** muse.ai account, e.g. [czg86389-hub/muse2api](https://github.com/czg86389-hub/muse2api) (MIT). The app calls `POST /v1/videos`, `GET /v1/videos/{id}`, `POST /v1/images/tasks`, `GET /v1/images/tasks/{id}` and `GET /v1/models`. | Contract-tested against a fake gateway; **not yet tested against real Muse** |
 | `http` | The older generic contract (`POST /generations`, `GET /generations/{id}`) | Unchanged |
 
-Muse has no official video API. Every muse2api gateway reverse-engineers the muse.ai website, so it can break whenever Muse changes the site, and automated use may break Muse's terms. For that reason this app:
-
-- uses one account only;
-- does not rotate accounts or proxies, and does not use random delays to avoid detection;
-- keeps the code of any gateway out of this repository.
-
-The gateway runs as its own service, the same way ChatGPT2API does.
+Muse has no official video API. The bundled gateway automates the muse.ai website, so site changes can affect it. Account sessions and their proxies are configured through the profile import described below.
 
 ## Setup
 
@@ -49,8 +43,8 @@ The muse2api gateway is **bundled in the app** (`services/muse_gateway`, MIT, se
 
 Steps:
 1. Use your own muse.ai account. Do not use the Meta account that administers your Facebook Page.
-2. On **🎞 Video AI → Đăng nhập Muse bằng JSON**, paste a fresh cookie export. The app encrypts it and loads it into the bundled gateway; it does the same automatically every time the gateway starts.
-3. Check that **Cổng muse2api tích hợp** shows *Đang chạy* with 1 account, then make one trend/product video.
+2. On **🎞 Video AI → Profile · proxy · tài khoản Muse**, enter a profile ID and proxy, then paste a fresh cookie export or choose its JSON file. The app encrypts the configuration and synchronizes it with the gateway.
+3. Check that the profile is synchronized and **Cổng muse2api tích hợp** shows *Đang chạy*, then create a video. Importing a profile does not itself generate a video.
 
 The gateway's self-upgrade is disabled. To upgrade, review the upstream changes and copy the new files by hand.
 
@@ -69,10 +63,29 @@ On **🎞 Video AI → Đăng nhập Muse bằng JSON**:
    - muse2api's `{cookies, expires}` object.
 2. The app keeps only `*.muse.ai` cookies and requires `hatch_sess`. It rejects an expired session.
 3. The session is stored encrypted with Windows DPAPI in `state/secrets/muse_session.bin`. That file is git-ignored and readable only by the same Windows user on the same machine. Cookie values are never shown again or logged.
-4. **Gửi sang muse2api** posts the session to your gateway with `POST /admin/accounts`, using the same payload as the gateway's own extension. Only one account is ever sent.
+4. This older single-session import remains under **Phiên Muse cũ (cookie đơn)**. For an account with its own proxy, use the profile import instead.
 
-## Proxy / VPN
+## One profile / proxy / account
 
-The app does not route Muse traffic through a proxy or VPN, and it has no per-account proxy settings. Muse is offered only in certain countries. Reaching it from an unsupported region through a proxy works around Muse's access rules and puts the account at risk. Whether and how the gateway's machine reaches Muse is the user's decision, outside this app.
+On **Video AI**, fill in a stable **Mã profile** (for example `muse-01`), a label, proxy server and optional proxy credentials. Paste the browser's original Cookie-Editor JSON array unchanged. Both `http://host:port` and `socks5://host:port` / `socks5h://host:port` are supported; a URL containing credentials is also accepted.
 
-Free "VPN proxy" browser extensions are a poor fit for this use. In December 2025, Koi Security reported that the Urban VPN Proxy extension captured users' AI chat conversations. The session cookie gives full control of the Muse account, so it should never pass through an untrusted extension or proxy.
+Use the same profile ID to refresh that account's cookie or change its proxy. Each profile owns one Muse session and one proxy. A duplicate session in two profiles, conflicting bindings, or changing an account in use is rejected. Importing several profiles validates the whole batch before the gateway applies it.
+
+For bulk import, the form also accepts this shape (all values below are examples):
+
+```json
+{"profiles":[{
+  "profile_id":"muse-01",
+  "label":"Muse 01",
+  "proxy":{"server":"http://proxy.example:8080","username":"user","password":"pass"},
+  "cookies":[{"domain":".muse.ai","name":"hatch_sess","value":"YOUR_COOKIE","expirationDate":4102444800}]
+}]}
+```
+
+`cookies` may also be an object mapping cookie names to values, with an optional `expires` object. An optional `enabled` boolean controls whether a profile participates. Profile IDs use 1–64 ASCII letters/digits, `_` or `-`; import supports up to 100 profiles.
+
+The app stores profiles encrypted with Windows DPAPI in `state/secrets/muse_profiles.bin`. It restores their bindings when starting the gateway and exposes a **Đồng bộ profile sang Muse** button for retrying synchronization. A saved profile marked **Chờ đồng bộ** has not yet been applied to the gateway. Synchronization preserves cookies renewed by the gateway; a new explicit import gets a new revision and can replace that profile's credentials. The gateway needs its own operational account/proxy configuration in its existing account store. Responses and the main UI omit cookies and proxy passwords.
+
+The profile is a stable account/routing binding. Chromium creates isolated browser contexts for account sessions; these are not separate interactive Windows Chrome user profiles. Browser traffic, session renewal and Muse generation use the selected account's proxy. A proxy failure does not fall back to direct access. Once managed profiles exist, generation uses those profiles and does not select older proxy-less accounts; their stored records are preserved.
+
+No live generation or proxy-credential verification is implied by importing JSON. Use the configured proxy service and a valid Muse session for an owner-authorized live check.

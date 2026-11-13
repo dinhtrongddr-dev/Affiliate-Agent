@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import copy
+import re
 import os
 import tempfile
 import threading
@@ -107,6 +109,72 @@ class Store:
         self.tasks: dict[str, dict] = _read(cfg.tasks_file, {})
 
     # ---------- 账号 ----------
+    def eligible_accounts(self) -> list[dict]:
+        managed = any(a.get("profile_id") for a in self.accounts)
+        return [a for a in self.accounts if a.get("enabled", True) and a.get("cookies")
+                and (not managed or (a.get("profile_id") and (a.get("proxy") or {}).get("server")))]
+
+    def upsert_profiles(self, profiles: list[dict], busy_ids=()) -> list[dict]:
+        """Validate the whole import before one atomic write; preserve legacy records."""
+        with _LOCK:
+            proposed = copy.deepcopy(self.accounts)
+            seen = set()
+            result = []
+            for profile in profiles:
+                pid = profile["profile_id"]
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", pid) or pid in seen:
+                    raise ValueError("Profile IDs must be unique ASCII slugs of at most 64 characters")
+                seen.add(pid)
+                cookies = profile["cookies"]
+                proxy = profile["proxy"]
+                if not cookies.get("hatch_sess") or not proxy.get("server"):
+                    raise ValueError("Each profile requires a Muse session and proxy")
+                existing = next((a for a in proposed if a.get("profile_id") == pid), None)
+                if existing is None:
+                    matches = [a for a in proposed if not a.get("profile_id")
+                               and a.get("cookies", {}).get("hatch_sess") == cookies["hatch_sess"]]
+                    if len(matches) > 1:
+                        raise ValueError("Muse session matches multiple legacy accounts")
+                    existing = matches[0] if matches else None
+                revision = profile.get("revision")
+                same_revision = bool(revision and existing and existing.get("profile_revision") == revision)
+                if same_revision:
+                    for key, value in (("proxy", proxy), ("label", profile.get("label") or pid),
+                                       ("enabled", profile.get("enabled", True))):
+                        if existing.get(key) != value:
+                            raise ValueError("Profile revision conflicts with saved configuration")
+                    cookies = existing["cookies"]
+                now = int(time.time())
+                changes = {"profile_id": pid, "label": profile.get("label") or pid,
+                           "cookies": cookies, "cookies_exp": (existing.get("cookies_exp") or {}) if same_revision else profile.get("expires") or {},
+                           "proxy": proxy, "enabled": profile.get("enabled", True)}
+                if revision:
+                    changes["profile_revision"] = revision
+                changed = existing is None or any(existing.get(k) != v for k, v in changes.items())
+                if existing and changed and existing["id"] in busy_ids:
+                    raise ValueError("Profile is busy; retry after its active request finishes")
+                if existing is None:
+                    existing = {"id": uuid.uuid4().hex[:12], "created_at": now,
+                                "last_used": None, "last_keepalive": None, "use_count": 0}
+                    proposed.append(existing)
+                if changed:
+                    existing.update(changes)
+                    existing.update(ok=None, synced_at=0, proxy_status={}, expiry_anchor=now,
+                                    expires_at=account_expiry(changes["cookies_exp"], now))
+                result.append(existing)
+            # Validate against all retained accounts, including legacy session identities.
+            for account in result:
+                for other in proposed:
+                    if other["id"] == account["id"]:
+                        continue
+                    if other.get("cookies", {}).get("hatch_sess") == account["cookies"]["hatch_sess"]:
+                        raise ValueError("Muse session is already bound to another account/profile")
+                    if other.get("proxy") == account["proxy"]:
+                        raise ValueError("Proxy is already bound to another account/profile")
+            _write(self.cfg.accounts_file, proposed)
+            self.accounts = proposed
+            return [self.public_account(a) | {"account_id": a["id"]} for a in result]
+
     def add_account(self, cookies: dict, label: str = "",
                     cookies_exp: dict | None = None) -> dict:
         with _LOCK:
@@ -160,7 +228,7 @@ class Store:
         """选择可用账号：优先复用当前已预热的健康账号（减少切号重连耗时），每满 15 次或遇错自动轮转。
         exclude_ids: 需要排除的账号 ID 集合（例如正在被其他并发线程占用的账号）。"""
         with _LOCK:
-            live = [a for a in self.accounts if a.get("enabled", True) and a.get("cookies")]
+            live = self.eligible_accounts()
             if not live:
                 return None
             blocked = set(exclude_ids or [])

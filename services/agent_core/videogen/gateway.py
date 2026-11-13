@@ -174,9 +174,11 @@ class GatewayProcess:
 
 
 def sync_session(settings) -> dict | None:
-    """Push the stored Muse session when the gateway has no account yet."""
-    from . import muse_session
+    """Restore saved profile routes, or the older single Muse session."""
+    from . import muse_profiles, muse_session
     try:
+        if muse_profiles.load(settings):
+            return muse_profiles.push_to_gateway(settings)
         if not muse_session.load(settings):
             return None
         resp = httpx.get(f"{base_url(settings)}/admin/accounts", timeout=10, headers={
@@ -199,9 +201,14 @@ def account_status(settings) -> dict:
     if resp.status_code != 200:
         return {"reachable": True, "error": f"HTTP {resp.status_code}"}
     body = resp.json()
-    accounts = [{k: a.get(k) for k in ("id", "label", "enabled", "status", "healthy", "error",
-                                         "last_error", "expires_at")}
-                for a in body.get("accounts") or []]
+    accounts = []
+    for account in body.get("accounts") or []:
+        item = {k: account.get(k) for k in ("id", "label", "enabled", "status", "healthy", "error",
+                                           "last_error", "expires_at", "profile_id")}
+        route = account.get("proxy") or {}
+        item["proxy_server"] = route.get("server")
+        item["proxy_authenticated"] = bool(route.get("username") or route.get("has_password"))
+        accounts.append(item)
     return {"reachable": True, "accounts": accounts, "stats": body.get("stats") or {}}
 
 

@@ -6,6 +6,7 @@ A timeline is a plain dict (stored as script_json) so it can be edited in the UI
       "hook": "Câu hook 0-3 giây",
       "cta": "Link sản phẩm ở giỏ hàng",
       "music_mood": "upbeat",
+      "content_mode": "viral|value|affiliate",
       "scenes": [
         {"kind": "video", "source": "C:/in.mp4", "start": 3.2, "duration": 2.5,
          "voiceover": "...", "text": "nhãn trên màn hình", "motion": "zoom_in"},
@@ -34,7 +35,7 @@ log = logging.getLogger("affiliate_agent.render")
 TRANSITIONS = ["smoothleft", "fade", "slideup", "circleopen", "smoothup",
                "wipeleft", "zoomin", "radial", "slideleft", "dissolve"]
 MOTIONS = ["zoom_in", "pan_right", "zoom_out", "pan_left"]
-MIN_SCENE, MAX_SCENE = 1.4, 7.0
+MIN_SCENE, MAX_SCENE = 1.2, 8.0
 CARD_PALETTES = [("0x141E30", "0xEE0979"), ("0x0F2027", "0x2C9E8F"),
                  ("0x232526", "0xFF8008"), ("0x1D2671", "0xC33764")]
 
@@ -51,6 +52,7 @@ class RenderResult:
     music: str | None
     voice: bool
     subtitles: Path
+    music_metadata: dict | None = None
 
 
 def _motion_filter(motion: str, frames: int, w: int, h: int, fps: int) -> str:
@@ -187,14 +189,21 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         raise RenderError("Timeline has no scenes with a visual source")
     seed = sum(map(ord, seed_text)) % 7
 
-    # 1) voice per scene decides each scene's length
+    # 1) Voice per scene decides each scene's duration
     speeches: list[Speech] = []
     durations: list[float] = []
     for i, scene in enumerate(scenes):
         text = scene.get("voiceover") or ""
         if settings.tts_enabled and text:
-            speech = synthesize(text, work_dir / f"voice_{i:02d}.mp3",
-                                settings.tts_voice, settings.tts_rate, settings.ffprobe_path)
+            speech = synthesize(
+                text,
+                work_dir / f"voice_{i:02d}.mp3",
+                settings.tts_voice,
+                settings.tts_rate,
+                settings.ffprobe_path,
+                mode=getattr(settings, "tts_mode", "fast"),
+                precision=getattr(settings, "tts_precision", "auto"),
+            )
         else:
             from .tts import estimate_duration, evenly_timed_words
             est = estimate_duration(text) if text else 0.0
@@ -202,18 +211,19 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         speeches.append(speech)
         wanted = float(scene.get("duration") or 2.5)
         needed = speech.duration + 0.35 + (settings.transition_seconds if i else 0.15)
-        durations.append(round(min(MAX_SCENE + 4, max(MIN_SCENE, wanted, needed)), 3))
+        # Allow adaptive scenes to breathe up to 12.0s when necessary
+        durations.append(round(min(MAX_SCENE + 4.5, max(MIN_SCENE, wanted, needed)), 3))
 
-    # 2) normalised clips
+    # 2) Normalised scene clips
     clips = []
     for i, scene in enumerate(scenes):
         clips.append(render_scene(settings, scene, durations[i], work_dir / f"scene_{i:02d}.mp4", i))
 
-    # 3) transitions (built into the final single-pass graph)
+    # 3) Transitions chain
     chain_parts, vchain, achain, total, starts = chain_graph(
         durations, settings.transition_seconds, seed)
 
-    # 4) subtitles
+    # 4) Subtitles & Voice offsets
     lead = settings.transition_seconds / 2
     voice_offsets = [starts[i] + (lead if i else 0.1) for i in range(len(scenes))]
     captions = [(voice_offsets[i], sp.words) for i, sp in enumerate(speeches)]
@@ -222,14 +232,40 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         end = starts[i + 1] if i + 1 < len(scenes) else total
         start = max(starts[i], 2.8) if i == 0 and timeline.get("hook") else starts[i]
         labels.append((start, end, scene.get("text") or ""))
-    cta = timeline.get("cta") or settings.cta_text
-    cta_start = max(total - 2.6, total * 0.75)
+
+    # Track exact voice end timestamp to never cut off speech or ending dialogue
+    last_voice_end = 0.0
+    for i, sp in enumerate(speeches):
+        if sp.duration > 0:
+            last_voice_end = max(last_voice_end, voice_offsets[i] + sp.duration)
+
+    # CTA resolution: never force sales CTA on emotional viral stories
+    raw_cta = timeline.get("cta")
+    content_mode = str(timeline.get("content_mode") or "").lower()
+    if raw_cta is not None:
+        cta = str(raw_cta).strip()
+    elif content_mode == "viral":
+        cta = ""
+    else:
+        cta = (settings.cta_text or "").strip()
+
+    if cta:
+        # CTA only starts AFTER the voice finishes completely, with a buffer
+        cta_start = max(last_voice_end + 0.2, total - 2.2)
+        if cta_start >= total - 0.3:
+            # If dialogue extends to the end of the video, omit CTA popup to keep ending intact
+            cta = ""
+            cta_start = total
+    else:
+        cta = ""
+        cta_start = total
+
     hook_end = min(2.8, durations[0] if len(durations) == 1 else starts[1] + 0.3)
     subs = build_ass(work_dir / "subs.ass", settings.render_width, settings.render_height,
                      settings.font_name, captions, timeline.get("hook") or "", hook_end,
                      labels, cta, cta_start, total)
 
-    # 5) audio mix + subtitle burn
+    # 5) Audio mix + Subtitle burn
     inputs: list[str] = []
     for clip in clips:
         inputs += ["-i", clip.name]
@@ -244,12 +280,21 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
                            f"adelay={ms}|{ms}[vo{i}]")
             voice_labels.append(f"[vo{i}]")
             idx += 1
-    music = pick_track(settings.music, timeline.get("music_mood", ""), seed_text)
+    music = pick_track(
+        settings.music,
+        timeline.get("music_mood", ""),
+        seed=seed_text,
+        timeline=timeline,
+        settings=settings,
+        job_id=seed_text,
+    )
+    music_meta = music.to_dict() if hasattr(music, "to_dict") else None
     has_voice = bool(voice_labels)
     if has_voice:
         filters.append("".join(voice_labels)
                        + f"amix=inputs={len(voice_labels)}:normalize=0:dropout_transition=0,"
                        f"apad,atrim=duration={total:.3f}[voice]")
+
     if music:
         inputs += ["-stream_loop", "-1", "-i", str(Path(music).resolve())]
         filters.append(f"[{idx}:a]aresample=44100,aformat=channel_layouts=stereo,"
@@ -257,19 +302,28 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
                        f"afade=t=in:d=0.4,afade=t=out:st={max(0, total - 1.2):.3f}:d=1.2[mus]")
         if has_voice:
             filters.append("[voice]asplit=2[voice_mix][voice_sc]")
-            filters.append("[mus][voice_sc]sidechaincompress=threshold=0.04:ratio=8:"
-                           "attack=15:release=350[duck]")
+            # Smooth ducking: natural breathing without sudden drops
+            filters.append("[mus][voice_sc]sidechaincompress=threshold=0.06:ratio=4:"
+                           "attack=20:release=400[duck]")
             mix = [f"[{achain}]", "[voice_mix]", "[duck]"]
         else:
             mix = [f"[{achain}]", "[mus]"]
     else:
-        mix = [f"[{achain}]", "[voice]"] if has_voice else [f"[{achain}]"]
-    # loudnorm turns pure digital silence into NaN, so only normalise real audio.
-    has_sound = has_voice or bool(music) or settings.keep_source_audio
+        # Subtle acoustic room tone prevents digital dead silence when music track is absent
+        filters.append(f"anoisesrc=d={total:.3f}:color=pink:amplitude=0.0008,lowpass=f=600,"
+                       f"aformat=channel_layouts=stereo[amb]")
+        if has_voice:
+            mix = [f"[{achain}]", "[voice]", "[amb]"]
+        else:
+            mix = [f"[{achain}]", "[amb]"]
+
+    # Continuous audio: normalize to standard broadcast loudness (-14 LUFS)
+    has_sound = has_voice or bool(music) or settings.keep_source_audio or True
     norm = "loudnorm=I=-14:TP=-1.5:LRA=11," if has_sound else ""
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0:dropout_transition=0,"
                    f"{norm}aresample=44100[aout]")
     filters.append(f"[{vchain}]ass=subs.ass[vout]")
+
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     tmp_out = work_dir / "final.mp4"
@@ -283,6 +337,10 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         ], cwd=work_dir)
     except FFmpegError as exc:
         raise RenderError(f"Final mix failed: {exc}") from exc
+    finally:
+        # Zero-waste disk hygiene: purge temporary downloaded music & audio cache immediately
+        if hasattr(music, "cleanup"):
+            music.cleanup()
     shutil.move(str(tmp_out), output)
     scene_report = [
         {**scene, "rendered_duration": durations[i], "start_at": round(starts[i], 3),
@@ -291,7 +349,8 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     ]
     shutil.copyfile(subs, output.with_suffix(".ass"))
     return RenderResult(output, round(total, 3), scene_report,
-                        str(music) if music else None, has_voice, output.with_suffix(".ass"))
+                        str(music) if music else None, has_voice, output.with_suffix(".ass"),
+                        music_metadata=music_meta)
 
 
 def extract_cover(settings, video: Path, at: float, out: Path) -> Path:

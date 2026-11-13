@@ -169,12 +169,164 @@ def character_prompt(plan: dict) -> str:
             f"{plan['character']}. Photorealistic. {STYLE}")
 
 
+SHOT_FIELDS = ("action", "setting", "camera", "lighting", "emotion", "continuity",
+               "dialogue", "sound", "transition")
+MAX_SCENE_REFERENCES = 6
+
+
+def _storyboard_manifest(plan: dict) -> dict[str, dict]:
+    """Accept only workflow-resolved local assets whose contents still match."""
+    manifest = {}
+    for item in plan.get("reference_manifest") or []:
+        if not isinstance(item, dict):
+            raise providers.ProviderError("Tham chiếu storyboard không hợp lệ")
+        rid = str(item.get("id") or "")
+        path = Path(str(item.get("path") or ""))
+        expected = str(item.get("sha256") or "").lower()
+        if not rid or rid in manifest or not path.is_absolute() or not path.is_file():
+            raise providers.ProviderError("Thiếu file tham chiếu storyboard hợp lệ")
+        try:
+            with path.open("rb") as fh:
+                digest = hashlib.file_digest(fh, "sha256").hexdigest()
+        except OSError as exc:
+            raise providers.ProviderError("Không đọc được file tham chiếu storyboard") from exc
+        if digest != expected:
+            raise providers.ProviderError("Nội dung file tham chiếu storyboard đã thay đổi")
+        manifest[rid] = {"id": rid, "role": str(item.get("role") or "reference"),
+                         "path": str(path), "sha256": digest}
+    return manifest
+
+
+def storyboard_prompt(scene: dict, plan: dict, references: list[dict]) -> str:
+    """Compile explicit shot/cast instructions without imposing one realistic person."""
+    parts = [str(scene.get("gen_prompt") or "").strip(),
+             "Vertical 9:16 video. No subtitles, watermark or invented logos."]
+    if plan.get("style"):
+        parts.append("Visual style: " + str(plan["style"]))
+    if plan.get("setting"):
+        parts.append("Series setting: " + str(plan["setting"]))
+    if plan.get("continuity_rules"):
+        parts.append("Series continuity rules: " + json.dumps(plan["continuity_rules"], ensure_ascii=False))
+    cast = plan.get("characters") or []
+    if cast:
+        parts.append("Recurring cast (preserve each distinct identity): "
+                     + json.dumps(cast, ensure_ascii=False, sort_keys=True))
+    shot = scene.get("shot") or {}
+    for field in SHOT_FIELDS:
+        if shot.get(field):
+            parts.append(f"{field.capitalize()}: {shot[field]}")
+    if references:
+        parts.append("Attachment legend (exact upload order): " + "; ".join(
+            f"attachment {index} = {ref['id']} (role: {ref['role']})"
+            for index, ref in enumerate(references, 1)))
+        parts.append("Use each attachment only for its stated role; preserve product and cast "
+                     "identity, appearance and wardrobe across shots. Do not merge identities.")
+    # task_id historically sorts paths. Include semantic order and content in the compiled
+    # prompt so new storyboards distinguish reordered or replaced files at the same path.
+    identity = [[r["id"], r["role"], r["sha256"]] for r in references]
+    digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
+    parts.append("Reference manifest digest: " + digest)
+    if not plan.get("muse_voice"):
+        parts.append("No speech. Dialogue is script context only; speech is added separately by the app.")
+    return "\n".join(parts)
+
+
+def _compile_storyboard(settings, plan: dict, provider=None) -> list:
+    scenes = [(i, s) for i, s in enumerate(plan.get("scenes") or [])
+              if s.get("visual") == "generate"]
+    if not scenes:
+        return []
+    if provider and not provider.supports("video"):
+        raise providers.ProviderError("Nhà cung cấp không hỗ trợ video storyboard")
+    manifest = _storyboard_manifest(plan)
+    compiled = []
+    for index, scene in scenes:
+        if not str(scene.get("gen_prompt") or "").strip():
+            raise providers.ProviderError(f"Cảnh {index + 1} thiếu prompt tạo video")
+        ids = scene.get("reference_ids") or []
+        if not isinstance(ids, list) or len(ids) > MAX_SCENE_REFERENCES:
+            raise providers.ProviderError(f"Mỗi cảnh chỉ nhận tối đa {MAX_SCENE_REFERENCES} tham chiếu")
+        if any(not isinstance(rid, str) or rid not in manifest for rid in ids):
+            raise providers.ProviderError(f"Cảnh {index + 1} có tham chiếu không xác định")
+        if len(set(ids)) != len(ids):
+            raise providers.ProviderError(f"Cảnh {index + 1} có tham chiếu trùng lặp")
+        refs = [manifest[rid] for rid in ids]
+        if refs and provider and not provider.supports("references"):
+            raise providers.ProviderError("Nhà cung cấp không hỗ trợ tham chiếu storyboard")
+        try:
+            duration = max(5, int(round(float(scene.get("duration")
+                                             or settings.videogen_clip_seconds))))
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise providers.ProviderError(f"Thời lượng cảnh {index + 1} không hợp lệ") from exc
+        prompt = storyboard_prompt(scene, plan, refs) + f"\nRequested duration: {duration} seconds."
+        compiled.append((index, prompt,
+                         [r["path"] for r in refs], duration))
+    return compiled
+
+
+def _matching_storyboard_tasks(db, job_id, compiled):
+    expected = {index: (prompt, refs) for index, prompt, refs, _ in compiled}
+    return [t for t in list_tasks(db, job_id, 10000)
+            if t["kind"] == "video" and t["scene_index"] in expected
+            and t["id"] == task_id(job_id, t["scene_index"], "video",
+                                    *expected[t["scene_index"]], attempt=t["attempt"])]
+
+
+def results_for_storyboard(settings, job_id: str, plan: dict) -> dict[int, Path]:
+    compiled = _compile_storyboard(settings, plan)
+    latest = {}
+    for task in sorted(_matching_storyboard_tasks(settings.database_path, job_id, compiled),
+                       key=lambda t: t["attempt"]):
+        latest[task["scene_index"]] = task
+    return {index: Path(t["result_path"]) for index, t in latest.items()
+            if t["status"] == "DOWNLOADED" and t["result_path"]
+            and Path(t["result_path"]).is_file()}
+
+
+def _plan_storyboard(settings, job_id: str, plan: dict, provider) -> int:
+    compiled = _compile_storyboard(settings, plan, provider)
+    if len(compiled) > settings.videogen_max_clips:
+        raise providers.ProviderError("Storyboard exceeds configured maximum clips")
+    if not compiled:
+        cancel_job_tasks(settings.database_path, job_id)
+        return 0
+    existing = _matching_storyboard_tasks(settings.database_path, job_id, compiled)
+    existing_scenes = {t["scene_index"] for t in existing}
+    new_count = sum(index not in existing_scenes for index, *_ in compiled)
+    if new_count > remaining_today(settings):
+        raise providers.ProviderError("Daily budget cannot cover new storyboard tasks")
+    # All validation precedes mutation. Preserve matching accepted work on a repeated
+    # planning pass; only superseded active rows are cancelled, never resubmitted.
+    db = settings.database_path
+    ensure_schema(db)
+    retained = {task_id(job_id, i, "video", prompt, refs)
+                for i, prompt, refs, _ in compiled}
+    retained.update(t["id"] for t in existing)
+    with connect(db) as conn:
+        conn.execute(
+            f"UPDATE gen_tasks SET status='CANCELLED', error=?, updated_at=? WHERE job_id=? "
+            f"AND status IN ({','.join('?' * len(ACTIVE))}) "
+            f"AND id NOT IN ({','.join('?' * len(retained))})",
+            ("Kịch bản mới thay thế", now_iso(), job_id, *ACTIVE, *retained))
+    last_sb_task = None
+    use_chain = bool(getattr(settings, "videogen_continuity_chain", False) or plan.get("continuity_chain") or plan.get("creation_branch"))
+    for index, prompt, refs, duration in compiled:
+        depends = last_sb_task if use_chain else None
+        created_id = _insert(db, job_id=job_id, scene_index=index, kind="video", provider=provider.name,
+                prompt=prompt, refs=refs, duration=duration, depends_on=depends)
+        if use_chain:
+            last_sb_task = created_id
+    return len(compiled)
+
+
 # ------------------------------------------------------------------ planning
 
 def plan_job(settings, job_id: str, plan: dict, product_img: Path | None,
              provider: providers.VideoProvider) -> int:
     """Create generation tasks for the plan's "generate" scenes. Returns the number of
     video tasks; 0 means nothing to wait for (render can continue right away)."""
+    if plan.get("creation_branch"):
+        return _plan_storyboard(settings, job_id, plan, provider)
     db = settings.database_path
     ensure_schema(db)
     cancel_job_tasks(db, job_id)
@@ -190,11 +342,16 @@ def plan_job(settings, job_id: str, plan: dict, product_img: Path | None,
             and provider.supports("image")):
         character_task = _insert(db, job_id=job_id, scene_index=-1, kind="image",
                                  provider=provider.name, prompt=character_prompt(plan), refs=[])
+    last_video_task = character_task
+    use_chain = bool(getattr(settings, "videogen_continuity_chain", False) or plan.get("continuity_chain") or plan.get("creation_branch"))
     for index, scene in scenes:
         duration = int(round(float(scene.get("duration") or settings.videogen_clip_seconds)))
         prompt = video_prompt(scene, plan, bool(refs), bool(character_task))
-        _insert(db, job_id=job_id, scene_index=index, kind="video", provider=provider.name,
-                prompt=prompt, refs=refs, duration=max(5, duration), depends_on=character_task)
+        depends = last_video_task if use_chain else character_task
+        task_id_created = _insert(db, job_id=job_id, scene_index=index, kind="video", provider=provider.name,
+                prompt=prompt, refs=refs, duration=max(5, duration), depends_on=depends)
+        if use_chain:
+            last_video_task = task_id_created
     return len(scenes)
 
 
@@ -229,13 +386,39 @@ def _retry_or_fail(settings, t: dict, error: str, qc: dict | None = None) -> Non
 
 def _submit(settings, provider, t: dict) -> None:
     db = settings.database_path
+    if t["status"] == "PENDING":
+        job = get_job(db, t["job_id"])
+        if job and json.loads(job.get("brief_json") or "{}").get("creation_branch"):
+            try:
+                state_path = Path(settings.work_dir) / t["job_id"] / "plan_state.json"
+                plan = json.loads(state_path.read_text(encoding="utf-8"))["plan"]
+                compiled = _compile_storyboard(settings, plan)
+                expected = {task_id(t["job_id"], index, "video", prompt, refs,
+                                    attempt=t["attempt"])
+                            for index, prompt, refs, _ in compiled}
+                if t["id"] not in expected:
+                    raise providers.ProviderError("Queued task no longer matches current storyboard")
+            except (OSError, ValueError, KeyError, TypeError, providers.ProviderError) as exc:
+                _update(db, t["id"], status="FAILED",
+                        error=f"Storyboard references changed or task superseded; review and replan: {exc}"[:500])
+                return
     refs = [Path(r) for r in t["refs"] if Path(r).is_file()]
     if t["depends_on"]:
         dep = get_task(db, t["depends_on"])
         if dep and dep["status"] in ACTIVE:
-            return  # wait for the character reference
-        if dep and dep["status"] == "DOWNLOADED" and dep["result_path"]:
-            refs.append(Path(dep["result_path"]))
+            return  # wait for preceding reference or scene
+        if dep and dep["status"] == "DOWNLOADED":
+            cont_frame = Path(settings.work_dir) / t["job_id"] / "generated" / f"continuity_{dep['id']}.jpg"
+            if cont_frame.is_file():
+                refs = [cont_frame] + [r for r in refs if r != cont_frame]
+                continuity_hint = (
+                    "Attachment 1 is the seamless starting frame from the preceding scene. "
+                    "Continue character motion, posture, wardrobe and lighting seamlessly from this exact frame."
+                )
+                if continuity_hint not in t["prompt"]:
+                    t["prompt"] = f"{t['prompt']}\n{continuity_hint}"
+            elif dep["result_path"] and Path(dep["result_path"]).is_file():
+                refs.append(Path(dep["result_path"]))
     if t["status"] == "PENDING":
         from ..trend_intel import store as usage_store
         if not usage_store.consume(db, "videogen", settings.videogen_daily_limit, kind="day"):
@@ -292,6 +475,16 @@ def _check(settings, provider, t: dict) -> None:
         if not qc["ok"]:
             _retry_or_fail(settings, t, "QC: " + "; ".join(qc["issues"]), qc)
             return
+        try:
+            from ..editor.ffmpeg import extract_continuity_frame
+            cont_frame = settings.work_dir / t["job_id"] / "generated" / f"continuity_{t['id']}.jpg"
+            extract_continuity_frame(
+                out, cont_frame, offset_seconds=0.3,
+                ffmpeg_bin=getattr(settings, "ffmpeg_path", "ffmpeg"),
+                ffprobe_bin=getattr(settings, "ffprobe_path", "ffprobe"),
+            )
+        except Exception as exc:
+            log.debug("extract_continuity_frame failed for %s: %s", t["id"], exc)
         _update(db, t["id"], status="DOWNLOADED", result_path=str(out), qc_json=qc, error=None)
         _add_to_clip_library(settings, t, out)
     else:
