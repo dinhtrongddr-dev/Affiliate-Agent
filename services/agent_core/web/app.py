@@ -245,7 +245,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       candidates=json.loads(job.get("product_candidates_json") or "[]"),
                       brief=json.loads(job.get("brief_json") or "{}"),
                       busy=job["status"] in BUSY, active="jobs",
-                      clips=list_clips(s, job_id),
+                      clips=list_clips(s, job_id), voices=VOICES,
                       storyboard=storyboard(s, job_id),
                       gen_tasks=gen_engine.list_tasks(s.database_path, job_id, 50))
 

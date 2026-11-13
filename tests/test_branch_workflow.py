@@ -51,11 +51,11 @@ def test_content_first_branch_reaches_generation_without_affiliate_product(setti
             patch.object(workflow, "ShopeeAffiliateClient") as affiliate, \
             patch.object(workflow, "render_job") as render:
         result = workflow.process_job(settings, job_id)
-    expected = "NEEDS_MEDIA_REVIEW" if branch == "template_series" else workflow.gen_engine.WAIT_STATUS
-    assert result["status"] == expected
+    # Series without uploaded cast images no longer stops: Muse makes the cast photos first.
+    assert result["status"] == workflow.gen_engine.WAIT_STATUS
     affiliate.assert_not_called()
     render.assert_not_called()
-    assert generate.call_count == (0 if branch == "template_series" else 1)
+    assert generate.call_count == 1
     state = json.loads((settings.work_dir / job_id / "plan_state.json").read_text(encoding="utf-8"))
     plan = state["plan"]
     assert plan["creation_branch"] == branch
@@ -65,8 +65,7 @@ def test_content_first_branch_reaches_generation_without_affiliate_product(setti
     job = db.get_job(settings.database_path, job_id)
     assert not job["affiliate_link"]
     assert state["plan"]["creation_branch"] == branch
-    if branch == "template_series":
-        assert "reference" in result["error"].lower()
+    assert "voice_cast" in state["plan"] and state["plan"]["style_profile"]
 
 
 def test_product_review_retains_factual_provenance_and_separate_owner_notes(settings):
@@ -86,15 +85,18 @@ def test_product_review_retains_factual_provenance_and_separate_owner_notes(sett
     from agent_core.creative import branch_plan_prompt
     prompt = branch_plan_prompt(brief, {}, True, False)
     assert "Tôi dùng hai ngày" in prompt
-    assert "Không tự nhận đã sử dụng" in prompt
+    assert "không nói đã dùng" in prompt
     assert "real_usage_evidence" in prompt
 
 
-def test_legacy_job_still_has_no_explicit_branch(settings):
+def test_trend_job_without_branch_uses_the_creation_branches(settings):
+    """One prompt system: a plain trend job is a viral_creator job, with a product a review."""
     job_id = workflow.create_trend_job(settings, "Legacy trend")
     brief = json.loads(db.get_job(settings.database_path, job_id)["brief_json"])
-    assert "creation_branch" not in brief
+    assert brief["creation_branch"] == "viral_creator"
     assert db.get_job(settings.database_path, job_id)["mode"] == "trend"
+    job_id = workflow.create_trend_job(settings, "Review", offer={"itemId": "1", "productName": "Hộp"})
+    assert json.loads(db.get_job(settings.database_path, job_id)["brief_json"])["creation_branch"] == "product_review"
 
 
 def test_unlinked_creator_caption_has_no_empty_affiliate_or_sales_claims():
@@ -284,7 +286,8 @@ def test_zero_remaining_budget_still_consults_engine_for_retained_tasks(settings
         result = workflow.process_job(settings, job_id)
     assert result["status"] == workflow.gen_engine.WAIT_STATUS
     planner.assert_called_once()
-    assert planner.call_args.args[2]["scenes"][0]["gen_prompt"] == plan["scenes"][0]["gen_prompt"].strip()
+    # free-text gen_prompt is only a short fallback; the Muse prompt is compiled from shot fields
+    assert plan["scenes"][0]["gen_prompt"].strip().startswith(planner.call_args.args[2]["scenes"][0]["gen_prompt"].rstrip("…").split("…")[0][:50])
     render.assert_not_called()
 
 

@@ -144,7 +144,7 @@ def remaining_today(settings) -> int:
 
 # ------------------------------------------------------------------ prompts
 
-STYLE = ("Vertical 9:16 smartphone video, natural light, realistic, no on-screen text, "
+STYLE = ("Vertical 9:16 video filmed on a phone, handheld, natural light, no on-screen text, "
          "no subtitles, no watermark, no logos.")
 
 
@@ -166,7 +166,7 @@ def video_prompt(scene: dict, plan: dict, has_product_ref: bool, has_character_r
 
 def character_prompt(plan: dict) -> str:
     return (f"Character reference photo, waist-up, neutral background, facing camera: "
-            f"{plan['character']}. Photorealistic. {STYLE}")
+            f"{plan['character']}. Smartphone photo, real skin texture. {STYLE}")
 
 
 SHOT_FIELDS = ("action", "setting", "camera", "lighting", "emotion", "continuity",
@@ -197,38 +197,16 @@ def _storyboard_manifest(plan: dict) -> dict[str, dict]:
     return manifest
 
 
-def storyboard_prompt(scene: dict, plan: dict, references: list[dict]) -> str:
-    """Compile explicit shot/cast instructions without imposing one realistic person."""
-    parts = [str(scene.get("gen_prompt") or "").strip(),
-             "Vertical 9:16 video. No subtitles, watermark or invented logos."]
-    if plan.get("style"):
-        parts.append("Visual style: " + str(plan["style"]))
-    if plan.get("setting"):
-        parts.append("Series setting: " + str(plan["setting"]))
-    if plan.get("continuity_rules"):
-        parts.append("Series continuity rules: " + json.dumps(plan["continuity_rules"], ensure_ascii=False))
-    cast = plan.get("characters") or []
-    if cast:
-        parts.append("Recurring cast (preserve each distinct identity): "
-                     + json.dumps(cast, ensure_ascii=False, sort_keys=True))
-    shot = scene.get("shot") or {}
-    for field in SHOT_FIELDS:
-        if shot.get(field):
-            parts.append(f"{field.capitalize()}: {shot[field]}")
-    if references:
-        parts.append("Attachment legend (exact upload order): " + "; ".join(
-            f"attachment {index} = {ref['id']} (role: {ref['role']})"
-            for index, ref in enumerate(references, 1)))
-        parts.append("Use each attachment only for its stated role; preserve product and cast "
-                     "identity, appearance and wardrobe across shots. Do not merge identities.")
-    # task_id historically sorts paths. Include semantic order and content in the compiled
-    # prompt so new storyboards distinguish reordered or replaced files at the same path.
+def storyboard_prompt(scene: dict, plan: dict, references: list[dict],
+                      duration: int = 10, style_override: str | None = None) -> str:
+    """Short structured Muse prompt; reference identity is kept as an internal line only."""
+    from ..muse_prompt import INTERNAL, compile_shot
+    text = compile_shot(scene, plan, references, duration, style_override)
+    # task_id sorts paths; keep order and file contents in the stored identity so a reordered
+    # or replaced file at the same path is a new task. Stripped before sending.
     identity = [[r["id"], r["role"], r["sha256"]] for r in references]
     digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
-    parts.append("Reference manifest digest: " + digest)
-    if not plan.get("muse_voice"):
-        parts.append("No speech. Dialogue is script context only; speech is added separately by the app.")
-    return "\n".join(parts)
+    return text + f"\n{INTERNAL}refs:{digest}"
 
 
 def _compile_storyboard(settings, plan: dict, provider=None) -> list:
@@ -241,8 +219,9 @@ def _compile_storyboard(settings, plan: dict, provider=None) -> list:
     manifest = _storyboard_manifest(plan)
     compiled = []
     for index, scene in scenes:
-        if not str(scene.get("gen_prompt") or "").strip():
-            raise providers.ProviderError(f"Cảnh {index + 1} thiếu prompt tạo video")
+        if not (str(scene.get("gen_prompt") or "").strip()
+                or str((scene.get("shot") or {}).get("action") or "").strip()):
+            raise providers.ProviderError(f"Cảnh {index + 1} thiếu hành động/prompt tạo video")
         ids = scene.get("reference_ids") or []
         if not isinstance(ids, list) or len(ids) > MAX_SCENE_REFERENCES:
             raise providers.ProviderError(f"Mỗi cảnh chỉ nhận tối đa {MAX_SCENE_REFERENCES} tham chiếu")
@@ -254,14 +233,42 @@ def _compile_storyboard(settings, plan: dict, provider=None) -> list:
         if refs and provider and not provider.supports("references"):
             raise providers.ProviderError("Nhà cung cấp không hỗ trợ tham chiếu storyboard")
         try:
-            duration = max(5, int(round(float(scene.get("duration")
-                                             or settings.videogen_clip_seconds))))
+            float(scene.get("duration") or settings.videogen_clip_seconds)
         except (ValueError, TypeError, OverflowError) as exc:
             raise providers.ProviderError(f"Thời lượng cảnh {index + 1} không hợp lệ") from exc
-        prompt = storyboard_prompt(scene, plan, refs) + f"\nRequested duration: {duration} seconds."
-        compiled.append((index, prompt,
-                         [r["path"] for r in refs], duration))
+        # Muse returns ~10 s regardless; ask for a full take and let the edit pick the best part.
+        duration = 10
+        missing = [c["id"] for c in _scene_cast(scene, plan)
+                   if not any(r["role"] == "character:" + c["id"] for r in refs)]
+        sheets = [CHARREF + cid for cid in missing] if _wants_sheets(settings, plan) else []
+        prompt = storyboard_prompt(scene, plan, refs, duration,
+                                   getattr(settings, "style_profile", "") or None)
+        compiled.append((index, prompt, [r["path"] for r in refs] + sheets, duration))
     return compiled
+
+
+CHARREF = "charref:"
+MAX_SHEETS = 4
+
+
+def _scene_cast(scene, plan):
+    from ..muse_prompt import scene_cast
+    return scene_cast(scene, plan)
+
+
+def _wants_sheets(settings, plan) -> bool:
+    return bool(getattr(settings, "videogen_character", True) and plan.get("characters"))
+
+
+def _sheet_characters(plan, compiled) -> list[dict]:
+    """Characters that need an app-made reference photo (no uploaded/template image)."""
+    wanted = []
+    for _, _, refs, _ in compiled:
+        for ref in refs:
+            if ref.startswith(CHARREF) and ref[len(CHARREF):] not in wanted:
+                wanted.append(ref[len(CHARREF):])
+    chars = {c["id"]: c for c in plan.get("characters") or [] if c.get("id")}
+    return [chars[cid] for cid in wanted if cid in chars][:MAX_SHEETS]
 
 
 def _matching_storyboard_tasks(db, job_id, compiled):
@@ -299,23 +306,49 @@ def _plan_storyboard(settings, job_id: str, plan: dict, provider) -> int:
     # planning pass; only superseded active rows are cancelled, never resubmitted.
     db = settings.database_path
     ensure_schema(db)
+    from ..muse_prompt import character_sheet_prompt
+    style = getattr(settings, "style_profile", "") or None
+    sheets = []   # (scene_index, prompt, depends_on) - chained so cast photos come first
+    if provider.supports("image"):
+        prev = None
+        for k, character in enumerate(_sheet_characters(plan, compiled)):
+            prompt = character_sheet_prompt(character, plan, style)
+            sheets.append((-(k + 1), prompt, prev))
+            prev = task_id(job_id, -(k + 1), "image", prompt, [])
     retained = {task_id(job_id, i, "video", prompt, refs)
                 for i, prompt, refs, _ in compiled}
+    retained.update(task_id(job_id, i, "image", prompt, []) for i, prompt, _ in sheets)
     retained.update(t["id"] for t in existing)
+    # a character photo that was already made (any attempt) is reused, never regenerated
+    done_sheets = {(t["scene_index"], t["prompt"]) for t in list_tasks(db, job_id, 10000)
+                   if t["kind"] == "image" and t["status"] == "DOWNLOADED"}
     with connect(db) as conn:
         conn.execute(
             f"UPDATE gen_tasks SET status='CANCELLED', error=?, updated_at=? WHERE job_id=? "
             f"AND status IN ({','.join('?' * len(ACTIVE))}) "
             f"AND id NOT IN ({','.join('?' * len(retained))})",
             ("Kịch bản mới thay thế", now_iso(), job_id, *ACTIVE, *retained))
-    last_sb_task = None
-    use_chain = bool(getattr(settings, "videogen_continuity_chain", False) or plan.get("continuity_chain") or plan.get("creation_branch"))
+    last_sheet = None
+    for index, prompt, depends in sheets:
+        tid = task_id(job_id, index, "image", prompt, [])
+        if (index, prompt) not in done_sheets:
+            _insert(db, job_id=job_id, scene_index=index, kind="image", provider=provider.name,
+                    depends_on=depends, prompt=prompt, refs=[])
+        last_sheet = tid
+    # Consecutive shots in the same location group continue from the previous shot's last
+    # frame; different groups start in parallel (a full chain of 8 shots takes ~40 min).
+    use_chain = bool(getattr(settings, "videogen_continuity_chain", True))
+    scenes = plan.get("scenes") or []
+    prev_index, prev_task = None, None
     for index, prompt, refs, duration in compiled:
-        depends = last_sb_task if use_chain else None
-        created_id = _insert(db, job_id=job_id, scene_index=index, kind="video", provider=provider.name,
-                prompt=prompt, refs=refs, duration=duration, depends_on=depends)
-        if use_chain:
-            last_sb_task = created_id
+        group = str(scenes[index].get("group") or "") if index < len(scenes) else ""
+        same_group = bool(use_chain and prev_task and group and prev_index == index - 1
+                          and str(scenes[prev_index].get("group") or "") == group)
+        depends = prev_task if same_group else last_sheet
+        created_id = _insert(db, job_id=job_id, scene_index=index, kind="video",
+                             provider=provider.name, prompt=prompt, refs=refs,
+                             duration=duration, depends_on=depends)
+        prev_index, prev_task = index, created_id
     return len(compiled)
 
 
@@ -343,7 +376,8 @@ def plan_job(settings, job_id: str, plan: dict, product_img: Path | None,
         character_task = _insert(db, job_id=job_id, scene_index=-1, kind="image",
                                  provider=provider.name, prompt=character_prompt(plan), refs=[])
     last_video_task = character_task
-    use_chain = bool(getattr(settings, "videogen_continuity_chain", False) or plan.get("continuity_chain") or plan.get("creation_branch"))
+    # Legacy (non-storyboard) plans have no location groups: chain only when asked.
+    use_chain = bool(plan.get("continuity_chain"))
     for index, scene in scenes:
         duration = int(round(float(scene.get("duration") or settings.videogen_clip_seconds)))
         prompt = video_prompt(scene, plan, bool(refs), bool(character_task))
@@ -402,7 +436,9 @@ def _submit(settings, provider, t: dict) -> None:
                 _update(db, t["id"], status="FAILED",
                         error=f"Storyboard references changed or task superseded; review and replan: {exc}"[:500])
                 return
-    refs = [Path(r) for r in t["refs"] if Path(r).is_file()]
+    refs = _resolve_refs(db, t)
+    if refs is None:
+        return  # character reference photos still generating
     if t["depends_on"]:
         dep = get_task(db, t["depends_on"])
         if dep and dep["status"] in ACTIVE:
@@ -417,7 +453,9 @@ def _submit(settings, provider, t: dict) -> None:
                 )
                 if continuity_hint not in t["prompt"]:
                     t["prompt"] = f"{t['prompt']}\n{continuity_hint}"
-            elif dep["result_path"] and Path(dep["result_path"]).is_file():
+            elif (dep["result_path"] and Path(dep["result_path"]).is_file()
+                  and Path(dep["result_path"]) not in refs
+                  and not any(str(r).startswith(CHARREF) for r in t["refs"])):
                 refs.append(Path(dep["result_path"]))
     if t["status"] == "PENDING":
         from ..trend_intel import store as usage_store
@@ -426,10 +464,12 @@ def _submit(settings, provider, t: dict) -> None:
             return
     _update(db, t["id"], status="SUBMITTING")
     try:
+        from ..muse_prompt import strip_internal
+        prompt = strip_internal(t["prompt"])
         if t["kind"] == "image":
-            remote = provider.submit_image(t["prompt"], refs, t["id"])
+            remote = provider.submit_image(prompt, refs, t["id"])
         else:
-            remote = provider.submit_video(t["prompt"], refs, t["duration"] or 10, t["id"])
+            remote = provider.submit_video(prompt, refs, t["duration"] or 10, t["id"])
     except providers.ProviderError as exc:
         errors = t["submit_errors"] + 1
         if errors >= SUBMIT_ERRORS_BEFORE_FAIL or isinstance(exc, providers.NotSupported):
@@ -441,6 +481,31 @@ def _submit(settings, provider, t: dict) -> None:
         return
     _update(db, t["id"], status="SUBMITTED", remote_id=remote, submitted_at=now_iso(),
             error=None)
+
+
+def _resolve_refs(db, t: dict) -> list[Path] | None:
+    """Files to attach; "charref:<id>" becomes this job's generated photo of that character.
+    None means a needed character photo is not ready yet (wait); a failed one is skipped."""
+    refs: list[Path] = []
+    sheets = None
+    for raw in t["refs"]:
+        if not str(raw).startswith(CHARREF):
+            if Path(raw).is_file():
+                refs.append(Path(raw))
+            continue
+        cid = str(raw)[len(CHARREF):]
+        if sheets is None:
+            sheets = [x for x in list_tasks(db, t["job_id"], 10000)
+                      if x["kind"] == "image" and x["scene_index"] < 0]
+        mine = sorted((x for x in sheets if f"cast:{cid}" in x["prompt"]), key=lambda x: x["attempt"])
+        if not mine:
+            continue
+        latest = mine[-1]
+        if latest["status"] in ACTIVE:
+            return None
+        if latest["status"] == "DOWNLOADED" and latest["result_path"] and Path(latest["result_path"]).is_file():
+            refs.append(Path(latest["result_path"]))
+    return refs
 
 
 def _check(settings, provider, t: dict) -> None:

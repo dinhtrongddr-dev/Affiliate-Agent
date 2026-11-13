@@ -303,23 +303,30 @@ class Muse2APIContractTests(unittest.TestCase):
 
 
 class TrendFakeAI:
+    """Answers the single (creation-branch) prompt system: storyboard, review, visual QA."""
     def chat(self, messages, **kwargs):
         content = messages[0]["content"]
         prompt = content if isinstance(content, str) else content[0]["text"]
-        if "biên tập viên" in prompt:
+        if "QA video ngắn" in prompt:
+            return {"content": json.dumps({"artifacts": 8, "phone_realism": 7, "issues": []})}
+        if "Biên tập storyboard" in prompt:
             return {"content": json.dumps({"score": 8.5, "issues": [], "revised": None})}
-        if "đạo diễn" in prompt:
-            assert "Video AI (Muse)" in prompt and '"character"' in prompt
+        if "JSON mẫu" in prompt:
+            assert '"storyboard_version": 2' in prompt and '"talking"' in prompt
             return {"content": json.dumps({
-                "title": "Máy xay mini", "hook": "Xay sinh tố 30 giây?", "music_mood": "upbeat",
-                "character": "Vietnamese woman, 25, white t-shirt",
+                "storyboard_version": 2, "title": "Máy xay mini", "hook": "Xay sinh tố 30 giây?",
+                "music_mood": "upbeat", "audience_gender": "female",
+                "characters": [{"id": "me", "name": "Lan", "gender": "female", "age": "25",
+                                "wardrobe": "white t-shirt"}],
                 "scenes": [
-                    {"visual": "generate", "gen_prompt": "woman opens mini blender box",
-                     "duration": 6, "voiceover": "Mở hộp máy xay mini nè.", "text": "Mở hộp"},
-                    {"visual": "generate", "gen_prompt": "woman blends mango",
-                     "duration": 6, "voiceover": "Xay xoài thử luôn.", "text": ""},
+                    {"visual": "generate", "duration": 4, "group": "kitchen", "cast": ["me"],
+                     "lines": [{"speaker": "narrator", "text": "Mở hộp máy xay mini nè."}],
+                     "shot": {"action": "woman opens mini blender box"}},
+                    {"visual": "generate", "duration": 4, "group": "kitchen", "cast": ["me"],
+                     "lines": [{"speaker": "narrator", "text": "Xay xoài thử luôn."}],
+                     "shot": {"action": "woman blends mango"}},
                 ],
-                "cta": "Link ở giỏ hàng", "caption": "Máy xay mini tiện lợi.",
+                "cta": "Link mình để dưới", "caption": "Máy xay mini tiện lợi.",
                 "hashtags": ["#mayxay"], "facebook_description": "Máy xay mini"})}
         return {"content": json.dumps({"topic": "máy xay mini", "angle": "xay nhanh",
                                        "product_category": "máy xay",
@@ -345,7 +352,7 @@ class TrendJobWithMuseTests(unittest.TestCase):
                 result = workflow.process_job(s, job_id)
                 self.assertEqual(result["status"], engine.WAIT_STATUS, result)
                 gw.capabilities = frozenset({"video", "references"})  # no character image
-                for _ in range(4):
+                for _ in range(6):
                     engine.poll(s, gw)
                 self.assertEqual(get_job(s.database_path, job_id)["status"], "GENERATION_DONE")
                 done = workflow.resume_after_generation(s, job_id)

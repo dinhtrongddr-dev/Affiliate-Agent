@@ -2,6 +2,10 @@
 import math
 import re
 
+# Target video length per branch (seconds); enforced by the storyboard checks and QA.
+DURATION_TARGETS = {"viral_creator": (15.0, 30.0), "product_review": (20.0, 40.0),
+                    "template_series": (20.0, 35.0)}
+
 BRANCHES = {
     "product_review": "Review / trải nghiệm sản phẩm",
     "viral_creator": "Creator bắt trend, sáng tạo nội dung gốc",
@@ -32,7 +36,7 @@ def normalise_characters(value) -> list[dict]:
         if not isinstance(raw, dict):
             continue
         character = {key: bounded_text(raw[key], 800) for key in
-                     ("name", "role", "age", "appearance", "wardrobe", "personality", "description") if key in raw}
+                     ("name", "role", "gender", "age", "appearance", "wardrobe", "personality", "description", "voice") if key in raw}
         character["id"] = reference_id(raw.get("id")) or f"character_{index + 1}"
         if reference_id(raw.get("reference_id")):
             character["reference_id"] = reference_id(raw["reference_id"])
@@ -42,14 +46,14 @@ def normalise_characters(value) -> list[dict]:
 
 SURI_FAMILY = {
     "id": "suri-family", "version": 1, "title": "Gia đình Suri",
-    "style": "Photorealistic faces, skin, hair, fabric and everyday Vietnamese home; "
-             "playful cartoon-like family comedy through expressions, timing and harmless exaggeration.",
+    "style": "Real faces, skin, hair, fabric and an everyday Vietnamese home filmed like a family vlog; "
+             "playful family comedy through expressions, timing and harmless exaggeration.",
     "characters": [
-        {"id": "father", "name": "Bố", "role": "father", "age": "adult",
+        {"id": "father", "name": "Bố", "role": "father", "gender": "male", "age": "35",
          "personality": "Warm, overconfident, affectionate; comic plans backfire harmlessly."},
-        {"id": "mother", "name": "Mẹ", "role": "mother", "age": "adult",
+        {"id": "mother", "name": "Mẹ", "role": "mother", "gender": "female", "age": "32",
          "personality": "Warm, observant, quick wit; loving equal partner."},
-        {"id": "suri", "name": "Suri", "role": "daughter", "age": "4",
+        {"id": "suri", "name": "Suri", "role": "daughter", "gender": "female", "age": "4",
          "personality": "Curious four-year-old girl; innocent literal thinking and playful surprises."},
     ],
     "rules": "Exactly father, mother and four-year-old daughter Suri. Age-appropriate daily family comedy; "

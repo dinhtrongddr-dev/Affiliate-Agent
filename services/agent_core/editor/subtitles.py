@@ -14,8 +14,19 @@ def _ts(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\uFE0F]")
+
+
 def _clean(text: str) -> str:
     return re.sub(r"[{}\\]", "", str(text or "")).replace("\n", " ").strip()
+
+
+def _plain(text: str) -> str:
+    """No emoji, no shouting: sentence case for the single text layer."""
+    text = " ".join(_EMOJI.sub("", _clean(text)).split())
+    if text.isupper():
+        text = text.lower()
+    return text[:1].upper() + text[1:] if text else text
 
 
 def _wrap(text: str, max_chars: int) -> str:
@@ -64,6 +75,7 @@ def build_ass(
     cta: str,
     cta_start: float,
     total: float,
+    single_layer: bool = False,
 ) -> Path:
     """Build SSA/ASS subtitle script with safe-zone bounds for Facebook Reels and Shopee Video.
 
@@ -100,6 +112,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events: list[str] = []
     pop = r"{\fad(80,120)\fscx70\fscy70\t(0,160,\fscx100\fscy100)}"
+
+    if single_layer:
+        return _single_layer(path, header, captions, hook, hook_end, cta, total)
 
     # 1) Hook text in top safe-zone
     clean_hook = _clean(hook)
@@ -140,4 +155,45 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     path = Path(path)
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8-sig")
+    return path
+
+
+def phrase_events(captions: list[tuple[float, list[Word]]], total: float,
+                  max_words: int = 5) -> list[tuple[float, float, str]]:
+    """Phrase-level subtitle events that never overlap: each ends before the next begins."""
+    events = []
+    for offset, words in captions:
+        for chunk in chunk_words(words, max_words=max_words):
+            text = _plain(" ".join(w.text for w in chunk))
+            if text:
+                events.append([offset + chunk[0].start, offset + chunk[-1].end + 0.15, text])
+    events.sort(key=lambda e: e[0])
+    for a, b in zip(events, events[1:], strict=False):
+        a[1] = min(a[1], b[0] - 0.02)
+    return [(round(max(0.0, s), 3), round(min(e, total), 3), t) for s, e, t in events if e - s > 0.12]
+
+
+def _single_layer(path, header, captions, hook, hook_end, cta, total) -> Path:
+    """Hook (0-2 s, sentence case, no emoji), then phrase subtitles only. The optional CTA is
+    one last subtitle line, not a card."""
+    lines = []
+    clean_hook = _plain(hook)
+    if clean_hook:
+        lines.append(f"Dialogue: 3,{_ts(0)},{_ts(hook_end)},Hook,,0,0,0,,"
+                     r"{\fad(60,120)}" + _wrap(clean_hook, 20))
+    subs = phrase_events(captions, total)
+    clean_cta = _plain(cta)
+    if clean_cta:
+        last_end = subs[-1][1] if subs else 0.0
+        if total - last_end > 1.0:
+            subs.append((round(last_end + 0.1, 3), round(total - 0.05, 3), clean_cta))
+    for start, end, text in subs:
+        if clean_hook and end <= hook_end:
+            continue   # hook covers the first seconds; avoid two texts at once
+        start = max(start, hook_end + 0.02) if clean_hook and start < hook_end else start
+        if end - start > 0.12:
+            lines.append(f"Dialogue: 1,{_ts(start)},{_ts(end)},Sub,,0,0,0,,"
+                         r"{\fad(40,40)}" + _wrap(text, 24))
+    path = Path(path)
+    path.write_text(header + "\n".join(lines) + "\n", encoding="utf-8-sig")
     return path

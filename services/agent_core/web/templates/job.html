@@ -166,6 +166,21 @@
         {% for m in ['upbeat','chill','emotional','funny','epic'] %}
         <option {{ 'selected' if script.music_mood == m }}>{{ m }}</option>{% endfor %}
       </select>
+      {% if script.voice_cast %}
+      <h3 style="margin-top:16px">Giọng ({{ script.voice_cast|length }} người nói)</h3>
+      <p class="small muted">Mỗi người nói giữ một giọng suốt video. Đổi giọng chỉ dựng lại tiếng, không tạo lại clip Muse.</p>
+      <div id="voice-cast">
+      {% for sid, v in script.voice_cast.items() %}
+        <div class="row" style="align-items:center;gap:8px;margin:4px 0" data-speaker="{{ sid }}">
+          <span style="min-width:150px"><b>{{ v.label or sid }}</b>{% if v.pitch and v.pitch > 1.05 %} <span class="small muted">(giọng trẻ em)</span>{% endif %}</span>
+          <select class="vc" style="max-width:300px">
+            {% for name, label in voices.items() %}<option value="{{ name }}" {{ 'selected' if name == v.voice }}>{{ label }}</option>{% endfor %}
+          </select>
+          <button class="btn" type="button" onclick="previewVoice(this)">▶ Nghe</button>
+        </div>
+      {% endfor %}
+      </div>
+      {% endif %}
       <h3 style="margin-top:16px">Cảnh ({{ script.scenes|length }})</h3>
       <div id="scenes"></div>
       <div class="row">
@@ -294,8 +309,10 @@ function drawScenes(){
        <span><button class="btn sm" onclick="moveScene(${i},-1)">↑</button>
        <button class="btn sm" onclick="moveScene(${i},1)">↓</button>
        <button class="btn sm danger" onclick="delScene(${i})">✕</button></span></div>
-     <label>Lời thoại</label><textarea class="vo" rows="2">${esc(s.voiceover)}</textarea>
-     <div class="grid g2"><div><label>Chữ trên màn hình</label><input class="tx" value="${esc(s.text)}"></div>
+     ${(s.lines&&s.lines.length)?s.lines.map((ln,k)=>`<label>Lời ${esc((SCRIPT.voice_cast&&SCRIPT.voice_cast[ln.speaker]&&SCRIPT.voice_cast[ln.speaker].label)||ln.speaker)}${s.talking?' (nói trước camera)':''}</label>
+       <textarea class="ln" data-k="${k}" rows="2">${esc(ln.text)}</textarea>`).join(""):
+       `<label>Lời thoại</label><textarea class="vo" rows="2">${esc(s.voiceover)}</textarea>`}
+     <div class="grid g2"><div ${SCRIPT.creation_branch?'style="display:none"':''}><label>Chữ trên màn hình</label><input class="tx" value="${esc(s.text)}"></div>
      <div><label>Thời lượng tối thiểu (giây)</label><input class="du" type="number" step="0.1" min="1" max="8" value="${s.duration??2.5}"></div></div>
      <div class="grid g2"><div><label>Nguồn hình</label><select class="src">
        <option value="">${s.clip_id?'(giữ clip hiện tại)':'Giữ nguyên ('+esc(s.kind)+')'}</option>
@@ -307,7 +324,11 @@ function drawScenes(){
 function collect(){
   document.querySelectorAll("#scenes .scene").forEach(el=>{
     const s=SCRIPT.scenes[+el.dataset.i];
-    s.voiceover=el.querySelector(".vo").value; s.text=el.querySelector(".tx").value;
+    if(s.lines&&s.lines.length){
+      el.querySelectorAll(".ln").forEach(t=>{ s.lines[+t.dataset.k].text=t.value; });
+      s.lines=s.lines.filter(l=>l.text.trim()); s.voiceover=s.lines.map(l=>l.text).join(" ");
+    } else { s.voiceover=el.querySelector(".vo").value; }
+    s.text=el.querySelector(".tx").value;
     s.duration=parseFloat(el.querySelector(".du").value)||2.5;
     const src=el.querySelector(".src").value, st=parseFloat(el.querySelector(".st").value)||0;
     if(src){ s.clip_id=src; s.start=st; }
@@ -349,8 +370,27 @@ function setupClipDrop(el){
 function caption(){return{title:document.getElementById("c-title").value,caption:document.getElementById("c-caption").value,
   hashtags:document.getElementById("c-tags").value,facebook_description:document.getElementById("c-fb").value,
   tiktok_link:document.getElementById("c-tt").value.trim()};}
+function collectVoices(){
+  document.querySelectorAll("#voice-cast [data-speaker]").forEach(el=>{
+    const sid=el.dataset.speaker, v=SCRIPT.voice_cast[sid], pick=el.querySelector(".vc").value;
+    if(v && pick!==v.voice){ v.voice=pick; v.locked=true; }
+  });
+}
+function speakerLine(sid){
+  for(const sc of SCRIPT.scenes||[]) for(const ln of sc.lines||[]) if(ln.speaker===sid && ln.text) return ln.text;
+  return "";
+}
+async function previewVoice(btn){
+  const row=btn.closest("[data-speaker]"), sid=row.dataset.speaker, info=SCRIPT.voice_cast[sid]||{};
+  const r=await fetch("/api/tts/preview",{method:"POST",headers:{"Content-Type":"application/json","X-Requested-With":"affiliate-agent"},
+    body:JSON.stringify({voice:row.querySelector(".vc").value,text:speakerLine(sid)})});
+  if(!r.ok) return toast("Không nghe thử được",true);
+  const a=new Audio(URL.createObjectURL(await r.blob()));
+  if(info.pitch && info.pitch>1.05) a.playbackRate=1.0, a.preservesPitch=false, a.playbackRate=info.pitch;
+  a.play();
+}
 async function saveRender(){
-  collect();
+  collect(); if(SCRIPT.voice_cast) collectVoices();
   const script={...SCRIPT,hook:document.getElementById("hook").value,cta:document.getElementById("cta").value,
     music_mood:document.getElementById("mood").value}; delete script.render;
   await api(`/api/jobs/${JOB}/render`,{script,content:caption()},{ok:"Đang dựng lại video…",reload:true});

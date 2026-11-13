@@ -365,6 +365,7 @@ def create_trend_job(settings, topic: str, notes: str = "", keywords: list[str] 
              "keywords": keywords or [], "trend_id": trend_id, "reference_url": url}
     if offer:
         brief["offer"] = offer
+    creation_branch = creation_branch or ("product_review" if offer else "viral_creator")
     if creation_branch:
         if creation_branch == "product_review" and not offer:
             raise WorkflowError("Nhánh review cần chọn sản phẩm trước khi tạo job.")
@@ -445,6 +446,11 @@ def _process(settings, job: dict) -> dict:
         _stop(settings, job_id, "WAITING_FOR_AI_CREDENTIALS", exc,
               keyframes=[str(p) for p in frame_paths])
 
+    if mode == "trend" and not brief.get("creation_branch"):
+        # One prompt system: older trend jobs run through the creation branches too.
+        brief.update(normalise_brief("product_review" if brief.get("offer") else "viral_creator"))
+        update_job(db, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
+        job = get_job(db, job_id)
     if brief.get("creation_branch"):
         return _process_creation(settings, job, brief, client)
 
@@ -590,6 +596,36 @@ def _process_creation(settings, job, brief, client) -> dict:
                               analysis, product, affiliate_link, [], {})
 
 
+def _recent_hooks(settings, exclude: str = "", limit: int = 15) -> list[str]:
+    """Hooks of the latest videos, so a new storyboard does not open the same way."""
+    from .db import connect
+    hooks = []
+    with connect(settings.database_path) as conn:
+        for row in conn.execute("SELECT id, content_json FROM jobs WHERE content_json IS NOT NULL "
+                                "ORDER BY updated_at DESC LIMIT 60").fetchall():
+            if row["id"] == exclude:
+                continue
+            try:
+                hook = (json.loads(row["content_json"]) or {}).get("hook")
+            except (TypeError, ValueError):
+                continue
+            if hook and hook not in hooks:
+                hooks.append(str(hook)[:80])
+            if len(hooks) >= limit:
+                break
+    return hooks
+
+
+def _cast_plan_voices(settings, plan: dict, brief: dict) -> None:
+    from .style_profiles import resolve
+    from .voice_cast import cast_voices
+    plan["style_profile"] = resolve(plan.get("style_profile"), plan.get("creation_branch"),
+                                    getattr(settings, "style_profile", "") or None)
+    pinned = {c["id"]: c["voice"] for c in (brief.get("template") or {}).get("characters") or []
+              if isinstance(c, dict) and c.get("voice")}
+    plan["voice_cast"] = cast_voices(plan, settings.tts_voice, pinned)
+
+
 def _related_affiliates(settings, plan: dict, analysis: dict) -> list[dict]:
     from .trend_intel.matcher import match_products
     keywords = plan.get("affiliate_keywords") or []
@@ -691,7 +727,8 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                             "has_product_image": bool(product_img)}
             prompt = creative.branch_plan_prompt(
                 prompt_brief, product, bool(gen_limit), bool(settings.pexels_api_key.get_secret_value()),
-                clips_text, 1, gen_limit) + "\n" + reference_legend(references)
+                clips_text, 1, gen_limit, recent_hooks=_recent_hooks(settings, job_id)
+            ) + "\n" + reference_legend(references)
             # Clip indexes refer to the library, while reference IDs refer to ordered attachments.
             raw = _ask_json(client, settings, prompt,
                             [Path(r["path"]) for r in references] or None,
@@ -716,13 +753,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                 plan = creative.normalise_plan(
                     creative.fallback_base_plan(analysis, segments), "base", segments)
         else:
-            prompt = creative.trend_plan_prompt(
-                {**brief, **{k: analysis.get(k) for k in ("topic", "angle")}}, product,
-                bool(gen_limit), bool(settings.pexels_api_key.get_secret_value()),
-                clips_text, 2 if product_img else 1, gen_limit)
-            images = ([product_img] if product_img else []) + clip_thumbs
-            raw = _ask_json(client, settings, prompt, images or None, temperature=0.7)
-            plan = creative.normalise_plan(raw, "trend", None, n_clips)
+            raise WorkflowError("Job trend cần nhánh sáng tạo; chạy lại để chuyển nhánh.")
         score = None
         if settings.viral_review:
             try:
@@ -742,7 +773,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                         again_prompt = (creative.branch_review_prompt(plan, product, 0, prompt_brief)
                                         if branch else creative.review_prompt(plan, product, 0))
                         again = _ask_json(client, settings, again_prompt, temperature=0.2,
-                                          max_tokens=600)
+                                          max_tokens=1500)
                         score = float(again.get("score", score))
                     except Exception:  # noqa: BLE001
                         pass
@@ -758,10 +789,13 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     # 5) AI clips (Muse): submit and wait without blocking the worker -------
     reference_issues = []
     if branch:
+        _cast_plan_voices(settings, plan, brief)
         from .storyboard_support import attach_references, reference_errors
         try:
             attach_references(plan, brief, references)
-            reference_issues = reference_errors(plan, brief, references)
+            # Missing cast photos are generated by Muse first unless that is switched off.
+            if not settings.videogen_character:
+                reference_issues = reference_errors(plan, brief, references)
         except ProviderError as exc:
             reference_issues = [str(exc)]
         if branch in {"viral_creator", "template_series"}:
@@ -899,7 +933,9 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
     for i, scene in enumerate(plan["scenes"]):
         item = {k: scene.get(k) for k in ("duration", "voiceover", "text", "motion")}
         if strict:
-            item.update({k: scene[k] for k in ("shot", "reference_ids", "gen_prompt") if k in scene})
+            item.update({k: scene[k] for k in ("shot", "reference_ids", "gen_prompt", "lines", "cast",
+                                               "talking", "group", "product_visible", "hands_only")
+                         if k in scene})
         if scene.get("clip") is not None and scene["clip"] < len(user_clips):
             item.update(_clip_scene(settings, job["id"], user_clips[scene["clip"]],
                                     scene.get("start_offset") or 0))
@@ -950,7 +986,9 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
               "cta": plan.get("cta", "") if strict else plan.get("cta") or settings.cta_text,
               "music_mood": plan.get("music_mood", "upbeat"), "scenes": scenes}
     if strict:
-        result.update({k: plan[k] for k in ("creation_branch", "storyboard_version", "style", "characters")
+        result.update({k: plan[k] for k in ("creation_branch", "storyboard_version", "style", "characters",
+                                            "voice_cast", "style_profile", "audience_gender",
+                                            "duration_target_seconds", "content_mode")
                        if k in plan})
     return result
 
@@ -1131,19 +1169,12 @@ section{{margin-top:26px}}h1{{line-height:1.2}}
 <section><h2>Nội dung Shopee</h2><pre>{esc(content.get("shopee_caption"))}</pre>
 <p>{esc(hashtags)}</p></section>
 <section><h2>Khung hình xem trước</h2><div class="grid">{''.join(frames)}</div></section>
-<section><h2>Đánh giá chất lượng sáng tạo 2.0 (Creative Quality Score)</h2>
-<p><b>Tổng điểm: {c_qa.get('total_score', 0)} / 100</b> — <span class="status">{c_qa.get('status', 'PENDING')}</span></p>
-<ul>
-  <li>Hook &amp; Khả năng giữ chân: {c_qa.get('hook', 0)} / 20</li>
-  <li>Storytelling &amp; Cấu trúc: {c_qa.get('storytelling', 0)} / 15</li>
-  <li>Cảm xúc &amp; Tâm lý: {c_qa.get('emotion', 0)} / 15</li>
-  <li>Sáng tạo &amp; Khác biệt: {c_qa.get('creativity', 0)} / 15</li>
-  <li>Hình ảnh &amp; Phân cảnh: {c_qa.get('storyboard', 0)} / 10</li>
-  <li>Voice &amp; Âm thanh: {c_qa.get('voice_audio', 0)} / 10</li>
-  <li>Editing &amp; Nhịp độ: {c_qa.get('editing', 0)} / 10</li>
-  <li>CTA &amp; Phù hợp ngữ cảnh: {c_qa.get('cta_fit', 0)} / 5</li>
-</ul>
-<p><b>Điểm mạnh:</b> {esc(", ".join(c_qa.get('strengths') or []))}</p>
+<section><h2>QA video (xem hình + đo thật)</h2>
+<p><b>Tổng điểm: {c_qa.get('total_score', 0)} / 100</b> — <span class="status">{c_qa.get('status', 'PENDING')}</span>
+{"" if c_qa.get('visual_checked') else '<span class="status">CHƯA KIỂM HÌNH</span>'}</p>
+<p class="muted">Thành phần: {esc(json.dumps(c_qa.get('breakdown') or {}, ensure_ascii=False))}
+ · Hình: {esc(json.dumps({k: v for k, v in (c_qa.get('visual') or {}).items() if k != 'issues'}, ensure_ascii=False))}</p>
+<p><b>Cần sửa:</b> {esc("; ".join(c_qa.get('improvements') or []) or "—")}</p>
 </section>
 <section><h2>Kiểm tra kỹ thuật file video thực tế (Technical QA)</h2>
 <p><span class="status">Kỹ thuật video: {"PASS" if t_qa.get("passed") else "CHECK"}</span>
@@ -1206,6 +1237,16 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
         music_used=bool(getattr(result, "music", None)),
     )
 
+    from .qa_video import score_video, visual_check
+    product_ref = next(iter(sorted((settings.work_dir / job["id"] / "assets").glob("product_*.jpg"))), None)         if (settings.work_dir / job["id"] / "assets").is_dir() else None
+    visual = visual_check(settings, video_out, timeline, result.scenes, product_ref)
+    real_qa = score_video(timeline, result.scenes, float(metadata.get("duration_sec") or 0),
+                          bool(getattr(result, "music", None)), visual, job.get("viral_score"),
+                          getattr(result, "subtitles", None), tech_qa.passed)
+    if "wrong_product" in real_qa["gates"]:
+        shopee_qa.reasons.append("QA: sản phẩm trong video không khớp sản phẩm thật")
+        shopee_qa.passed = False
+
     facebook_out = None
     if facebook_qa.passed:
         fb_dir = settings.facebook_output / job["id"]
@@ -1238,8 +1279,8 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
                 "subtitle_metrics": tech_qa.subtitle_metrics,
             },
             "creative_qa": {
-                "total_score": creative_qa.total,
-                "status": creative_qa.status,
+                **real_qa,
+                "rubric_note": "Điểm thành phần dưới đây là gợi ý theo kịch bản, không cộng vào tổng.",
                 "hook": creative_qa.hook,
                 "storytelling": creative_qa.storytelling,
                 "emotion": creative_qa.emotion,
@@ -1249,7 +1290,7 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
                 "editing": creative_qa.editing,
                 "cta_fit": creative_qa.cta_fit,
                 "strengths": creative_qa.strengths,
-                "improvements": creative_qa.improvements,
+                "improvements": real_qa["improvements"] + creative_qa.improvements,
             },
         },
         "publishing": "manual_review_required",

@@ -145,7 +145,10 @@ class Worker:
             auto_sync.enqueue_due(self.settings)
         self._requeue_ai_waits()
         for kind, interval in PERIODIC.items():
-            if now - self.last_run.get(kind, -interval) >= interval:
+            # First run 10 minutes after start-up, so opening the app never queues a
+            # several-minute AI refresh in front of the owner's videos.
+            self.last_run.setdefault(kind, now - interval + 600)
+            if now - self.last_run[kind] >= interval:
                 self.last_run[kind] = now
                 enqueue_task(self.settings.database_path, kind)
 

@@ -385,7 +385,9 @@ def claim_task(db_path: Path) -> dict[str, Any] | None:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT * FROM tasks WHERE status='QUEUED' AND run_after<=? "
-            "ORDER BY run_after ASC, id ASC LIMIT 1",
+            # Video work the owner is waiting for runs before background refreshes.
+            "ORDER BY CASE WHEN kind IN ('fetch_trends','trend_analyse','sync_conversions',"
+            "'sync_shopee') THEN 1 ELSE 0 END, run_after ASC, id ASC LIMIT 1",
             (stamp,),
         ).fetchone()
         if not row:

@@ -26,6 +26,11 @@ class FakeAI:
         self.calls += 1
         content = messages[0]["content"]
         prompt = content if isinstance(content, str) else content[0]["text"]
+        if "QA video ngắn" in prompt:
+            self.kinds.append("visual_qa")
+            return {"content": json.dumps({"face_consistency": None, "artifacts": 9,
+                                           "subtitle_readable": 9, "phone_realism": 7,
+                                           "hook_stop_power": 7, "issues": []})}
         if "biên tập viên" in prompt:
             self.kinds.append("review")
             return {"content": json.dumps({"score": 8.5, "issues": [], "revised": None})}
@@ -156,7 +161,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 (media / "outbox" / "shopee" / job_id / "review.html").is_file()
             )
-            self.assertEqual(fake_ai.kinds, ["analysis", "plan", "review"])
+            self.assertEqual(fake_ai.kinds, ["analysis", "plan", "review", "visual_qa"])
             rendered = probe_video(Path(result["output_path"]), settings.ffprobe_path)
             self.assertEqual((rendered["width"], rendered["height"]), (360, 640))
             self.assertTrue(json.loads(saved_job["script_json"])["scenes"])

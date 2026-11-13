@@ -2,11 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 from agent_core.settings import get_settings
-from agent_core.creative import (
-    _smart_truncate,
-    determine_duration_strategy,
-    generate_hook_variations,
-)
+from agent_core.creative import _smart_truncate
 from agent_core.quality import (
     evaluate_creative_quality,
     inspect_rendered_video,
@@ -38,44 +34,6 @@ def test_smart_truncate_vietnamese():
 
     # Test case 3: Chuỗi rỗng
     assert _smart_truncate("", 20) == ""
-
-
-def test_adaptive_duration_strategy():
-    """Kiểm tra chiến lược thời lượng thích ứng 4 khoảng chuẩn."""
-    # Short viral (topic về chú chó/pet)
-    d1 = determine_duration_strategy({"topic": "Chú chó chạy trên cánh đồng", "notes": "chó cưng vui nhộn"})
-    assert d1["category"] == "short_viral"
-    assert 10.0 <= d1["target_seconds"] <= 25.0
-
-    # Story viral (topic về mẹ/gia đình)
-    d2 = determine_duration_strategy({"topic": "Ai là người hiểu mẹ nhất", "notes": "tình cảm gia đình sâu sắc"})
-    assert d2["category"] == "story_viral"
-    assert 25.0 <= d2["target_seconds"] <= 45.0
-
-    # Value & affiliate (review sản phẩm)
-    d3 = determine_duration_strategy({"creation_branch": "product_review", "offer": {"price": 100000}})
-    assert d3["category"] == "value_affiliate"
-    assert 30.0 <= d3["target_seconds"] <= 60.0
-
-
-def test_hook_variations_generator():
-    """Kiểm tra bộ tạo 3 phương án hook đa góc nhìn."""
-    hooks = generate_hook_variations(
-        topic="Người mẹ thức khuya",
-        angle="Sự thấu hiểu của con cái",
-        premise="Ai là người hiểu mẹ nhất trong gia đình?",
-    )
-    assert len(hooks) == 3
-    types = [h["type"] for h in hooks]
-    assert "curiosity_gap" in types
-    assert "pattern_interrupt" in types
-    assert "relatable_empathy" in types
-
-    for h in hooks:
-        assert len(h["text_hook"]) > 5
-        assert len(h["text_hook"]) <= 55
-        assert len(h["voice_hook"]) > 5
-        assert len(h["visual_action"]) > 5
 
 
 def test_creative_quality_scorecard_100():

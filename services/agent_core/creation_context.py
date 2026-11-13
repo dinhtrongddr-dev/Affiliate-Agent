@@ -81,14 +81,18 @@ def build_product_context(settings, item_id, *, experience=None):
              'price_statistics': stats or None}
     images = []
     approved = current.get('media_usage_rights') in {'owned', 'licensed', 'permission', 'official'}
+    # Owner decision: listing photos from the data API are used to keep the product accurate.
+    listing_ok = bool(getattr(settings, 'use_listing_images', False))
     stored_image = value('image_url')
     if stored_image:
         images.append({'url': stored_image, 'role': 'primary', 'source': 'catalog',
                        'rights': current.get('media_usage_rights') or 'unknown',
-                       'approvedForRender': approved and stored_image == current.get('image_url')})
+                       'approvedForRender': (approved or listing_ok)
+                       and stored_image == current.get('image_url')})
     if raw.get('imageUrl') and raw['imageUrl'] != stored_image:
         images.append({'url': raw['imageUrl'], 'role': 'primary', 'source': 'addlive',
-                       'rights': 'unknown', 'approvedForRender': False})
+                       'rights': 'listing' if listing_ok else 'unknown',
+                       'approvedForRender': listing_ok})
     missing = ['description', 'specifications', 'variants', 'gallery', 'real_usage_evidence']
     if not images:
         missing.append('primary_image')

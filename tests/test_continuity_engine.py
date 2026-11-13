@@ -84,7 +84,8 @@ def test_plan_job_creates_continuity_chain(tmp_path):
         ffprobe_path="ffprobe",
     )
 
-    plan = {
+    plan = {  # legacy (non-storyboard) plans chain only on request; storyboards chain by group
+        "continuity_chain": True,
         "scenes": [
             {"visual": "generate", "gen_prompt": "First scene showing a girl walking"},
             {"visual": "generate", "gen_prompt": "Second scene showing her reaching for a cup"},

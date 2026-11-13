@@ -26,8 +26,9 @@ def test_suri_default_is_versioned_three_person_family_and_independent_snapshot(
     assert template["version"] == 1
     assert [c["id"] for c in template["characters"]] == ["father", "mother", "suri"]
     assert template["characters"][2]["age"] == "4"
-    assert "Photorealistic" in template["style"]
-    assert "cartoon-like" in template["style"]
+    # phone/vlog look instead of "photorealistic" (phase 1: UGC realism)
+    assert "family vlog" in template["style"] and "Photorealistic" not in template["style"]
+    assert [c["gender"] for c in template["characters"]] == ["male", "female", "female"]
     template["characters"][2]["name"] = "Changed"
     assert SURI_FAMILY["characters"][2]["name"] == "Suri"
 
@@ -65,7 +66,8 @@ def test_rich_storyboard_survives_normalization_but_paths_do_not():
     result = creative.normalise_plan(plan, "trend")
     assert result["creation_branch"] == "template_series"
     assert result["storyboard_version"] == 1
-    assert len(result["scenes"][0]["gen_prompt"]) == 3500
+    # the Muse prompt is compiled from shot fields; free text is only a short fallback
+    assert len(result["scenes"][0]["gen_prompt"]) <= 600
     assert result["scenes"][0]["reference_ids"] == ["father", "suri"]
     assert result["scenes"][0]["shot"]["sound"] == "comic beat"
     assert "arbitrary_path" not in result["scenes"][0]["shot"]
@@ -90,9 +92,9 @@ def test_prompts_keep_branch_honesty_budget_and_storyboard_contract(branch):
     review = creative.branch_review_prompt({}, {}, 7, brief)
     assert branch in idea and branch in plan and branch in review
     assert "Tối đa 2 cảnh generate" in plan
-    assert "5–8 giây" in plan
-    assert "reference_ids" in plan and "continuity" in plan and "gen_prompt" in plan
-    assert "Không tự nhận đã sử dụng" in plan
+    assert "2-6 giây" in plan
+    assert "reference_ids" in plan and '"group"' in plan and '"lines"' in plan and '"talking"' in plan
+    assert "không nói đã dùng" in plan
     assert "không có CTA bán hàng" in review
     if branch != "product_review":
         assert "không ép" in idea.lower()
@@ -122,7 +124,7 @@ def test_new_branch_generated_duration_minimum_and_legacy_duration():
     scene = {"visual": "generate", "duration": 2}
     branch = creative.normalise_plan({"creation_branch": "viral_creator", "scenes": [scene]}, "trend")
     legacy = creative.normalise_plan({"scenes": [scene]}, "trend")
-    assert branch["scenes"][0]["duration"] == 5
+    assert branch["scenes"][0]["duration"] == 2   # AI clips are cut to 2-6 s
     assert legacy["scenes"][0]["duration"] == 2
 
 
@@ -181,7 +183,7 @@ def test_custom_series_snapshot_is_authoritative_not_forced_suri_cast():
         assert "grandma-kitchen" in prompt
 
 
-@pytest.mark.parametrize("version", [True, 2, "1"])
+@pytest.mark.parametrize("version", [True, 3, "1"])
 def test_unsupported_storyboard_version_rejected(version):
     with pytest.raises(ValueError):
         creative.normalise_plan({"storyboard_version": version,

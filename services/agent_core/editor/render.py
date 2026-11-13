@@ -28,7 +28,7 @@ from pathlib import Path
 from .ffmpeg import FFmpegError, probe, run_ffmpeg
 from .music import pick_track
 from .subtitles import build_ass
-from .tts import Speech, synthesize
+from .tts import Speech
 
 log = logging.getLogger("affiliate_agent.render")
 
@@ -154,7 +154,7 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
     return out
 
 
-def chain_graph(durations: list[float], t: float, seed: int = 0
+def chain_graph(durations: list[float], t: float, seed: int = 0, only: str | None = None
                 ) -> tuple[list[str], str, str, float, list[float]]:
     """xfade/acrossfade chain over inputs 0..n-1.
 
@@ -168,7 +168,7 @@ def chain_graph(durations: list[float], t: float, seed: int = 0
     vprev, aprev = "0:v", "0:a"
     for i in range(1, len(durations)):
         offset = length - t
-        trans = TRANSITIONS[(i + seed) % len(TRANSITIONS)]
+        trans = only or TRANSITIONS[(i + seed) % len(TRANSITIONS)]
         vout, aout = f"xv{i}", f"xa{i}"
         parts.append(f"[{vprev}][{i}:v]xfade=transition={trans}:duration={t}:offset={offset:.3f}[{vout}]")
         parts.append(f"[{aprev}][{i}:a]acrossfade=d={t}:c1=tri:c2=tri[{aout}]")
@@ -189,49 +189,57 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         raise RenderError("Timeline has no scenes with a visual source")
     seed = sum(map(ord, seed_text)) % 7
 
-    # 1) Voice per scene decides each scene's duration
-    speeches: list[Speech] = []
+    from .voice_track import scene_voice
+    cast = timeline.get("voice_cast") or {}
+    style = str(timeline.get("style_profile") or "")
+    hard_cuts = style in {"ugc_phone", "sitcom_bright"}
+    trans = 0.08 if hard_cuts else settings.transition_seconds
+
+    # 1) Voice per scene decides each scene's duration (never longer than the real footage
+    #    plus 0.3 s, so a freeze frame can no longer cover a long line).
+    voices = []
     durations: list[float] = []
     for i, scene in enumerate(scenes):
-        text = scene.get("voiceover") or ""
-        if settings.tts_enabled and text:
-            speech = synthesize(
-                text,
-                work_dir / f"voice_{i:02d}.mp3",
-                settings.tts_voice,
-                settings.tts_rate,
-                settings.ffprobe_path,
-                mode=getattr(settings, "tts_mode", "fast"),
-                precision=getattr(settings, "tts_precision", "auto"),
-            )
-        else:
-            from .tts import estimate_duration, evenly_timed_words
-            est = estimate_duration(text) if text else 0.0
-            speech = Speech(None, est, evenly_timed_words(text, 0.0, est))
-        speeches.append(speech)
+        available = None
+        clip_window = None
+        if scene.get("kind", "video") == "video" and Path(scene["source"]).is_file():
+            try:
+                src_len = probe(settings.ffprobe_path, Path(scene["source"]))["duration_sec"]
+                available = max(0.5, src_len - float(scene.get("start") or 0))
+                if scene.get("generated"):
+                    clip_window = (Path(scene["source"]), float(scene.get("start") or 0), available)
+            except Exception:  # noqa: BLE001 - probe failure: keep old behaviour
+                available = None
+        voice = scene_voice(settings, scene, cast, work_dir, i, clip_window)
+        voices.append(voice)
         wanted = float(scene.get("duration") or 2.5)
-        needed = speech.duration + 0.35 + (settings.transition_seconds if i else 0.15)
-        # Allow adaptive scenes to breathe up to 12.0s when necessary
-        durations.append(round(min(MAX_SCENE + 4.5, max(MIN_SCENE, wanted, needed)), 3))
+        needed = voice.end + 0.3 + (trans if i else 0.15)
+        duration = max(MIN_SCENE, wanted, needed)
+        if available is not None:
+            duration = min(duration, available + 0.3) if needed <= available + 0.3 else duration
+        durations.append(round(min(MAX_SCENE + 4.5, duration), 3))
+    speeches = [Speech(None, v.end, v.words) for v in voices]
 
     # 2) Normalised scene clips
     clips = []
     for i, scene in enumerate(scenes):
+        if scene.get("generated") and hard_cuts:
+            scene = {**scene, "motion": "none"}   # no fake zoom on real-looking footage
         clips.append(render_scene(settings, scene, durations[i], work_dir / f"scene_{i:02d}.mp4", i))
 
-    # 3) Transitions chain
-    chain_parts, vchain, achain, total, starts = chain_graph(
-        durations, settings.transition_seconds, seed)
+    # 3) Transitions chain (phone-style profiles use near-hard cuts)
+    chain_parts, vchain, achain, total, starts = chain_graph(durations, trans, seed,
+                                                             "fade" if hard_cuts else None)
 
     # 4) Subtitles & Voice offsets
-    lead = settings.transition_seconds / 2
-    voice_offsets = [starts[i] + (lead if i else 0.1) for i in range(len(scenes))]
+    voice_offsets = [starts[i] for i in range(len(scenes))]
     captions = [(voice_offsets[i], sp.words) for i, sp in enumerate(speeches)]
     labels = []
-    for i, scene in enumerate(scenes):
-        end = starts[i + 1] if i + 1 < len(scenes) else total
-        start = max(starts[i], 2.8) if i == 0 and timeline.get("hook") else starts[i]
-        labels.append((start, end, scene.get("text") or ""))
+    if not timeline.get("creation_branch"):   # storyboards keep a single text layer
+        for i, scene in enumerate(scenes):
+            end = starts[i + 1] if i + 1 < len(scenes) else total
+            start = max(starts[i], 2.8) if i == 0 and timeline.get("hook") else starts[i]
+            labels.append((start, end, scene.get("text") or ""))
 
     # Track exact voice end timestamp to never cut off speech or ending dialogue
     last_voice_end = 0.0
@@ -260,10 +268,12 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         cta = ""
         cta_start = total
 
-    hook_end = min(2.8, durations[0] if len(durations) == 1 else starts[1] + 0.3)
+    single_layer = bool(timeline.get("creation_branch"))
+    hook_end = min(2.0 if single_layer else 2.8,
+                   durations[0] if len(durations) == 1 else starts[1] + 0.3)
     subs = build_ass(work_dir / "subs.ass", settings.render_width, settings.render_height,
                      settings.font_name, captions, timeline.get("hook") or "", hook_end,
-                     labels, cta, cta_start, total)
+                     labels, cta, cta_start, total, single_layer=single_layer)
 
     # 5) Audio mix + Subtitle burn
     inputs: list[str] = []
@@ -272,13 +282,15 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     filters = list(chain_parts)
     voice_labels = []
     idx = len(clips)
-    for i, sp in enumerate(speeches):
-        if sp.audio_path:
-            inputs += ["-i", sp.audio_path.name]
-            ms = int(voice_offsets[i] * 1000)
+    for i, voice in enumerate(voices):
+        for k, part in enumerate(voice.parts):
+            if not part.audio:
+                continue
+            inputs += ["-i", str(Path(part.audio).resolve())]
+            ms = int((voice_offsets[i] + part.offset) * 1000)
             filters.append(f"[{idx}:a]aresample=44100,aformat=channel_layouts=stereo,"
-                           f"adelay={ms}|{ms}[vo{i}]")
-            voice_labels.append(f"[vo{i}]")
+                           f"adelay={ms}|{ms}[vo{i}_{k}]")
+            voice_labels.append(f"[vo{i}_{k}]")
             idx += 1
     music = pick_track(
         settings.music,
@@ -344,7 +356,8 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     shutil.move(str(tmp_out), output)
     scene_report = [
         {**scene, "rendered_duration": durations[i], "start_at": round(starts[i], 3),
-         "voice": bool(speeches[i].audio_path)}
+         "voice": any(p.audio for p in voices[i].parts), "revoice": voices[i].revoice,
+         "voice_end": round(voices[i].end, 3)}
         for i, scene in enumerate(scenes)
     ]
     shutil.copyfile(subs, output.with_suffix(".ass"))
