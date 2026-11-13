@@ -99,7 +99,7 @@ def plan_metrics(settings, plan: dict) -> dict:
     }
 
 
-def bench_matcher(settings) -> dict:
+def bench_matcher(settings, verify: bool = False) -> dict:
     from agent_core import catalog
     from agent_core.trend_intel import matcher
     import sqlite3
@@ -131,6 +131,26 @@ def bench_matcher(settings) -> dict:
         details.append({"trend": trend, "matcher_now": len(found), "stored": len(stored),
                         "bad_stored": sum(1 for p in stored if truth.get(p) is False)})
     precision = tp / (tp + fp) if tp + fp else None
+    if verify:
+        from agent_core.trend_intel.matcher import verify_matches
+        items, rows = [], {}
+        for trend in by_trend:
+            row = conn.execute("SELECT * FROM trend_topics WHERE keyword=?", (trend,)).fetchone()
+            if not row:
+                continue
+            topic = {**dict(row), "intent": json.loads(row["intent_json"] or "{}")}
+            rows[topic["key"]] = trend
+            items.append((topic, matcher.match_products(settings, topic, products=products)))
+        kept = verify_matches(settings, [(t, f) for t, f in items if f])
+        ntp = nfp = nlost = 0
+        for topic, _ in items:
+            truth = by_trend[rows[topic["key"]]]
+            now = {m["product_id"] for m in kept.get(topic["key"], [])}
+            ntp += sum(1 for p in now if truth.get(p) is True)
+            nfp += sum(1 for p in now if truth.get(p) is False)
+            nlost += sum(1 for p, ok in truth.items() if ok and p not in now)
+        details.append({"now_verified": {"true_pos": ntp, "false_pos": nfp, "good_lost": nlost,
+                                         "precision": round(ntp / (ntp + nfp), 3) if ntp + nfp else None}})
     return {"labelled_pairs": len(labels["pairs"]), "precision_stored": precision and round(precision, 3),
             "false_matches_stored": fp, "good_lost": fn, "per_trend": details}
 
@@ -216,7 +236,7 @@ def main() -> None:
     settings = get_settings()
     report = {"at": datetime.now().isoformat(timespec="seconds")}
     print("matcher ...", flush=True)
-    report["matcher"] = bench_matcher(settings)
+    report["matcher"] = bench_matcher(settings, verify=args.ai)
     print("existing storyboards ...", flush=True)
     report["existing_jobs"] = existing_jobs(settings)
     report["existing_summary"] = summarise(report["existing_jobs"])

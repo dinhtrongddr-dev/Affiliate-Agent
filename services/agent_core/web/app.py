@@ -246,6 +246,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       brief=json.loads(job.get("brief_json") or "{}"),
                       busy=job["status"] in BUSY, active="jobs",
                       clips=list_clips(s, job_id), voices=VOICES,
+                      link_info=workflow.link_check(s, job),
+                      hook_variants=_hook_variants(s, job),
                       storyboard=storyboard(s, job_id),
                       gen_tasks=gen_engine.list_tasks(s.database_path, job_id, 50))
 
@@ -670,6 +672,26 @@ def create_app(start_worker: bool = True) -> FastAPI:
     @app.get("/logs", response_class=HTMLResponse)
     def logs_page(request: Request):
         return render(request, "logs.html", log=tail_log(S().logs_dir, 400))
+
+    def _hook_variants(s, job) -> list[dict]:
+        out = Path(job.get("output_path") or "")
+        manifest = out.parent / "manifest.json"
+        if not manifest.is_file():
+            return []
+        try:
+            rows = json.loads(manifest.read_text(encoding="utf-8")).get("hook_variants") or []
+        except ValueError:
+            return []
+        return [{**r, "file": Path(r["path"]).name} for r in rows if Path(r.get("path", "")).is_file()]
+
+    @app.post("/api/jobs/{job_id}/hook-variant")
+    async def api_hook_variant(job_id: str, request: Request):
+        job_or_404(job_id)
+        body = await request.json()
+        try:
+            return workflow.use_hook_variant(S(), job_id, int(body.get("index") or 0))
+        except (workflow.WorkflowError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from None
 
     @app.get("/files/{job_id}/{name:path}")
     def job_file(job_id: str, name: str):

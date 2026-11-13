@@ -20,6 +20,10 @@ from .store import hours_since, strip_accents
 log = logging.getLogger("affiliate_agent.trend_intel")
 
 MIN_RELEVANCE = 60.0
+# Words that name a kind of thing, not the thing ("máy" = any machine, "bộ" = any set ...).
+GENERIC = {"máy", "may", "bộ", "bo", "đồ", "do", "dụng", "cụ", "thiết", "bị", "set", "combo",
+           "mini", "loại", "cái", "chiếc", "hộp", "sạc", "sac", "usb", "điện", "dien", "cho",
+           "nữ", "nam", "đa", "năng", "tiền", "tien", "du", "lịch", "lich"}
 MIN_AI_FIT = 40.0  # AI re-rank veto: below this the product is dropped, not just demoted
 STALE_HOURS = 7 * 24
 
@@ -110,10 +114,13 @@ def _term_matches(words: list[str], target: str, tokens: set[str]) -> bool:
     "binh giu"), or the term's first word plus two thirds of its words. Sharing filler words
     ("mini", "sac", "giu nhiet") alone is not a match."""
     if len(words) == 1:
-        return len(words[0]) >= 4 and words[0] in tokens
+        return len(words[0]) >= 4 and words[0] in tokens and words[0] not in GENERIC
     if f" {words[0]} {words[1]} " in f" {target} ":
         return True
-    coverage = sum(1 for w in words if w in tokens) / len(words)
+    if words[0] in GENERIC:   # "máy xay sạc USB" must not match a USB cable via "máy"+"sạc"+"usb"
+        return False
+    meaningful = [w for w in words if w not in GENERIC]
+    coverage = sum(1 for w in meaningful if w in tokens) / max(1, len(meaningful))
     return words[0] in tokens and coverage >= 0.66
 
 
@@ -234,6 +241,102 @@ def rerank(settings, topic: dict, matches: list[dict], ask=None) -> list[dict]:
                  "reason": "; ".join(x for x in (f"AI: {why}" if why else "", m["reason"]) if x)}
         out.append(m)
     out.sort(key=lambda m: m["score"], reverse=True)
+    return out
+
+
+VERIFY_BATCH = 15
+MIN_PURCHASE_INTENT = 40.0   # floor in code; a lower .env value cannot reopen forced matches
+LOW_INTENT_MIN_FIT = 75.0    # below the floor only an exact product (fit >= 75) is kept
+FIT_TTL_HOURS = 7 * 24
+
+
+def verify_prompt(pairs: list[tuple[dict, dict]]) -> str:
+    rows = "\n".join(json.dumps({"pair": i, "trend": t["keyword"],
+                                  "angle": (t.get("intent") or {}).get("angle", "")[:120],
+                                  "product": m["name"]}, ensure_ascii=False)
+                      for i, (t, m) in enumerate(pairs))
+    return f"""
+Bạn kiểm duyệt ghép trend ↔ sản phẩm cho video affiliate ngắn ở Việt Nam.
+Với MỖI cặp, chấm fit 0-100: người xem trend đó có thật sự muốn mua đúng sản phẩm đó không,
+và video có nối được tự nhiên không. Chỉ dựa vào tên sản phẩm, không bịa tính năng.
+Sai loại hàng thì fit < 20: "máy xay mini" ↔ cáp sạc USB; "bida" ↔ găng tay tập gym.
+Trend tin tức / người nổi tiếng / sự kiện thể thao / học tập ghép với PHỤ KIỆN CHUNG CHUNG
+(túi xách, loa, tai nghe, móc khoá, ốp lưng...) là ép buộc: fit < 30.
+Fit cao (>= 70) chỉ khi sản phẩm CHÍNH LÀ thứ trend nói tới hoặc thứ người xem cần ngay
+(vd "Lê Quang Liêm" kỳ thủ ↔ bộ cờ vua; "máy xay mini" ↔ máy xay sinh tố mini).
+Cặp:
+{rows}
+Trả DUY NHẤT JSON: {{"pairs": [{{"pair": 0, "fit": 0, "reason": "ngắn"}}]}}
+"""
+
+
+def _name_hash(name: str) -> str:
+    import hashlib
+    return hashlib.sha256(_plain(name).encode()).hexdigest()[:16]
+
+
+def verify_matches(settings, items: list[tuple[dict, list[dict]]], ask=None) -> dict[str, list[dict]]:
+    """AI checks every (trend, product) pair, 15 per call, cached 7 days per pair.
+    Returns topic key -> matches kept (fit >= MIN_AI_FIT), re-scored with the fit."""
+    from .store import connect, ensure_schema
+    db = settings.database_path
+    ensure_schema(db)
+    cached, todo = {}, []
+    with connect(db) as conn:
+        for topic, matches in items:
+            for m in matches:
+                row = conn.execute(
+                    "SELECT fit, reason, checked_at FROM trend_pair_fit WHERE topic_key=? "
+                    "AND product_id=? AND name_hash=?",
+                    (topic["key"], m["product_id"], _name_hash(m["name"]))).fetchone()
+                if row and (hours_since(row["checked_at"]) or 1e9) < FIT_TTL_HOURS:
+                    cached[(topic["key"], m["product_id"])] = (row["fit"], row["reason"] or "")
+                else:
+                    todo.append((topic, m))
+    if todo:
+        if ask is None:
+            from ..workflow import _ask_json, _client
+            client = _client(settings)
+
+            def ask(prompt):
+                return _ask_json(client, settings, prompt, temperature=0.1, max_tokens=2500)
+        for start in range(0, len(todo), VERIFY_BATCH):
+            chunk = todo[start:start + VERIFY_BATCH]
+            try:
+                reply = ask(verify_prompt(chunk)) or {}
+            except Exception as exc:  # noqa: BLE001 - unverified pairs are dropped, not kept
+                log.warning("pair verification failed: %s", exc)
+                continue
+            with connect(db) as conn:
+                for item in reply.get("pairs") or []:
+                    try:
+                        idx, fit = int(item.get("pair")), max(0.0, min(100.0, float(item.get("fit"))))
+                    except (TypeError, ValueError):
+                        continue
+                    if not 0 <= idx < len(chunk):
+                        continue
+                    topic, m = chunk[idx]
+                    why = str(item.get("reason") or "")[:200]
+                    cached[(topic["key"], m["product_id"])] = (fit, why)
+                    conn.execute("INSERT OR REPLACE INTO trend_pair_fit VALUES (?,?,?,?,?,?)",
+                                 (topic["key"], m["product_id"], _name_hash(m["name"]), fit, why,
+                                  utcnow()))
+    out = {}
+    for topic, matches in items:
+        kept = []
+        purchase = float((topic.get("intent") or {}).get("purchase_intent") or 100)
+        floor = MIN_AI_FIT if purchase >= max(MIN_PURCHASE_INTENT, float(
+            getattr(settings, "trend_min_purchase_intent", 0) or 0)) else LOW_INTENT_MIN_FIT
+        for m in matches:
+            verdict = cached.get((topic["key"], m["product_id"]))
+            if verdict is None or verdict[0] < floor:
+                continue   # unverified, vetoed, or a forced match on a low-intent trend
+            fit, why = verdict
+            kept.append({**m, "score": round(0.6 * m["score"] + 0.4 * fit, 1), "fit": fit,
+                         "reason": "; ".join(x for x in (f"AI {fit:.0f}: {why}" if why else "",
+                                                         m.get("reason", "")) if x)})
+        kept.sort(key=lambda m: m["score"], reverse=True)
+        out[topic["key"]] = kept
     return out
 
 

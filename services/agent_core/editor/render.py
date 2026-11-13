@@ -53,6 +53,7 @@ class RenderResult:
     voice: bool
     subtitles: Path
     music_metadata: dict | None = None
+    variants: list | None = None
 
 
 def _motion_filter(motion: str, frames: int, w: int, h: int, fps: int) -> str:
@@ -81,6 +82,34 @@ def _fill_916(label_in: str, w: int, h: int, prescale: float) -> str:
         f"[fgsrc]scale={pw}:{ph}:force_original_aspect_ratio=decrease,setsar=1[fg];"
         f"[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p"
     )
+
+
+def best_cut(settings, source: Path, length: float, duration: float) -> float:
+    """Start time of the most lively `duration`-second stretch of an AI clip (the take is
+    ~10 s; the edit keeps 2-6 s). Skips the first 0.3 s and the last 0.5 s where generated
+    clips often hold still. Returns 0.0 when the clip cannot be read."""
+    try:
+        import subprocess
+
+        import numpy as np
+        fps = 4
+        raw = subprocess.run([settings.ffmpeg_path, "-hide_banner", "-loglevel", "error", "-i", str(source),
+                              "-vf", f"fps={fps},scale=32:56,format=gray", "-f", "rawvideo", "-"],
+                             capture_output=True, timeout=120).stdout
+        frames = np.frombuffer(raw, dtype=np.uint8)
+        frames = frames[: len(frames) // (32 * 56) * (32 * 56)].reshape(-1, 32 * 56).astype(np.float32)
+    except Exception:  # noqa: BLE001
+        return 0.0
+    if len(frames) < 4:
+        return 0.0
+    motion = np.abs(np.diff(frames, axis=0)).mean(axis=1)          # motion between frames
+    win = max(1, int(round(duration * fps)))
+    first, last = int(0.3 * fps), len(motion) - int(0.5 * fps) - win
+    if last <= first:
+        return 0.0
+    sums = [motion[k:k + win].sum() for k in range(first, last + 1)]
+    best = first + int(np.argmax(sums))
+    return round(best / fps, 2)
 
 
 def render_scene(settings, scene: dict, duration: float, out: Path, index: int) -> Path:
@@ -206,6 +235,13 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
             try:
                 src_len = probe(settings.ffprobe_path, Path(scene["source"]))["duration_sec"]
                 available = max(0.5, src_len - float(scene.get("start") or 0))
+                if (scene.get("generated") and not scene.get("talking")
+                        and not float(scene.get("start") or 0) and src_len > float(scene.get("duration") or 4) + 1):
+                    shift = best_cut(settings, Path(scene["source"]), src_len,
+                                     float(scene.get("duration") or 4))
+                    if shift:
+                        scene = scenes[i] = {**scene, "start": shift}
+                        available = max(0.5, src_len - shift)
                 if scene.get("generated") and scene.get("talking"):
                     # start the cut just before the character starts talking
                     from .voice_track import speech_windows
@@ -342,7 +378,13 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     norm = "loudnorm=I=-14:TP=-1.5:LRA=11," if has_sound else ""
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0:dropout_transition=0,"
                    f"{norm}aresample=44100[aout]")
-    filters.append(f"[{vchain}]ass=subs.ass[vout]")
+    alt_hooks = [h for h in (timeline.get("hook_variants") or [])
+                 if h and h != timeline.get("hook")][: max(0, int(getattr(settings, "variants", 1)) - 1)]
+    if alt_hooks:   # one decode, two encodes: the hook-free picture is reused for A/B hooks
+        filters.append(f"[{vchain}]split=2[vsub][vclean]")
+        filters.append("[vsub]ass=subs.ass[vout]")
+    else:
+        filters.append(f"[{vchain}]ass=subs.ass[vout]")
 
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -354,6 +396,9 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
             "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
             "-profile:v", "high", "-movflags", "+faststart",
             "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "final.mp4",
+            *(["-map", "[vclean]", "-map", "[aout]", "-t", f"{total:.3f}", "-c:v", "libx264",
+               "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+               "clean.mp4"] if alt_hooks else []),
         ], cwd=work_dir)
     except FFmpegError as exc:
         raise RenderError(f"Final mix failed: {exc}") from exc
@@ -362,6 +407,20 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         if hasattr(music, "cleanup"):
             music.cleanup()
     shutil.move(str(tmp_out), output)
+    variants = []
+    for k, hook in enumerate(alt_hooks, start=2):
+        try:   # same body, only the first seconds' hook text differs
+            build_ass(work_dir / f"subs_{k}.ass", settings.render_width, settings.render_height,
+                      settings.font_name, captions, hook, hook_end, labels, cta, cta_start, total,
+                      single_layer=single_layer)
+            target = output.with_name(f"{output.stem}_hook{k}{output.suffix}")
+            run_ffmpeg(settings.ffmpeg_path, [
+                "-i", "clean.mp4", "-vf", f"ass=subs_{k}.ass", "-c:v", "libx264", "-preset", "fast",
+                "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-c:a", "copy",
+                str(target)], cwd=work_dir)
+            variants.append({"index": k, "hook": hook, "path": str(target)})
+        except FFmpegError as exc:
+            log.warning("hook variant %s failed: %s", k, exc)
     scene_report = [
         {**scene, "rendered_duration": durations[i], "start_at": round(starts[i], 3),
          "voice": any(p.audio for p in voices[i].parts), "revoice": voices[i].revoice,
@@ -371,7 +430,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     shutil.copyfile(subs, output.with_suffix(".ass"))
     return RenderResult(output, round(total, 3), scene_report,
                         str(music) if music else None, has_voice, output.with_suffix(".ass"),
-                        music_metadata=music_meta)
+                        music_metadata=music_meta, variants=variants)
 
 
 def extract_cover(settings, video: Path, at: float, out: Path) -> Path:

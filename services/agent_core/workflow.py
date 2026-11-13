@@ -257,15 +257,23 @@ Nếu video không thể hiện sản phẩm rõ ràng, để product_category r
 """.strip()
 
 
-def _normalise_hashtags(values: Any) -> list[str]:
+# Internal names and generic English tags read as machine-made to a Vietnamese audience.
+_BAD_TAG = re.compile(
+    r"^(viralcreator|productreview|templateseries|creationbranch|ugc|aigenerated|"
+    r"dog\w*|cat\w*|countryside\w*|life\w*|running|funny\w*|cute\w*|family\w*|love\w*|"
+    r"happy\w*|kitchen\w*|homedecor|fyp|foryou\w*|viral|trending|shorts|reels?)$", re.I)
+
+
+def _normalise_hashtags(values: Any, limit: int = 5) -> list[str]:
     if not isinstance(values, list):
         return []
     result = []
     for value in values:
         tag = re.sub(r"[^\wÀ-ỹ]", "", str(value).replace("#", ""), flags=re.UNICODE)
-        if tag:
+        if tag and not _BAD_TAG.match(tag):
             result.append("#" + tag[:40])
-    return list(dict.fromkeys(result))[:10]
+    unique = list(dict.fromkeys(t.lower() for t in result))
+    return [next(t for t in result if t.lower() == u) for u in unique][:limit]
 
 
 def _ai_status(exc: Exception) -> str:
@@ -554,6 +562,7 @@ def _process(settings, job: dict) -> dict:
                   review_status="NEEDS_PRODUCT")
         try:
             affiliate_link = affiliate.create_short_link(offer_url, sub_id=job_id)
+            _mark_sub_id(settings, job_id)
         except Exception as exc:  # noqa: BLE001
             _stop(settings, job_id, "WAITING_FOR_SHOPEE_API", exc)
         update_job(db, job_id, product_item_id=product["item_id"], product_name=product["name"],
@@ -638,10 +647,18 @@ def _related_affiliates(settings, plan: dict, analysis: dict) -> list[dict]:
     keywords = plan.get("affiliate_keywords") or []
     if not keywords:
         return []
-    return match_products(settings, {
-        "keyword": str(plan.get("title") or analysis.get("topic") or ""),
-        "intent": {"product_keywords": keywords},
-    }, limit=8)
+    topic = {"key": "job:" + str(plan.get("title") or analysis.get("topic") or "")[:80],
+             "keyword": str(plan.get("title") or analysis.get("topic") or ""),
+             "intent": {"product_keywords": keywords}}
+    found = match_products(settings, topic, limit=8)
+    if not found:
+        return []
+    from .trend_intel.matcher import verify_matches
+    try:   # the story's suggestions get the same AI check as trend matches
+        return verify_matches(settings, [(topic, found)]).get(topic["key"], [])
+    except Exception as exc:  # noqa: BLE001 - unverified suggestions are not offered
+        log.warning("affiliate suggestion check failed: %s", exc)
+        return []
 
 
 def attach_affiliate(settings, job_id: str, catalog_id: str) -> dict:
@@ -1010,6 +1027,7 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
     if strict:
         result.update({k: plan[k] for k in ("creation_branch", "storyboard_version", "style", "characters",
                                             "voice_cast", "style_profile", "audience_gender",
+                                            "hook_variants",
                                             "duration_target_seconds", "content_mode")
                        if k in plan})
     return result
@@ -1287,6 +1305,8 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
         "metadata": metadata, "analysis": analysis, "product": product,
         "affiliate_link": affiliate_link, "content": content, "timeline": timeline,
         "keyframes": saved_frames, "warnings": warnings,
+        "hook_variants": [{"index": 1, "hook": timeline.get("hook", ""), "path": str(video_out)}]
+        + list(getattr(result, "variants", None) or []),
         "music_metadata": getattr(result, "music_metadata", None),
         "quality": {
             "shopee": {"passed": shopee_qa.passed, "reasons": shopee_qa.reasons},
@@ -1406,6 +1426,7 @@ def select_product_for_job(settings, job_id: str, item_id: str, confirmed: bool 
                    last_error="Shopee Affiliate App ID or Secret is missing.")
         raise WorkflowError("Shopee Affiliate App ID or Secret is missing.")
     link = affiliate.create_short_link(str(offer_url), sub_id=job_id)
+    _mark_sub_id(settings, job_id)
     update_job(settings.database_path, job_id, product_item_id=str(product["item_id"]),
                product_name=str(product.get("name") or ""), affiliate_link=link,
                script_json=None, status="ANALYZED", review_status="PENDING")
@@ -1481,8 +1502,78 @@ def _local_to_utc(value: str, tz_name: str) -> str | None:
     return local.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _mark_sub_id(settings, job_id: str) -> None:
+    """The app built this link with sub_id = job id, so orders can be traced to the video."""
+    job = get_job(settings.database_path, job_id)
+    if job:
+        brief = json.loads(job.get("brief_json") or "{}")
+        brief["link_has_sub_id"] = True
+        update_job(settings.database_path, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
+
+
+def use_hook_variant(settings, job_id: str, index: int) -> dict:
+    """Make hook variant N the video that gets approved/published (A/B pick by the owner)."""
+    job = get_job(settings.database_path, job_id)
+    if not job or not job.get("output_path"):
+        raise WorkflowError("Video chưa dựng xong")
+    if job["status"] not in {"READY_FOR_REVIEW", "NEEDS_MEDIA_REVIEW"}:
+        raise WorkflowError("Chỉ đổi bản hook trước khi duyệt")
+    out = Path(job["output_path"])
+    manifest = json.loads((out.parent / "manifest.json").read_text(encoding="utf-8"))
+    variants = {int(v["index"]): v for v in manifest.get("hook_variants") or []}
+    if index not in variants or index == 1:
+        raise WorkflowError("Không có bản hook này")
+    chosen = Path(variants[index]["path"])
+    if not chosen.is_file() or chosen == out:
+        raise WorkflowError("File bản hook không còn")
+    # swap the two files' contents; paths stay fixed, so switching back and forth is safe
+    swap = out.with_name(out.stem + ".swap" + out.suffix)
+    shutil.copy2(out, swap)
+    shutil.copy2(chosen, out)
+    shutil.move(str(swap), chosen)
+    fb = Path(job.get("facebook_output_path") or "")
+    if fb.is_file():
+        shutil.copy2(out, fb)
+    variants[1]["hook"], variants[index]["hook"] = variants[index]["hook"], variants[1]["hook"]
+    manifest["hook_variants"] = [variants[k] for k in sorted(variants)]
+    timeline = json.loads(job.get("script_json") or "{}")
+    timeline["hook_variants"] = [variants[k]["hook"] for k in sorted(variants) if k != 1]
+    timeline["hook"] = variants[1]["hook"]
+    manifest["timeline"]["hook"] = timeline["hook"]
+    (out.parent / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2,
+                                                         default=str), encoding="utf-8")
+    content = json.loads(job.get("content_json") or "{}")
+    content["hook"] = timeline["hook"]
+    update_job(settings.database_path, job_id, script_json=json.dumps(timeline, ensure_ascii=False),
+               content_json=json.dumps(content, ensure_ascii=False))
+    return {"hook": timeline["hook"]}
+
+
+def link_check(settings, job: dict) -> dict:
+    """Is the product link right for this video? Blockers stop approval, notes only inform."""
+    brief = json.loads(job.get("brief_json") or "{}")
+    branch = brief.get("creation_branch")
+    link = str(job.get("affiliate_link") or "")
+    blockers, notes = [], []
+    if branch == "product_review" and not link:
+        blockers.append("Video review chưa có link affiliate của sản phẩm đang review")
+    if link and not _is_affiliate_link(link):
+        blockers.append("Link gắn kèm không phải link Shopee/TikTok hợp lệ")
+    if branch == "product_review" and link and job.get("product_item_id"):
+        offer = brief.get("offer") or {}
+        reviewed = str(offer.get("itemId") or offer.get("item_id") or "")
+        if reviewed and reviewed != str(job["product_item_id"]):
+            blockers.append("Link đang gắn thuộc sản phẩm khác với sản phẩm trong video")
+    if link and not brief.get("link_has_sub_id"):
+        notes.append(f"Link lấy từ kho (CSV/API data) chưa gắn Sub_id: đơn hàng không tách được theo "
+                     f"video. Muốn đo theo video, tạo Custom Link có Sub_id = {job['id']}.")
+    if branch in {"viral_creator", "template_series"} and not link:
+        notes.append("Video viral chưa gắn sản phẩm: chọn ở mục \"Gợi ý sản phẩm phù hợp\" (đã được AI xác nhận).")
+    return {"blockers": blockers, "notes": notes}
+
+
 def publish_blockers(settings, job: dict, platform: str, action: str = "draft") -> list[str]:
-    issues = []
+    issues = list(link_check(settings, job)["blockers"])
     if platform == "shopee":
         if "tiktok" in str(job.get("affiliate_link") or ""):
             issues.append("Sản phẩm TikTok Shop: không đăng lên Shopee Video")

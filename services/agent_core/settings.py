@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     cta_text: str = "Link sản phẩm ở giỏ hàng / bình luận"
     viral_review: bool = True
     viral_min_score: float = 7.0
-    variants: int = 1
+    variants: int = 3   # hook A/B: the main video + up to 2 alternative hooks (same body)
 
     # Stock footage and AI video generation (optional)
     pexels_api_key: SecretStr = SecretStr("")
@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     trend_news_keywords_per_run: int = 15
     trend_ai_topics_per_run: int = 20
     trend_rerank_topics: int = 5
-    trend_min_purchase_intent: float = 30.0
+    trend_min_purchase_intent: float = 40.0
     trend_weights: str = ""  # JSON, e.g. {"affiliate": 0.3, "growth": 0.2}
 
     # Automation

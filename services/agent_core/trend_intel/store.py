@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS trend_products (
     PRIMARY KEY (topic_key, product_id)
 );
 
+CREATE TABLE IF NOT EXISTS trend_pair_fit (
+    topic_key TEXT NOT NULL,
+    product_id TEXT NOT NULL,
+    name_hash TEXT NOT NULL,
+    fit REAL NOT NULL,
+    reason TEXT,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (topic_key, product_id, name_hash)
+);
+
 CREATE TABLE IF NOT EXISTS trend_source_usage (
     source TEXT NOT NULL,
     period TEXT NOT NULL,

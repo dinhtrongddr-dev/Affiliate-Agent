@@ -81,22 +81,30 @@ def run(settings, collect: bool = True, ask=None) -> dict:
     open_topics = [t for t in store.list_topics(db_path, 500, include_blocked=False,
                                                 since_hours=RECENT_HOURS)
                    if t.get("intent") and t["status"] in ("NEW", "MATCHED", "NO_MATCH")]
+    candidates_by_topic = []
     for t in open_topics:
         if products is None:
             from .. import catalog
             products = catalog.list_products(db_path, "score", limit=2000)
         found = matcher.match_products(settings, t, products=products, win_scores=win)
-        if found and reranked < settings.trend_rerank_topics:
-            try:
-                found = matcher.rerank(settings, t, found, ask=ask)
-                reranked += 1
-            except Exception as exc:  # noqa: BLE001
-                log.warning("rerank failed for %s: %s", t["key"], exc)
+        candidates_by_topic.append((t, found))
+    # Every candidate pair is checked by the AI (batched, cached), not just the top topics.
+    verified = {}
+    try:
+        verified = matcher.verify_matches(settings, [(t, f) for t, f in candidates_by_topic if f],
+                                          ask=ask)
+        reranked = sum(1 for _, f in candidates_by_topic if f)
+    except Exception as exc:  # noqa: BLE001 - AI down: nothing unverified is shown
+        log.warning("match verification failed: %s", exc)
+        summary["verify_error"] = str(exc)[:300]
+    for t, found in candidates_by_topic:
+        found = verified.get(t["key"], []) if found else []
         store.save_matches(db_path, t["key"], found)
         store.update_topic(db_path, t["key"], status="MATCHED" if found else "NO_MATCH")
         rescore(settings, t["key"], found[0]["score"] if found else None)
         matched += bool(found)
     summary["matched_topics"] = matched
+    summary["verified_topics"] = reranked
     summary["catalog_products"] = len(products or [])
     return summary
 

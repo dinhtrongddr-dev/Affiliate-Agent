@@ -277,8 +277,8 @@ class PipelineTests(unittest.TestCase):
 
             def ask(prompt):
                 calls.append(prompt)
-                if "Chấm độ phù hợp" in prompt:
-                    return {"ranking": [{"product_id": "shopee:1", "fit": 90, "reason": "đúng"}]}
+                if "kiểm duyệt ghép trend" in prompt:   # every pair is verified now
+                    return {"pairs": [{"pair": 0, "fit": 90, "reason": "đúng"}]}
                 return {"topics": [
                     {"key": "noi chien khong dau", "commercial": True, "purchase_intent": 85,
                      "product_keywords": ["nồi chiên không dầu"], "angle": "mẹo nấu nhanh"},

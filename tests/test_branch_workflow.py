@@ -122,20 +122,28 @@ def seed_catalog(settings):
 
 def test_post_story_affiliate_match_follows_explicit_story_keywords_only(settings):
     seed_catalog(settings)
-    with patch.object(workflow, "_client") as ai:
+    checked = []
+
+    def approve(_settings, items):   # the AI pair check sees exactly the keyword matches
+        checked.extend(m["product_id"] for _, found in items for m in found)
+        return {t["key"]: found for t, found in items}
+
+    with patch("agent_core.trend_intel.matcher.verify_matches", side_effect=approve):
         matches = workflow._related_affiliates(settings, {
             "title": "Bố và bí mật nhỏ", "affiliate_keywords": ["hộp đựng đồ chơi"]}, {})
         unrelated_title_only = workflow._related_affiliates(settings, {"title": "Son môi đỏ"}, {})
     assert {row["product_id"] for row in matches} == {"shopee:123"}
     assert unrelated_title_only == []
-    ai.assert_not_called()
+    assert checked == ["shopee:123"]
 
 
 def test_attach_affiliate_preserves_story_and_binary_without_queue_or_paid_calls(settings, tmp_path):
     seed_catalog(settings)
     job_id = workflow.create_trend_job(settings, "Bố giấu đồ chơi", creation_branch="viral_creator")
     plan = storyboard("viral_creator")
-    matches = workflow._related_affiliates(settings, plan, {})
+    with patch("agent_core.trend_intel.matcher.verify_matches",
+               side_effect=lambda _s, items: {t["key"]: f for t, f in items}):
+        matches = workflow._related_affiliates(settings, plan, {})
     job = db.get_job(settings.database_path, job_id)
     brief = json.loads(job["brief_json"])
     brief["affiliate_suggestions"] = matches

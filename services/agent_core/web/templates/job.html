@@ -118,6 +118,21 @@
     <div class="tab active" id="t-publish">
       {% if job.status in ('READY_FOR_REVIEW', 'APPROVED') %}
       <p class="muted small">Xem video bên trái. Khi hài lòng, chọn nơi đăng rồi bấm duyệt. Shopee mặc định lưu <b>bản nháp</b>.</p>
+      {% if hook_variants|length > 1 %}
+      <h3>Hook A/B ({{ hook_variants|length }} bản, cùng thân video)</h3>
+      <p class="small muted">Chỉ khác chữ 2 giây đầu. Bản đang chọn sẽ được duyệt/đăng.</p>
+      <div class="grid g2">
+      {% for v in hook_variants %}
+        <div class="scene">
+          <div class="small"><b>{{ 'Đang dùng' if v.index == 1 else 'Bản ' ~ v.index }}</b>: “{{ v.hook }}”</div>
+          <video controls preload="none" style="width:100%;max-height:260px" src="/files/{{ job.id }}/{{ v.file }}?v={{ job.updated_at }}"></video>
+          {% if v.index != 1 %}<button class="btn sm" onclick="api('/api/jobs/{{ job.id }}/hook-variant',{index:{{ v.index }}},{ok:'Đã chọn hook này',reload:true})">Dùng bản này</button>{% endif %}
+        </div>
+      {% endfor %}
+      </div>
+      {% endif %}
+      {% for b in link_info.blockers %}<div class="small err-text">⛔ {{ b }}</div>{% endfor %}
+      {% for n in link_info.notes %}<div class="small muted">ℹ️ {{ n }}</div>{% endfor %}
       {% for p, name in platform_labels.items() %}
       <div class="scene">
         <label class="check"><input type="checkbox" name="pf" value="{{ p }}" {{ 'disabled' if blockers[p] }}

@@ -174,6 +174,7 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
     schema = {
         "storyboard_version": 2, "creation_branch": branch, "title": "",
         "hook": "chữ hook 0-2 giây, <= 7 từ, viết thường có hoa đầu câu, không emoji",
+        "hook_variants": ["hook kiểu khác 1 (<= 7 từ)", "hook kiểu khác 2 (<= 7 từ)"],
         "content_mode": "affiliate" if branch == "product_review" else "viral",
         "style_profile": "ugc_phone|sitcom_bright", "music_mood": "funny|emotional|chill|upbeat",
         "audience_gender": "female|male|unisex (đối tượng dùng sản phẩm; viral để unisex)",
@@ -231,6 +232,8 @@ Hình ảnh:
 - reference_ids: tối đa 6 ID từ manifest được cung cấp; không tạo đường dẫn/URL.
 
 Chữ trên màn hình: chỉ "hook" (0-2 giây) và phụ đề do app tạo từ lines. Không thêm chữ khác, không emoji.
+"hook_variants": 2 hook KHÁC KIỂU với "hook" (vd tò mò / đồng cảm / bất ngờ), cùng khớp hình mở đầu,
+để app dựng 3 bản A/B chỉ khác chữ 2 giây đầu.
 Hook: {HOOK_FORMULAS}
 {avoid}
 Kết: viral/series kết bằng payoff trọn vẹn, cta ĐỂ RỖNG; review có thể cta nhẹ ("link mình để dưới").
@@ -380,6 +383,9 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
         if plan["storyboard_version"] not in (1, 2) or isinstance(plan["storyboard_version"], bool):
             raise ValueError("Unsupported storyboard version")
         result["storyboard_version"] = plan["storyboard_version"]
+    if explicit and isinstance(plan.get("hook_variants"), list):
+        variants = [short_hook(h) for h in plan["hook_variants"][:3] if str(h or "").strip()]
+        result["hook_variants"] = [h for h in dict.fromkeys(variants) if h and h != result["hook"]][:2]
     for key, limit in (("style_profile", 30), ("audience_gender", 10)):
         if plan.get(key):
             result[key] = _text(plan[key], limit).lower()
