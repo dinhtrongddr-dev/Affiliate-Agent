@@ -342,7 +342,8 @@ class WebTests(unittest.TestCase):
                                                                  "product_id": "shopee:1"}, headers=h)
                 self.assertEqual(res.status_code, 200, res.text)
                 job = db.get_job(path, res.json()["job_id"])
-                self.assertEqual(job["affiliate_link"], "https://s.shopee.vn/a1")
+                self.assertFalse(job["affiliate_link"])
+                self.assertEqual(json.loads(job["brief_json"])["creation_branch"], "viral_creator")
                 self.assertEqual(store.get_topic(path, key)["status"], "USED")
                 manual = client.post("/api/intel/manual", json={"text": "#bepnhaminh | 2M"},
                                      headers=h)

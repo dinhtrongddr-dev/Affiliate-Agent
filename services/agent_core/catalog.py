@@ -177,7 +177,7 @@ def _fix_sales_column(products: list[dict]) -> None:
         p["revenue"] = None
 
 
-def import_products(db_path, products: list[dict]) -> dict:
+def import_products(db_path, products: list[dict], *, record_observations: bool = True) -> dict:
     ensure_schema(db_path)
     stamp = now_iso()
     inserted = updated = 0
@@ -213,6 +213,9 @@ def import_products(db_path, products: list[dict]) -> dict:
                 updated += 1
             else:
                 inserted += 1
+    if not record_observations:
+        return {"inserted": inserted, "updated": updated, "total": len(products),
+                "intelligence_snapshots": 0}
     # Keep a timestamped intelligence observation alongside the existing video catalog.
     from .shopee_intelligence.catalog import save_product as save_intel_product
     intel_saved = 0

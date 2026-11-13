@@ -6,6 +6,8 @@ Extend the existing product catalog with timestamped product observations, commi
 
 ## Approved data workflow
 
+The optional [AddLiveTag connection](addlive-data-api.md) adds an internal data-reference workflow at `/intelligence`. It keeps source/cache provenance and does not replace media permissions or confirm owner-specific earnings. CSV/manual import below remains available.
+
 1. Sign in to the Shopee Affiliate Dashboard using the account owner's KOC/KOL session.
 2. Open **Hoa hồng Sản phẩm** and use Shopee's own **Lấy link hàng loạt** workflow for products selected by the account owner.
 3. Import the CSV downloaded from Shopee into **Kho sản phẩm** at /catalog.
