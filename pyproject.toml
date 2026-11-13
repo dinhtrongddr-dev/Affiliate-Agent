@@ -17,7 +17,9 @@ dependencies = [
     "uvicorn>=0.29",
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
-    "edge-tts>=7.0",
+    "vieneu>=3.8",
+    "py-cpuinfo>=9.0",
+    "soundfile>=0.12",
     # embedded muse2api gateway (services/muse_gateway)
     "requests>=2.32",
     "websocket-client>=1.8",

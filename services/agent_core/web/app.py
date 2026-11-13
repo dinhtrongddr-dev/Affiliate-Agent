@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -78,8 +79,9 @@ EDITABLE_SETTINGS = [
     ("AA_SHOPEE_AFFILIATE_ENABLED", "Bật Shopee Affiliate API", "bool", "Shopee"),
     ("AA_SHOPEE_SEED_KEYWORDS", "Từ khoá ngách (phẩy ngăn cách)", "text", "Shopee"),
     ("AA_TTS_ENABLED", "Bật giọng đọc AI", "bool", "Dựng video"),
-    ("AA_TTS_VOICE", "Giọng đọc", "voice", "Dựng video"),
-    ("AA_TTS_RATE", "Tốc độ đọc (vd +8%)", "text", "Dựng video"),
+    ("AA_TTS_MODE", "Chế độ đọc VieNeu", "tts_mode", "Dựng video"),
+    ("AA_TTS_VOICE", "Giọng đọc VieNeu", "voice", "Dựng video"),
+    ("AA_TTS_RATE", "Tốc độ đọc (vd +0% hoặc +8%)", "text", "Dựng video"),
     ("AA_MUSIC_VOLUME", "Âm lượng nhạc nền (0-1)", "text", "Dựng video"),
     ("AA_KEEP_SOURCE_AUDIO", "Giữ âm thanh gốc video base", "bool", "Dựng video"),
     ("AA_CTA_TEXT", "Câu CTA mặc định", "text", "Dựng video"),
@@ -129,6 +131,11 @@ def create_app(start_worker: bool = True) -> FastAPI:
             worker = Worker(settings)
             worker.start()
             state["worker"] = worker
+        if settings.tts_enabled:
+            import threading
+            from ..editor.tts import warmup_engine
+            threading.Thread(target=warmup_engine, args=(getattr(settings, "tts_mode", "fast"),),
+                             daemon=True, name="tts-warmup").start()
         yield
         if state["worker"]:
             state["worker"].stop()
@@ -169,6 +176,11 @@ def create_app(start_worker: bool = True) -> FastAPI:
             raise HTTPException(404, "Không tìm thấy job")
         return job
 
+    from .addlive import install_routes as install_addlive_routes
+    install_addlive_routes(app, S, render)
+    from .creation import install_routes as install_creation_routes
+    install_creation_routes(app, S, render)
+
     def health() -> list[dict]:
         s = S()
         aff = ShopeeAffiliateClient(s).credentials_status()["sections"]["shopee_affiliate"]
@@ -184,7 +196,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
              "hint": "Chạy scripts/open-shopee-login.cmd"},
             {"name": f"Nhạc nền ({len(music)} bài)", "ok": bool(music),
              "hint": f"Chép nhạc bản quyền vào {s.music}"},
-            {"name": "Giọng đọc AI", "ok": s.tts_enabled and find_spec("edge_tts") is not None,
+            {"name": "Giọng đọc AI (VieNeu)", "ok": s.tts_enabled and find_spec("vieneu") is not None,
              "hint": "Bật TTS trong Cài đặt"},
             {"name": "Video stock (Pexels)", "ok": bool(s.pexels_api_key.get_secret_value()),
              "hint": "Tuỳ chọn: thêm Pexels API key", "optional": True},
@@ -219,6 +231,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(request: Request, job_id: str):
+        from .creation import storyboard
         s = S()
         job = job_or_404(job_id)
         posts = db.list_platform_posts(s.database_path, job_id)
@@ -231,17 +244,18 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       brief=json.loads(job.get("brief_json") or "{}"),
                       busy=job["status"] in BUSY, active="jobs",
                       clips=list_clips(s, job_id),
+                      storyboard=storyboard(s, job_id),
                       gen_tasks=gen_engine.list_tasks(s.database_path, job_id, 50))
 
     @app.get("/trends", response_class=HTMLResponse)
-    def trends_page(request: Request, view: str = "products"):
+    def trends_page(request: Request, view: str = "all"):
         from ..trend_intel import analyzer, scoring, store as tstore
         s = S()
         topics = tstore.list_topics(s.database_path, 300)
         counts = {"products": 0, "all": 0, "skipped": 0}
         shown = []
         for t in topics:
-            skipped = t["safety"] == "BLOCKED" or t["status"] in ("NOT_COMMERCIAL", "IGNORED")
+            skipped = t["safety"] == "BLOCKED" or t["status"] == "IGNORED"
             counts["skipped" if skipped else "all"] += 1
             if t["status"] == "MATCHED" and not skipped:
                 counts["products"] += 1
@@ -271,7 +285,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       provider=provider.name if provider else "", base_url=s.videogen_base_url,
                       remaining=gen_engine.remaining_today(s), daily=s.videogen_daily_limit,
                       job_filter=job, active="generation", session=_muse_summary(s),
-                      gateway=_gateway_info(s))
+                      gateway=_gateway_info(s), muse_profiles=_muse_profile_summaries(s))
 
     def _gateway_info(s):
         from ..videogen import gateway
@@ -290,6 +304,53 @@ def create_app(start_worker: bool = True) -> FastAPI:
             return muse_session.summary(muse_session.load(s))
         except Exception:  # noqa: BLE001 - unreadable store: show as not imported
             return None
+
+    def _muse_profile_summaries(s):
+        from ..videogen import muse_profiles
+        from ..secret_store import SecretStoreError
+        try:
+            return muse_profiles.summaries(s)
+        except (SecretStoreError, ValueError):
+            return []
+
+    @app.post("/api/muse/profiles")
+    async def api_muse_profiles(request: Request):
+        from ..videogen import gateway, muse_profiles
+        from ..secret_store import SecretStoreError
+        try:
+            body = await request.json()
+        except ValueError as exc:
+            raise HTTPException(400, "Không đọc được JSON") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(400, "Cần nội dung JSON và thông tin profile")
+        text = body.get("json") or ""
+        if not isinstance(text, str) or len(text) > 2_000_000:
+            raise HTTPException(400, "JSON profile không hợp lệ hoặc quá lớn (tối đa 2 MB)")
+        try:
+            info = await run_in_threadpool(muse_profiles.save, S(), text,
+                                          profile_id=body.get("profile_id") or "",
+                                          label=body.get("label") or "", proxy=body.get("proxy"))
+        except muse_profiles.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except SecretStoreError as exc:
+            raise HTTPException(400, "Không lưu được kho profile mã hoá Windows") from exc
+        if gateway.enabled(S()) and await run_in_threadpool(gateway.healthy, S()):
+            try:
+                info["pushed"] = await run_in_threadpool(muse_profiles.push_to_gateway, S())
+            except muse_profiles.ProfileError as exc:
+                info["push_error"] = str(exc)
+        return info
+
+    @app.post("/api/muse/profiles/push")
+    def api_muse_profiles_push():
+        from ..videogen import muse_profiles
+        from ..secret_store import SecretStoreError
+        try:
+            return muse_profiles.push_to_gateway(S())
+        except muse_profiles.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except SecretStoreError as exc:
+            raise HTTPException(400, "Không đọc được kho profile mã hoá Windows") from exc
 
     @app.post("/api/muse/session")
     async def api_muse_session(request: Request):
@@ -407,13 +468,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
             raise HTTPException(404, "Không có trend")
         if topic["safety"] == "BLOCKED":
             raise HTTPException(400, "Trend nhạy cảm: không gắn sản phẩm")
-        product = catalog.get_product(s.database_path, str(body.get("product_id") or ""))
-        if not product:
-            raise HTTPException(400, "Chọn một sản phẩm đã khớp")
         intent = topic.get("intent") or {}
-        offer = catalog.as_offer(product)
-        if not offer["affiliateLink"]:
-            offer["affiliateLink"] = product.get("tiktok_link") or ""
         notes = " ".join(x for x in (
             f"Trend đang hot ở VN: {topic['keyword']}.",
             f"Góc nối: {intent['angle']}" if intent.get("angle") else "",
@@ -421,12 +476,12 @@ def create_app(start_worker: bool = True) -> FastAPI:
             f"Bối cảnh: {topic['notes']}" if topic.get("notes") else "") if x)
         try:
             job_id = workflow.create_trend_job(s, topic["keyword"], notes,
-                                               intent.get("product_keywords") or [], offer=offer,
-                                               url=topic.get("url") or "")
+                                               intent.get("product_keywords") or [],
+                                               url=topic.get("url") or "",
+                                               creation_branch="viral_creator")
         except workflow.WorkflowError as exc:
             raise HTTPException(400, str(exc)) from exc
         tstore.update_topic(s.database_path, topic["key"], status="USED", job_id=job_id)
-        catalog.update_product(s.database_path, product["id"], status="VIDEO_QUEUED", job_id=job_id)
         db.enqueue_task(s.database_path, "process", job_id)
         return {"job_id": job_id}
 
@@ -444,21 +499,17 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       seeds=s.seed_keywords)
 
     @app.get("/catalog", response_class=HTMLResponse)
-    def catalog_page(request: Request, sort: str = "win", q: str = "", status: str = ""):
+    def catalog_page(request: Request, sort: str = "score", q: str = "", status: str = "", platform: str = ""):
         s = S()
-        db_path = s.database_path
-        rows = catalog.list_products(db_path, "new" if sort == "win" else sort, q, status)
-        for product in rows:
-            intel = (shopee_intelligence.get_product(db_path, product["item_id"])
-                     if product.get("platform") == "shopee" else None)
-            product["intel"] = intel or {}
-            product["win_score"] = intel.get("win_score") if intel else None
-            product["score_status"] = intel.get("score_status", "PROVISIONAL") if intel else "PROVISIONAL"
-            product["daily_sales_velocity"] = intel.get("daily_sales_velocity") if intel else None
-            product["commission_total_rate"] = intel.get("commission_total_rate") if intel else product.get("commission_rate")
-        if sort == "win":
-            rows.sort(key=lambda p: (p.get("win_score") or -1, p.get("commission_total_rate") or 0), reverse=True)
-        return render(request, "catalog.html", products=rows, sort=sort, q=q, status=status)
+        from ..shopee_intelligence import auto_sync, unified_catalog, addlive_config
+        from .. import shopee_schedule
+        unified_catalog.reconcile(s)
+        rows = unified_catalog.list_unified(s, q=q, sort=sort, status=status)
+        if platform in {"shopee", "tiktok"}:
+            rows = [p for p in rows if p.get("platform") == platform]
+        return render(request, "catalog.html", products=rows, sort=sort, q=q, status=status,
+                      platform=platform, sync=auto_sync.status(s), addlive=addlive_config.summary(s),
+                      schedule=shopee_schedule.status(s))
 
     @app.post("/api/catalog/import")
     async def api_catalog_import(file: UploadFile = File(...), tiktok: str = Form("false")):
@@ -474,6 +525,11 @@ def create_app(start_worker: bool = True) -> FastAPI:
                 p["platform"] = "tiktok"
                 p["tiktok_link"] = p["tiktok_link"] or p["affiliate_link"] or p["product_link"]
         result = catalog.import_products(S().database_path, products)
+        from ..shopee_intelligence.unified_catalog import reconcile, unhide_product
+        for p in products:
+            if p['platform'] == 'shopee':
+                unhide_product(S().database_path, p['item_id'])
+        reconcile(S())
         queue("trend_analyse")  # re-match open trends against the new catalog
         return result
 
@@ -526,9 +582,11 @@ def create_app(start_worker: bool = True) -> FastAPI:
                 xtra = float(data.get("xtra_commission_rate") or 0)
                 data["commission_total_rate"] = base + xtra
             try:
-                shopee_intelligence.save_product(
+                saved = shopee_intelligence.save_product(
                     s.database_path, data, source_type="manual_snapshot"
                 )
+                from ..shopee_intelligence.unified_catalog import mirror_product
+                mirror_product(s.database_path, saved['product_id'])
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
         return {"ok": True}
@@ -536,8 +594,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
     @app.post("/api/catalog/delete")
     async def api_catalog_delete(request: Request):
         body = await request.json()
+        from ..shopee_intelligence.unified_catalog import hide_product
         for pid in body.get("ids") or []:
-            catalog.delete_product(S().database_path, str(pid))
+            hide_product(S().database_path, str(pid))
         return {"ok": True}
 
     @app.post("/api/catalog/make-videos")
@@ -553,12 +612,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
             product = catalog.get_product(s.database_path, pid)
             if not product:
                 continue
-            if not (product.get("affiliate_link") or product.get("tiktok_link")):
-                errors.append(f"{product['name'][:40]}: thiếu link affiliate")
-                continue
             offer = catalog.as_offer(product)
             if not offer["affiliateLink"]:
-                offer["affiliateLink"] = product["tiktok_link"]
+                offer["affiliateLink"] = product.get("tiktok_link") or ""
             if product.get("platform") == "shopee":
                 intel = shopee_intelligence.get_product(s.database_path, product["item_id"])
                 if not intel or intel.get("media_usage_rights") not in {"owned", "licensed", "permission", "official"}:
@@ -566,9 +622,12 @@ def create_app(start_worker: bool = True) -> FastAPI:
                 elif intel.get("image_url"):
                     offer["imageUrl"] = intel["image_url"]
             try:
+                from ..creation_context import build_product_context
                 job_id = workflow.create_trend_job(s, str(body.get("topic") or product["name"]),
                                                    str(body.get("notes") or product.get("notes") or ""),
-                                                   offer=offer)
+                                                   offer=offer, creation_branch="product_review",
+                                                   experience=body.get("experience") or {},
+                                                   product_context=build_product_context(s, product["item_id"]))
             except workflow.WorkflowError as exc:
                 errors.append(f"{product['name'][:40]}: {exc}")
                 continue
@@ -810,7 +869,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
             raise HTTPException(404)
         keywords = json.loads(trend.get("keywords_json") or "[]")
         job_id = workflow.create_trend_job(s, trend["title"], trend.get("notes") or "", keywords,
-                                           trend_id=trend_id, url=trend.get("url") or "")
+                                           trend_id=trend_id, url=trend.get("url") or "",
+                                           creation_branch="viral_creator")
         db.update_trend(s.database_path, trend_id, status="USED", job_id=job_id)
         queue("process", job_id)
         return {"job_id": job_id}
@@ -826,8 +886,13 @@ def create_app(start_worker: bool = True) -> FastAPI:
         offer = body.get("offer") or {}
         if not offer.get("itemId"):
             raise HTTPException(400, "Thiếu sản phẩm")
+        from ..creation_context import build_product_context
+        context = build_product_context(S(), str(offer["itemId"]))
+        offer["imageUrl"] = next((r["url"] for r in context["image_references"] if r["approvedForRender"]), "")
         job_id = workflow.create_trend_job(S(), str(body.get("topic") or offer.get("productName") or ""),
-                                           str(body.get("notes") or ""), offer=offer)
+                                           str(body.get("notes") or ""), offer=offer,
+                                           creation_branch="product_review", experience=body.get("experience") or {},
+                                           product_context=context)
         queue("process", job_id)
         return {"job_id": job_id}
 
@@ -904,6 +969,25 @@ def create_app(start_worker: bool = True) -> FastAPI:
                                                     str(body.get("secret") or ""))
         return {"saved": True}
 
+    @app.post("/api/tts/preview")
+    async def api_tts_preview(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        voice = str(body.get("voice") or "Mai Anh")
+        mode = str(body.get("mode") or "fast")
+        rate = str(body.get("rate") or "+0%")
+        custom_text = str(body.get("text") or "").strip()
+        text = custom_text or f"Chào bạn, tôi là {voice}."
+        try:
+            from ..editor.tts import synthesize_bytes
+            data, media_type = synthesize_bytes(text, voice=voice, mode=mode, rate=rate)
+            from fastapi import Response
+            return Response(content=data, media_type=media_type)
+        except Exception as exc:
+            return JSONResponse({"error": f"Lỗi tạo giọng đọc: {exc}"}, 500)
+
     @app.get("/review/{job_id}")
     def review_redirect(job_id: str):
         return RedirectResponse(f"/jobs/{job_id}")
@@ -912,14 +996,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
 
 
 def run(host: str | None = None, port: int | None = None, open_browser: bool = True) -> None:
-    import threading
-    import webbrowser
-
-    import uvicorn
+    from .launcher import serve
 
     settings = get_settings()
     host = host or settings.web_host
     port = port or settings.web_port
-    if open_browser:
-        threading.Timer(1.5, lambda: webbrowser.open(f"http://{host}:{port}/")).start()
-    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+    serve(create_app, host, port, open_browser=open_browser)

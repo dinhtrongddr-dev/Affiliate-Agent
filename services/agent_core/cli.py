@@ -141,6 +141,7 @@ def main() -> int:
     regen.add_argument("job_id")
     sub.add_parser("trends-fetch", help="fetch Google Trends Vietnam")
     sub.add_parser("sync-conversions", help="pull Shopee conversion report (30 days)")
+    sub.add_parser("sync-shopee", help="sync Shopee product data only, without starting video workers")
 
     tiktok = sub.add_parser("tiktok-upload", help="send a reviewed video to TikTok")
     tiktok.add_argument("job_id")
@@ -208,6 +209,13 @@ def main() -> int:
         from .analytics import sync_conversions
         _print(sync_conversions(settings))
         return 0
+    if args.command == "sync-shopee":
+        from .shopee_intelligence import auto_sync
+        from .shopee_intelligence.unified_catalog import reconcile
+        reconcile(settings)
+        result = auto_sync.run(settings)
+        _print(result)
+        return 1 if result.get("status") in {"failed", "partial", "blocked"} else 0
     if args.command == "tiktok-upload":
         if not args.confirm:
             _print({"status": "NOT_STARTED", "message": "Repeat with --confirm to upload."})

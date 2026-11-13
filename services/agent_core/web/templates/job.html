@@ -15,6 +15,50 @@
   </div>
 </div>
 
+{% if brief.creation_branch %}
+<section style="padding:18px 0;border-bottom:1px solid #ddd;margin-bottom:22px">
+  <h2>{{ {'product_review':'Review sản phẩm','viral_creator':'Video viral','template_series':'Series nhân vật'}.get(brief.creation_branch,brief.creation_branch) }}</h2>
+  {% if brief.template %}<p class="small">{{ brief.template.label or brief.template.title or brief.template.id }} · phiên bản {{ brief.template.version }}</p>{% endif %}
+  <details><summary>Storyboard đã lên kế hoạch</summary>
+    {% if storyboard %}
+      {% if storyboard.hook %}<p><b>Hook:</b> {{ storyboard.hook }}</p>{% endif %}
+      {% if storyboard.style %}<p class="small"><b>Phong cách:</b> {{ storyboard.style }}</p>{% endif %}
+      {% if storyboard.characters %}<p class="small"><b>Nhân vật:</b> {% for character in storyboard.characters %}{{ character.name or character.id }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+      {% for scene in storyboard.scenes or [] %}
+      <article style="padding:12px 0;border-bottom:1px solid #eee">
+        <b>Cảnh {{ loop.index }}{% if scene.duration %} · {{ scene.duration }} giây{% endif %}</b>
+        {% if scene.voiceover %}<p>{{ scene.voiceover }}</p>{% endif %}
+        {% if scene.text %}<p class="small">Chữ trên màn hình: {{ scene.text }}</p>{% endif %}
+        {% if scene.visual_prompt or scene.visual_description %}<p class="small muted">{{ scene.visual_prompt or scene.visual_description }}</p>{% endif %}
+        {% for field, caption in [('action','Hành động'),('setting','Bối cảnh'),('camera','Máy quay'),('lighting','Ánh sáng'),('emotion','Cảm xúc'),('continuity','Tính liên tục'),('dialogue','Hội thoại'),('sound','Âm thanh'),('transition','Chuyển cảnh')] %}
+          {% if (scene.shot or {}).get(field) %}<p class="small"><b>{{ caption }}:</b> {{ (scene.shot or {}).get(field) }}</p>{% endif %}
+        {% endfor %}
+        {% if scene.gen_prompt %}<details class="small"><summary>Chỉ dẫn tạo cảnh</summary><p style="white-space:pre-wrap">{{ scene.gen_prompt }}</p></details>{% endif %}
+        {% if scene.reference_ids %}<p class="small muted">Tham khảo: {{ scene.reference_ids|join(', ') }}</p>{% endif %}
+      </article>
+      {% endfor %}
+      <details><summary>Dữ liệu storyboard</summary><pre style="white-space:pre-wrap;max-height:520px;overflow:auto">{{ storyboard | tojson(indent=2) }}</pre></details>
+    {% else %}<p class="muted">Storyboard xuất hiện sau khi lập kế hoạch hoàn tất.</p>{% endif %}
+  </details>
+  {% if brief.affiliate_suggestions %}
+  <h3>Gợi ý sản phẩm phù hợp</h3>
+  <p class="small muted">Chọn sản phẩm sau khi xem storyboard. Việc gắn sản phẩm không tự đăng video.</p>
+  {% for suggestion in brief.affiliate_suggestions %}
+    <div class="row" style="padding:8px 0">
+      <span>{{ suggestion.name or suggestion.product_name or suggestion.product_id or suggestion.id }}</span>
+      <span class="small muted">{{ suggestion.reason or '' }}</span>
+      {% if job.status in ('READY_FOR_REVIEW','NEEDS_MEDIA_REVIEW') %}<button class="btn sm" data-affiliate-id="{{ suggestion.catalog_id or suggestion.product_id or suggestion.id }}" onclick="api('/jobs/{{ job.id }}/affiliate',{catalog_id:this.dataset.affiliateId},{ok:'Đã gắn sản phẩm',reload:true})">Gắn sản phẩm</button>{% else %}<span class="small muted">Chờ xử lý ổn định để gắn sản phẩm</span>{% endif %}
+    </div>
+  {% endfor %}
+  {% endif %}
+  {% if brief.creation_branch == 'product_review' and not job.affiliate_link %}
+    <p class="small">Review chưa có link affiliate. <a href="/catalog">Thêm link trong Kho sản phẩm</a>, rồi gắn lại sản phẩm vào video khi có gợi ý phù hợp.</p>
+    {% set review_catalog_id = (brief.offer or {}).get('catalogId') %}
+    {% if review_catalog_id and job.status in ('READY_FOR_REVIEW','NEEDS_MEDIA_REVIEW') %}<button class="btn sm" data-catalog-id="{{ review_catalog_id }}" onclick="api('/jobs/{{ job.id }}/affiliate',{catalog_id:this.dataset.catalogId},{ok:'Đã gắn sản phẩm',reload:true})">Gắn link đã lưu cho sản phẩm review</button>{% endif %}
+  {% endif %}
+</section>
+{% endif %}
+
 {% if gen_tasks %}
 <div class="card" style="margin-bottom:16px">
   <div class="row space"><b>🎞 Clip AI (Muse) cho video này</b><a class="btn sm" href="/generation?job={{ job.id }}">Xem hàng đợi</a></div>
@@ -22,7 +66,7 @@
     <tr><td>{{ 'Ảnh nhân vật' if t.scene_index < 0 else 'Cảnh %d'|format(t.scene_index + 1) }}{% if t.attempt > 1 %} · lần {{ t.attempt }}{% endif %}</td>
       <td><span class="badge {{ {'DOWNLOADED':'ok','FAILED':'err','CANCELLED':'','SUBMITTED':'run','SUBMITTING':'run','PENDING':'info'}.get(t.status,'') }}">{{ {'DOWNLOADED':'Xong','FAILED':'Lỗi','CANCELLED':'Đã huỷ','SUBMITTED':'Đang tạo','SUBMITTING':'Đang gửi','PENDING':'Chờ'}.get(t.status, t.status) }}</span></td>
       <td class="muted">{{ (t.error or '')[:140] }}</td></tr>{% endfor %}</table>
-  {% if job.status == 'WAITING_FOR_GENERATION' %}<p class="small muted">Muse đang tạo clip (mỗi clip vài phút). Clip lỗi sẽ tự thử lại 1 lần; nếu vẫn lỗi, cảnh đó dùng clip của bạn / video stock / ảnh sản phẩm. Có thể tắt app, khi mở lại app sẽ dò tiếp, không tạo trùng.</p>{% endif %}
+  {% if job.status == 'WAITING_FOR_GENERATION' %}<p class="small muted">{% if brief.creation_branch %}Muse đang tạo các cảnh theo storyboard. Cảnh chưa đủ hoặc thiếu ảnh nhân vật sẽ chặn dựng video để bạn kiểm tra; không tự thay bằng cảnh khác.{% else %}Muse đang tạo clip (mỗi clip vài phút). Clip lỗi sẽ tự thử lại 1 lần; nếu vẫn lỗi, cảnh đó dùng clip của bạn / video stock / ảnh sản phẩm. Có thể tắt app, khi mở lại app sẽ dò tiếp, không tạo trùng.{% endif %}</p>{% endif %}
 </div>
 {% endif %}
 
@@ -129,7 +173,8 @@
       </div>
       {% if script.render %}<p class="small muted">Lần dựng gần nhất: {{ script.render.duration }}s ·
         {{ 'có giọng đọc' if script.render.voice else 'không có giọng' }} ·
-        nhạc: {{ (script.render.music or 'chưa có').split('\\')[-1] }}</p>{% endif %}
+        nhạc: {{ (script.render.music_metadata.title if script.render.music_metadata else (script.render.music or 'Ambient Floor')).split('\\')[-1] }}</p>
+      {% if script.render.music_metadata %}<p class="small muted">🎵 Nhạc Mixkit: {{ script.render.music_metadata.title }} ({{ script.render.music_metadata.score }}/100) · Giấy phép: {{ script.render.music_metadata.license }} · Đã dọn dẹp file tạm</p>{% endif %}{% endif %}
       {% else %}<p class="muted">Chưa có kịch bản.</p>{% endif %}
     </div>
 

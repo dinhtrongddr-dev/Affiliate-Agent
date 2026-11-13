@@ -55,8 +55,10 @@ class Settings(BaseSettings):
 
     # Creative / rendering
     tts_enabled: bool = True
-    tts_voice: str = "vi-VN-HoaiMyNeural"
-    tts_rate: str = "+8%"
+    tts_voice: str = "Mai Anh"
+    tts_mode: str = "fast"
+    tts_precision: str = "auto"
+    tts_rate: str = "+0%"
     music_dir: Path | None = None
     music_volume: float = 0.22
     keep_source_audio: bool = False
@@ -86,6 +88,7 @@ class Settings(BaseSettings):
     videogen_clip_seconds: int = 6
     videogen_character: bool = True      # make one character reference image first
     videogen_task_timeout_minutes: int = 30
+    videogen_continuity_chain: bool = False  # link consecutive AI scenes using last-frame continuity
     muse_embedded: bool = True           # app runs the bundled muse2api gateway itself
     muse_gateway_port: int = 18620
     muse_cdp_port: int = 19210

@@ -62,6 +62,9 @@ def handle_task(settings, task: dict):
             return {"skipped": "Shopee Affiliate API disabled"}
         from .analytics import sync_conversions
         return sync_conversions(settings)
+    if kind == "sync_shopee":
+        from .shopee_intelligence import auto_sync
+        return auto_sync.run(settings, sync_day=payload.get("sync_day"))
     if kind == "scan":
         from .media import scan_inbox
         results = scan_inbox(settings)
@@ -136,6 +139,10 @@ class Worker:
     # ------------------------------------------------------------ loop
     def _periodic(self) -> None:
         now = time.monotonic()
+        if now - self.last_run.get("_shopee_due", -1e9) >= 60:
+            self.last_run["_shopee_due"] = now
+            from .shopee_intelligence import auto_sync
+            auto_sync.enqueue_due(self.settings)
         for kind, interval in PERIODIC.items():
             if now - self.last_run.get(kind, -interval) >= interval:
                 self.last_run[kind] = now
@@ -154,6 +161,11 @@ class Worker:
 
     def run(self) -> None:
         log.info("Worker started")
+        try:
+            from .shopee_intelligence.unified_catalog import reconcile
+            reconcile(self.settings)
+        except Exception:  # noqa: BLE001
+            log.exception("Shopee catalog reconciliation requires attention")
         while not self.stop_event.is_set():
             try:
                 self._periodic()

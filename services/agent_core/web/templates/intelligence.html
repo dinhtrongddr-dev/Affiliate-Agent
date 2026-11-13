@@ -1,15 +1,72 @@
 {% extends "base.html" %}
 {% block title %}Shopee Product Intelligence · Affiliate Agent{% endblock %}
 {% block content %}
+<style>@media(max-width:1000px){nav.side .worker{position:static;margin-top:12px}}</style>
 <h1>Shopee Product Intelligence</h1>
 <p class="sub">Kho dữ liệu sản phẩm, hoa hồng KOC/KOL, lịch sử bán và điểm cơ hội Affiliate.</p>
+<section class="card" id="addlive-connection" style="margin-bottom:16px">
+  <div class="row space"><h2>Kết nối dữ liệu Sàn Cam</h2><span class="badge {{ 'ok' if addlive.configured else 'warn' }}">{{ 'Đã lưu API key' if addlive.configured else 'Chưa có API key' }}</span></div>
+  <p class="small muted">Nguồn: <a href="https://data.addlivetag.com" target="_blank" rel="noopener">data.addlivetag.com ↗</a> · Dữ liệu tham khảo cho công cụ nội bộ. Giá/hoa hồng có thể đến từ cache; kiểm tra lại trước khi chọn sản phẩm.</p>
+  <details {{ 'open' if not addlive.configured }}><summary>Cấu hình kết nối và tier tài khoản</summary>
+    <form id="addliveConfig" class="grid g3" style="margin-top:12px">
+      <label>API key<input name="api_key" type="password" autocomplete="new-password" placeholder="{{ 'Để trống để giữ key đã lưu' if addlive.configured else 'Dán API key' }}"></label>
+      <label>Hoa hồng sàn cơ bản (%)<input name="base_rate" type="number" min="0" max="100" step="0.01" value="{{ addlive.base_rate if addlive.base_rate is not none else '' }}" placeholder="Ví dụ 8; để trống nếu chưa biết"></label>
+      <label>Trần hoa hồng sàn (VND)<input name="cap" type="number" min="0" step="1" value="{{ addlive.cap }}" required></label>
+      <label>Affiliate ID (để tạo link của bạn)<input name="affiliate_id" inputmode="numeric" value="{{ addlive.affiliate_id }}" placeholder="Không phải API key"></label>
+      <label>sub_id (tối đa 5 phần)<input name="sub_id" value="{{ addlive.sub_id }}" placeholder="publisher-campaign-source-post-note"></label>
+      <div style="align-self:end"><button class="btn" type="submit">Lưu kết nối</button></div>
+    </form>
+    <p class="small muted">Key mã hoá Windows, chỉ được gửi từ máy chủ đến nguồn API; không hiển thị lại. Khai đúng tier để so sánh lịch sử hoa hồng; chưa có Affiliate ID thì app giữ link gốc và Custom Link hiện có.</p>
+  </details>
+</section>
+<div class="grid g2" style="align-items:start;margin-bottom:16px">
+  <section class="card">
+    <h2>Tra sản phẩm và đưa vào kho</h2>
+    <form id="addliveLookup" class="stack">
+      <label for="data-refs">ID hoặc link sản phẩm</label>
+      <textarea id="data-refs" name="references" rows="4" required placeholder="1589295236&#10;https://shopee.vn/product/123/456"></textarea>
+      <p class="small muted">Tối đa 100 mục, mỗi dòng một mục. Ưu tiên ID/link gốc; link rút gọn chỉ tra từng sản phẩm, khi tắt chế độ chỉ cache.</p>
+      <div class="row"><label class="check"><input name="cache_only" type="checkbox" checked> Chỉ đọc cache</label>
+        <label>Số mục gọi nguồn tối đa <input name="max_api" type="number" min="0" max="20" value="10" style="width:80px"></label></div>
+      <button class="btn primary" type="submit">Tra cứu & lưu dữ liệu dùng được</button>
+    </form>
+    <p id="data-lookup-status" class="small muted" role="status"></p>
+    <div id="data-lookup-result" style="overflow-x:auto"></div>
+    <a class="btn sm" href="/intelligence">Cập nhật danh sách bên dưới</a> <a class="btn sm" href="/catalog">Mở kho làm video →</a>
+  </section>
+  <section class="card">
+    <h2>Khám phá sản phẩm / shop / chiến dịch</h2>
+    <form id="addliveOffers" class="grid g2">
+      <label>Loại dữ liệu<select name="kind"><option value="products">Sản phẩm có hoa hồng</option><option value="shops">Shop / thương hiệu</option><option value="campaigns">Chiến dịch đang chạy</option><option value="shop-products">Sản phẩm của một shop</option></select></label>
+      <label>Từ khoá<input name="keyword" placeholder="Ví dụ: máy xay mini"></label>
+      <label>Shop ID<input name="shop_id" inputmode="numeric" placeholder="Dùng với sản phẩm của shop"></label>
+      <label>Trang<input name="page" type="number" min="1" max="1000" value="1"></label>
+      <label>Số kết quả<input name="limit" type="number" min="1" max="50" value="20"></label>
+      <div style="align-self:end"><button class="btn primary" type="submit">Tìm dữ liệu</button></div>
+    </form>
+    <p id="data-offers-status" class="small muted" role="status"></p>
+    <div id="data-offers-result" style="overflow-x:auto"></div>
+  </section>
+</div>
+<section class="card" style="margin-bottom:16px">
+  <h2>Lịch sử giá và hoa hồng</h2>
+  <form id="addliveHistory" class="row">
+    <input name="item_ids" aria-label="ID sản phẩm xem lịch sử" placeholder="ID sản phẩm, ngăn bằng dấu phẩy (tối đa 50)" style="flex:1;min-width:220px" required>
+    <label>Số ngày <input name="days" type="number" min="1" max="730" value="90" style="width:90px"></label>
+    <button class="btn" type="submit">Xem lịch sử</button>
+  </form>
+  <p class="small muted">Lịch sử theo ngày, chỉ lấy mốc thay đổi để giảm dữ liệu. Giá thấp nhất và biến động hoa hồng giúp chọn thời điểm; không dùng lịch sử giá để suy ra tốc độ bán.</p>
+  <p id="data-history-status" class="small muted" role="status"></p>
+  <div id="data-history-result" style="overflow-x:auto"></div>
+</section>
 <div class="grid g4" style="margin-bottom:16px">
   <div class="card stat"><div class="n">{{ summary.products }}</div><div class="l">Sản phẩm</div></div>
   <div class="card stat"><div class="n">{{ summary.linked }}</div><div class="l">Đã có Custom Link</div></div>
   <div class="card stat"><div class="n">{{ summary.high_commission }}</div><div class="l">Hoa hồng từ 10%</div></div>
   <div class="card stat"><div class="n">{{ summary.rights_cleared }}</div><div class="l">Media đã xác nhận quyền</div></div>
 </div>
-<div class="grid hero" style="margin-bottom:16px">
+<details class="card" style="margin-bottom:16px"><summary>Nhập CSV / nhập tay (tuỳ chọn)</summary>
+<div class="grid g2" style="margin:16px 0">
   <section class="card">
     <h2>1. Nhập dữ liệu sản phẩm</h2>
     <p class="small muted">Dùng CSV do bạn xuất/cung cấp hoặc file theo mẫu. Mỗi lần nhập sẽ tạo một mốc quan sát để tính tốc độ tăng trưởng.</p>
@@ -55,6 +112,7 @@
   </form>
   <p id="productResult" class="small muted"></p>
 </section>
+</details>
 <section class="card">
   <div class="row space">
     <div><h2>Kho sản phẩm</h2><p class="small muted">Điểm Win là thang tham khảo 100 điểm; sản phẩm chưa có hai mốc dữ liệu sẽ được đánh dấu tạm tính.</p></div>
@@ -75,15 +133,15 @@
       <tr><th>Sản phẩm</th><th>Giá</th><th>Đã bán</th><th>HH Shopee + Xtra</th><th>Tăng/ngày</th><th>Win Score</th><th>Media</th><th>Thao tác</th></tr>
       {% for p in products %}
       <tr>
-        <td><b>{{ p.product_name }}</b><div class="small muted">{{ p.shop_name or 'Chưa có shop' }} · ID {{ p.item_id or p.product_id }}</div><div class="small"><a href="{{ p.product_url }}" target="_blank" rel="noopener">Mở sản phẩm ↗</a></div></td>
+        <td><b>{{ p.product_name }}</b><div class="small muted">{{ p.shop_name or 'Chưa có shop' }} · ID {{ p.item_id or p.product_id }} · {{ p.source_type }}</div><div class="small"><a href="{{ p.product_url }}" target="_blank" rel="noopener">Mở sản phẩm ↗</a></div></td>
         <td class="small">{{ "{:,.0f}".format(p.current_price or 0) }}đ</td>
         <td class="small">{{ "{:,}".format(p.total_sold or 0) }}</td>
         <td class="small">{{ "%.2f"|format(p.base_commission_rate or 0) }}% + {{ "%.2f"|format(p.xtra_commission_rate or 0) }}%</td>
         <td class="small">{{ "%.1f"|format(p.daily_sales_velocity) if p.daily_sales_velocity is not none else 'Chờ snapshot' }}</td>
         <td><b>{{ "%.1f"|format(p.win_score) }}</b><div class="small muted">{{ 'Đã quan sát' if p.score_status=='OBSERVED' else 'Tạm tính' }}</div></td>
         <td class="small">{{ p.media_usage_rights }}{% if p.image_url %}<div><a href="{{ p.image_url }}" target="_blank" rel="noopener">Ảnh ↗</a></div>{% endif %}{% if p.video_url %}<div><a href="{{ p.video_url }}" target="_blank" rel="noopener">Video ↗</a></div>{% endif %}</td>
-        <td class="small">
-          {% if p.affiliate_link %}<button class="btn sm primary" onclick="makeVideo('{{ p.product_id }}')">Làm video</button><div><a href="{{ p.affiliate_link }}" target="_blank" rel="noopener">Mở Affiliate Link ↗</a></div>{% else %}<span class="muted">Cần tạo Custom Link</span>{% endif %}
+        <td class="small"><button class="btn sm" type="button" data-history-id="{{ p.item_id or p.product_id }}">Lịch sử giá / HH</button>
+          <button class="btn sm primary" onclick="makeVideo('{{ p.product_id }}')">Viết review</button>{% if p.affiliate_link %}<div><a href="{{ p.affiliate_link }}" target="_blank" rel="noopener">Mở Affiliate Link ↗</a></div>{% else %}<span class="muted">Có thể gắn link sau</span>{% endif %}
           {% if p.score_notes %}<details><summary>Chi tiết điểm</summary><ul>{% for note in p.score_notes %}<li>{{ note }}</li>{% endfor %}</ul></details>{% endif %}
         </td>
       </tr>
@@ -95,6 +153,81 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const dataMoney = value => value === null || value === undefined ? 'Chưa có' : Number(value).toLocaleString('vi-VN')+'đ';
+function dataTable(target, headers, rows){
+  const box=document.getElementById(target);box.replaceChildren();
+  if(!rows.length){box.textContent='Không có dữ liệu phù hợp.';return;}
+  const table=document.createElement('table'),head=table.insertRow();
+  for(const title of headers){const th=document.createElement('th');th.textContent=title;head.append(th);}
+  for(const values of rows){const row=table.insertRow();for(const value of values){const cell=row.insertCell();if(value instanceof Node)cell.append(value);else cell.textContent=value===null||value===undefined?'—':String(value);}}
+  box.append(table);
+}
+function dataSource(result){
+  const bits=[result.dataSource?'Nguồn: '+result.dataSource:'',result.stale?'Dữ liệu cũ':'',result.warning||'',...(result.warnings||[])];
+  const limits=result.limits||{};
+  if(limits.sourceRateLimited||limits.sourceCooldownSeconds)bits.push('Nguồn đang nghỉ '+(limits.sourceCooldownSeconds||120)+' giây; không gửi tiếp.');
+  if(limits.truncated)bits.push('Kết quả bị cắt theo giới hạn nguồn.');
+  return bits.filter(Boolean).join(' · ');
+}
+async function dataBusy(form,status,action){
+  const button=form.querySelector('button[type=submit]');button.disabled=true;
+  const out=document.getElementById(status);out.textContent='Đang lấy dữ liệu...';
+  try{await action(out);}catch(error){out.textContent=error.message;}finally{button.disabled=false;}
+}
+document.getElementById('addliveConfig').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.currentTarget,body=Object.fromEntries(new FormData(form));
+  body.base_rate=body.base_rate===''?null:Number(body.base_rate);body.cap=Number(body.cap);
+  await dataBusy(form,'data-lookup-status',async out=>{await api('/api/intelligence/addlive/config',body);form.elements.api_key.value='';out.textContent='Đã lưu kết nối mã hoá.';toast('Đã lưu kết nối');});
+});
+async function dataLookup(references,cacheOnly,maxApi){
+  const result=await api('/api/intelligence/addlive/lookup',{references,cache_only:cacheOnly,max_api:maxApi});
+  document.getElementById('data-lookup-status').textContent='Đã lưu '+(result.imported||0)+' sản phẩm. '+dataSource(result);
+  const items=result.results||[];
+  dataTable('data-lookup-result',['Sản phẩm / ID','Trạng thái','Nguồn / ghi chú'],items.map(item=>[
+    item.normalized?.product_name||item.product_name||item.itemId||item.item_id||item.input||'',item.imported?'Đã lưu':(item.status||item.outcome||'Chưa lưu'),[item.dataSource||item.data_source||'',item.warning||item.message||item.reason||item.import_error||'',...(item.warnings||[])].filter(Boolean).join(' · ')]));
+  return result;
+}
+document.getElementById('addliveLookup').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.currentTarget;
+  const references=form.elements.references.value.split(/[\s,]+/).filter(Boolean);
+  await dataBusy(form,'data-lookup-status',()=>dataLookup(references,form.elements.cache_only.checked,Number(form.elements.max_api.value)));
+});
+document.getElementById('addliveOffers').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.currentTarget,body=Object.fromEntries(new FormData(form));body.page=Number(body.page);body.limit=Number(body.limit);
+  await dataBusy(form,'data-offers-status',async out=>{
+    const result=await api('/api/intelligence/addlive/offers',body),items=result.products||result.shops||result.offers||[];
+    out.textContent='Trang '+(result.page||body.page)+' · '+items.length+' kết quả'+(result.hasNextPage?' · còn trang tiếp':'')+' · '+dataSource(result);
+    dataTable('data-offers-result',['Tên','Giá / hoa hồng','Thao tác'],items.map(item=>{
+      const action=document.createElement('div');
+      const url=item.productLink||item.originalLink||item.link;
+      if(typeof url==='string'&&/^https:\/\/(?:[a-z0-9-]+\.)*shopee\.vn\//i.test(url)){const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener';link.textContent='Mở ↗';action.append(link);}
+      if(item.itemId){const button=document.createElement('button');button.className='btn sm';button.textContent='Đưa ID vào ô tra cứu';button.type='button';button.addEventListener('click',()=>{document.getElementById('data-refs').value=String(item.itemId);document.getElementById('addliveLookup').scrollIntoView({behavior:'smooth'});toast('Đã chọn sản phẩm. Bấm tra cứu để đọc cache, hoặc tắt chỉ cache để lấy mới.');});action.append(button);}
+      const rate=Number(item.commissionRate);const rateText=item.commissionRate===undefined?'':((rate<=1?rate*100:rate).toFixed(2)+'%');
+      return [item.name||item.productName||item.shopName||item.shopId||'',(item.price!==undefined?dataMoney(item.price)+' · ':'')+rateText,action];
+    }));
+  });
+});
+async function dataHistory(ids,days){
+  const result=await api('/api/intelligence/addlive/history',{item_ids:ids,days});
+  document.getElementById('data-history-status').textContent=dataSource(result)||'Đã lấy lịch sử theo ngày.';
+  dataTable('data-history-result',['Sản phẩm / ID','Giá hiện tại / thấp nhất / cao nhất','Hoa hồng & mốc dữ liệu'],(result.items||[]).map(item=>{
+    const price=item.price||{},stats=price.stats||{},commission=item.commission||{},points=commission.points||[];
+    const latest=[...points].sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0]||{};
+    const note=[item.status,commission.warning,item.warning,points.some(p=>p.suspect)?'Có mốc nghi vấn: cần kiểm tra':''].filter(Boolean).join(' · ');
+    const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Xem các ngày thay đổi';detail.append(summary);
+    const lines=document.createElement('pre');lines.className='small';lines.style.whiteSpace='pre-wrap';
+    lines.textContent=[...(price.points||[]).map(p=>p.date+': giá '+dataMoney(p.price)),...points.map(p=>p.date+': HH '+(p.totalRatePercent??'—')+'%'+(p.suspect?' (nghi vấn)':''))].join('\n')||'Không có mốc trong khoảng đã chọn.';detail.append(lines);
+    const extra=document.createElement('div');extra.textContent='HH gần nhất: '+(latest.totalRatePercent??'—')+'% · '+(stats.dayCount??price.count??0)+' ngày · '+note;extra.append(detail);
+    return [item.product?.productName||item.product?.name||item.itemId||item.input,dataMoney(stats.last)+' / '+dataMoney(stats.min)+' / '+dataMoney(stats.max)+(stats.isLowest?' · Giá thấp nhất kỳ':''),extra];
+  }));
+}
+document.getElementById('addliveHistory').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.currentTarget;
+  await dataBusy(form,'data-history-status',()=>dataHistory(form.elements.item_ids.value.split(/[\s,]+/).filter(Boolean),Number(form.elements.days.value)));
+});
+document.querySelectorAll('[data-history-id]').forEach(button=>button.addEventListener('click',()=>{
+  const form=document.getElementById('addliveHistory');form.elements.item_ids.value=button.dataset.historyId;form.requestSubmit();form.scrollIntoView({behavior:'smooth'});
+}));
 document.getElementById("csvImport").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);

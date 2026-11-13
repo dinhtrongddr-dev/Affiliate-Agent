@@ -2,7 +2,7 @@
 {% block content %}
 {% set LC = {'RISING':'ok','NEW':'info','PEAKING':'warn','SATURATED':'warn','STABLE':'info','DECLINING':'err','UNKNOWN':''} %}
 <div class="row space"><div><h1>Trend</h1>
-  <p class="sub">App tự thu trend Việt Nam, chấm điểm, loại trend nhạy cảm/không bán được, rồi ghép với sản phẩm trong Kho. Chỉ lấy <b>tín hiệu</b>, không tải video của người khác.</p></div>
+  <p class="sub">Chọn trend để sáng tạo câu chuyện gốc trước, gắn affiliate phù hợp sau. Trend an toàn vẫn dùng được khi chưa có sản phẩm khớp. Chỉ lấy tín hiệu, không tải video của người khác.</p></div>
   <div class="row">
     <button class="btn primary" onclick="api('/api/trends/fetch',undefined,{ok:'Đang thu thập & phân tích trend… (vài phút)',reload:true,delay:6000})">⟳ Thu thập &amp; phân tích</button>
     <button class="btn" onclick="api('/api/intel/analyse',undefined,{ok:'Đang phân tích lại…',reload:true,delay:5000})">Phân tích lại</button>
@@ -48,7 +48,7 @@
       {% if t.intent and t.intent.angle %}<div class="small">💡 {{ t.intent.angle }}</div>{% endif %}
       {% if t.notes %}<div class="small muted">{{ t.notes[:140] }}</div>{% endif %}
       {% if t.safety == 'BLOCKED' %}<div class="small"><span class="badge err">Nhạy cảm</span> {{ t.safety_reason }}</div>
-      {% elif t.status == 'NOT_COMMERCIAL' %}<div class="small"><span class="badge warn">Không bán được</span> {{ (t.intent or {}).reason }}</div>
+      {% elif t.status == 'NOT_COMMERCIAL' %}<div class="small"><span class="badge">Chưa có affiliate tự nhiên</span> {{ (t.intent or {}).reason }}</div>
       {% elif t.status == 'IGNORED' %}<div class="small"><span class="badge">Đã bỏ qua</span></div>{% endif %}
       {% if t.url %}<a class="small" href="{{ t.url }}" target="_blank" rel="noopener">nguồn</a>{% endif %}
       <details class="small" style="margin-top:4px"><summary>Chi tiết điểm &amp; dữ liệu</summary>
@@ -83,6 +83,7 @@
       {% endfor %}
     </td>
     <td style="white-space:nowrap">
+      {% if t.safety != 'BLOCKED' %}<button class="btn sm primary" onclick="makeJob('{{ t.key }}','')">Viết video viral</button>{% endif %}
       {% if t.job_id %}<a class="btn sm" href="/jobs/{{ t.job_id }}">Xem video</a>{% endif %}
       {% if t.status in ('IGNORED','NOT_COMMERCIAL') or t.safety == 'BLOCKED' %}
         <button class="btn sm" onclick="topic('{{ t.key }}','restore')">Mở lại</button>

@@ -1,36 +1,53 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="row space"><div><h1>Kho sản phẩm</h1>
-  <p class="sub">Sản phẩm hot, hoa hồng cao, đã có sẵn link affiliate. Chọn sản phẩm rồi bấm "Làm video", AI làm từ A–Z.</p></div></div>
-
-<div class="grid g2" style="align-items:start;margin-bottom:16px">
-  <div class="card">
-    <h2>1. Lấy dữ liệu từ Shopee Affiliate</h2>
-    <ol class="small" style="padding-left:18px;margin:0 0 10px">
-      <li>Mở <a href="https://affiliate.shopee.vn/offer/product_offer" target="_blank" rel="noopener">Shopee Affiliate → Hoa hồng Sản phẩm</a>, chọn tab <b>Bán chạy nhất</b> hoặc một ngành hàng.</li>
-      <li>Tick sản phẩm (hoặc "Chọn tất cả sản phẩm trên trang này"), tối đa 100.</li>
-      <li>Bấm <b>Lấy link hàng loạt</b> → <b>Lấy link</b>. Chrome sẽ tải về một file CSV.</li>
-      <li>Kéo thả file CSV vào ô bên dưới.</li>
-    </ol>
-    <div class="drop" id="csv-drop"><input type="file" accept=".csv,text/csv" hidden>
-      <b>Kéo thả file CSV vào đây</b> hoặc bấm để chọn
-      <div class="small muted">CSV xuất từ Shopee Affiliate, hoặc bảng tính có cột Tên sản phẩm / Link sản phẩm / Link ưu đãi / Hoa hồng</div></div>
-    <label class="check" style="margin-top:8px"><input type="checkbox" id="csv-tiktok"> Đây là danh sách sản phẩm TikTok Shop</label>
-  </div>
-  <div class="card">
-    <h2>2. TikTok Shop</h2>
-    <p class="small muted">TikTok không cho gắn link ngoài vào video. Hãy thêm sản phẩm vào <b>Showcase</b> trong TikTok Shop của bạn,
-      rồi dán link sản phẩm TikTok vào cột "Link TikTok" bên dưới. App gửi video vào <b>hộp thư nháp TikTok</b>, bạn gắn sản phẩm
-      (giỏ hàng) và nhạc trend trong app TikTok rồi đăng.</p>
-    <p class="small muted">Facebook dùng link Shopee (Link ưu đãi). TikTok dùng giỏ hàng TikTok Shop.</p>
-    <p class="small muted">Video viral của người khác: chỉ dùng làm <b>tham khảo format</b> (dán link ở trang Trend). App không tải hay đăng lại video của người khác.</p>
-  </div>
-</div>
-
+<style>
+.shopee-status{padding:14px 0;border-block:1px solid var(--line);margin:16px 0 20px}.shopee-status small{display:block;color:var(--muted)}
+.shopee-add{padding-bottom:22px}.shopee-add input{flex:1;min-width:200px}.shopee-advanced{margin:20px 0;padding:16px 0;border-top:1px solid var(--line)}
+.shopee-advanced summary{cursor:pointer;font-weight:600}.shopee-advanced[open] summary{margin-bottom:16px}.shopee-settings{padding-bottom:20px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.shopee-photo{width:64px;height:64px;object-fit:contain;border-radius:8px;background:white;flex:none}.shopee-product{display:flex;gap:12px;min-width:230px}
+.shopee-status time{font-variant-numeric:tabular-nums}.shopee-table{background:white;padding:12px;border-radius:10px}.shopee-table tr:hover td{transition:background .15s}
+@media(max-width:1000px){main{padding:20px 16px}nav.side .worker{position:static;margin-top:12px}}
+</style>
+<div class="row space"><div><h1>Sản phẩm Shopee</h1><p class="muted" style="margin:0">Dữ liệu, hoa hồng và sản phẩm làm video trong cùng một nơi.</p></div><a class="btn" href="/create">Sáng tạo mới</a></div>
+{% set cfg = sync.config %}{% set last = sync.last_run or {} %}
+<section class="shopee-status row space" aria-label="Trạng thái đồng bộ">
+  <div><b>{{ 'Đã lưu kết nối' if addlive.configured else 'Chưa kết nối dữ liệu' }}</b><small>{{ 'Tự động mỗi ngày lúc ' ~ cfg.local_time ~ ' · ' ~ cfg.timezone if cfg.enabled else 'Đồng bộ tự động đang tắt' }}</small></div>
+  <div><small>Lần gần nhất</small><span>{{ {'completed':'Đã hoàn tất','partial':'Cập nhật một phần','failed':'Chưa hoàn tất','blocked':'Nguồn tạm chặn','queued':'Đang chờ','running':'Đang đồng bộ','unknown':'Cần kiểm tra'}.get(last.status, 'Chưa đồng bộ') }}</span><small><time>{{ last.local_time or '—' }}</time></small>{% if last.result and last.status in ('completed','partial') %}<small>{{ last.result.imported }} / {{ last.result.requested }} sản phẩm{% if last.result.summary %} · {{ last.result.summary.get('fromApi',0) }} mới, {{ last.result.summary.get('fromCache',0) }} cache{% endif %}</small>{% endif %}</div>
+  <div><small>Lần tiếp theo</small><time>{{ sync.next_due_local or 'Cần kết nối / bật lịch' }}</time><small>{{ 'Chạy được khi app đóng · Windows cần đăng nhập' if schedule.get('installed') and schedule.get('managed') and schedule.get('enabled') else 'Chưa xác nhận lịch Windows; lưu cài đặt để thiết lập' }}</small></div>
+  <button class="btn" id="sync-now" type="button" onclick="syncNow(this)" {{ 'disabled' if not addlive.configured or last.status in ('queued','running') }}> {{ 'Đang đồng bộ…' if last.status in ('queued','running') else 'Đồng bộ ngay' }}</button>
+</section>
+{% if schedule.error %}<p class="err-text" role="alert">Lịch Windows: {{ schedule.error }}</p>{% endif %}
+{% if last.error %}<p class="err-text" role="alert">Đồng bộ chưa hoàn tất: {{ last.error }}{% if sync.retry_after %} · Nguồn yêu cầu chờ {{ sync.retry_after }} giây.{% endif %}</p>{% endif %}
+<form id="addliveLookup" class="shopee-add">
+  <label for="manual-reference">Thêm sản phẩm hấp dẫn</label>
+  <div class="row"><input id="manual-reference" name="reference" placeholder="Dán link Shopee hoặc ID sản phẩm" required><button class="btn primary" {{ 'disabled' if not addlive.configured }}>Thêm sản phẩm</button></div>
+  <div class="small muted" id="lookup-status" role="status">{{ 'Sản phẩm thêm vào sẽ được theo dõi trong lịch cập nhật hằng ngày.' if addlive.configured else 'Mở Cài đặt nâng cao bên dưới để lưu API key một lần.' }}</div>
+</form>
+<details class="shopee-advanced" {{ 'open' if not addlive.configured }}><summary>Cài đặt nâng cao · Kết nối, lịch và nhập CSV</summary>
+<form id="addliveConfig" class="grid g3 shopee-settings">
+<label>API key<input name="api_key" type="password" autocomplete="new-password" placeholder="Để trống để giữ key đã lưu"></label>
+<label>Hoa hồng sàn / tier (%)<input name="base_rate" type="number" min="0" max="100" step="0.01" value="{{ addlive.base_rate if addlive.base_rate is not none else '' }}"></label>
+<label>Trần hoa hồng sàn (VND)<input name="cap" type="number" min="0" value="{{ addlive.cap }}"></label>
+<label>Affiliate ID của bạn<input name="affiliate_id" inputmode="numeric" value="{{ addlive.affiliate_id }}"></label>
+<label>sub_id<input name="sub_id" value="{{ addlive.sub_id }}"></label><div style="align-self:end"><button class="btn">Lưu kết nối</button></div>
+<p class="small muted">Key được mã hoá trên Windows và không hiển thị lại. Link affiliate đã lưu của bạn được giữ nguyên.</p>
+</form>
+<form id="autoSyncConfig" class="grid g3 shopee-settings">
+<label class="check"><input name="enabled" type="checkbox" {{ 'checked' if cfg.enabled }}> Tự động đồng bộ mỗi ngày</label>
+<label>Giờ địa phương ({{ cfg.timezone }})<input name="local_time" type="time" value="{{ cfg.local_time }}" required></label>
+<label>Lượt lấy dữ liệu mới / ngày<input name="max_api" type="number" min="1" max="20" value="{{ cfg.max_api }}" required></label>
+<label>Sản phẩm khám phá mỗi ngày<input name="discovery_limit" type="number" min="1" max="20" value="{{ cfg.discovery_limit }}" required></label>
+<label>Sản phẩm theo dõi tối đa / lượt<input name="max_items" type="number" min="1" max="100" value="{{ cfg.max_items }}" required></label><div style="align-self:end"><button class="btn">Lưu lịch tự động</button></div>
+<p class="small muted">Mỗi ngày một lượt có giới hạn; bấm đồng bộ ngay không tạo lượt trùng. Máy cần bật và có mạng. Chỉ cập nhật dữ liệu, không tự tạo hoặc đăng video.</p>
+</form>
+<h2>Nhập danh sách có sẵn (tuỳ chọn)</h2><div class="drop" id="csv-drop"><input type="file" accept=".csv,text/csv" hidden><b>Chọn hoặc thả CSV Shopee Affiliate / TikTok Shop</b></div>
+<label class="check"><input type="checkbox" id="csv-tiktok"> Đây là danh sách TikTok Shop</label>
+<p class="small muted">Link Shopee dùng cho Facebook. Với TikTok, gắn sản phẩm trong Showcase khi đăng bản nháp.</p>
+</details>
 <form class="card row" method="get" style="margin-bottom:12px">
   <input name="q" value="{{ q }}" placeholder="Tìm tên sản phẩm" style="flex:1;min-width:200px">
   <select name="sort" style="width:220px">
-    <option value="score" {{ 'selected' if sort=='score' }}>Tiềm năng (hoa hồng × lượt bán)</option>
+    <option value="score" {{ 'selected' if sort in ('score','win') }}>Win Score cao nhất</option>
     <option value="commission" {{ 'selected' if sort=='commission' }}>Hoa hồng / đơn cao nhất</option>
     <option value="rate" {{ 'selected' if sort=='rate' }}>Tỉ lệ hoa hồng cao nhất</option>
     <option value="sold" {{ 'selected' if sort=='sold' }}>Bán chạy nhất</option>
@@ -41,38 +58,36 @@
     <option value="NEW" {{ 'selected' if status=='NEW' }}>Chưa làm video</option>
     <option value="VIDEO_QUEUED" {{ 'selected' if status=='VIDEO_QUEUED' }}>Đã làm video</option>
   </select>
+  <select name="platform" aria-label="Nền tảng" style="width:150px"><option value="">Mọi nền tảng</option><option value="shopee" {{ 'selected' if platform=='shopee' }}>Shopee</option><option value="tiktok" {{ 'selected' if platform=='tiktok' }}>TikTok Shop</option></select>
   <button class="btn">Lọc</button>
 </form>
 
-<div class="card">
+<div class="shopee-table">
   <div class="row space" style="margin-bottom:10px">
     <label class="check"><input type="checkbox" id="all" onchange="document.querySelectorAll('.pick').forEach(c=>c.checked=this.checked)"> Chọn tất cả ({{ products|length }})</label>
     <div class="row">
       <input id="notes" placeholder="Ý tưởng / trend muốn bắt (tuỳ chọn)" style="width:300px">
       <button class="btn primary" onclick="makeVideos()">🎬 Làm video cho sản phẩm đã chọn</button>
-      <button class="btn danger" onclick="delSelected()">Xoá</button>
+      <button class="btn danger" onclick="delSelected()">Ẩn sản phẩm</button>
     </div>
   </div>
   {% if products %}
   <div style="overflow-x:auto">
   <table>
-    <tr><th></th><th>Sản phẩm</th><th>Giá</th><th>Đã bán</th><th>Doanh thu</th><th>Hoa hồng</th><th>Win Score</th><th>Trend/ngày</th><th>Link</th><th>Ảnh / TikTok / Data</th><th></th></tr>
+    <tr><th></th><th>Sản phẩm</th><th>Giá / Đã bán</th><th>Hoa hồng</th><th>Tiềm năng</th><th>Dữ liệu / media</th><th></th></tr>
     {% for p in products %}
     <tr>
       <td><input type="checkbox" class="pick" value="{{ p.id }}" style="width:auto"></td>
-      <td style="max-width:320px"><b>{{ p.name }}</b><div class="small muted">{{ p.shop_name }} · {{ 'TikTok' if p.platform == 'tiktok' else 'Shopee' }} · {{ p.item_id }}</div></td>
-      <td class="small">{{ p.price_text or p.price or '-' }}</td>
-      <td class="small">{{ p.sold or '-' }}</td>
-      <td class="small">{{ '₫{:,.0f}'.format(p.revenue) if p.revenue else '-' }}</td>
+      <td style="max-width:320px"><div class="shopee-product">{% if p.image_url and p.image_url.startswith('https://') %}<img class="shopee-photo" src="{{ p.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}<div><b>{{ p.name }}</b><div class="small muted">{{ p.shop_name or '' }} · {{ 'TikTok' if p.platform == 'tiktok' else 'Shopee' }} · {{ p.item_id }}</div>
+        {% if p.affiliate_link %}<a class="small" href="{{ p.affiliate_link }}" target="_blank" rel="noopener">Link affiliate của bạn ↗</a>{% else %}<span class="small muted">Chưa có link affiliate</span>{% endif %}
+        {% if p.product_link %}<div><a class="small" href="{{ p.product_link }}" target="_blank" rel="noopener">Xem sản phẩm ↗</a></div>{% endif %}</div></div></td>
+      <td class="small">{{ '₫{:,.0f}'.format(p.price) if p.price is not none else (p.price_text or '-') }}<div class="muted">{{ p.sold if p.sold is not none else '—' }} đã bán</div></td>
       <td class="small"><b>{{ '%g' % p.commission_total_rate if p.commission_total_rate is not none else '-' }}%</b>
         {% if p.commission %}<div class="muted">₫{{ '{:,.0f}'.format(p.commission) }}/đơn</div>{% endif %}
         {% if p.intel.xtra_commission_rate %}<div class="muted">Xtra {{ '%g' % p.intel.xtra_commission_rate }}%</div>{% endif %}</td>
       <td class="small"><b>{{ '%.1f'|format(p.win_score) if p.win_score is not none else '-' }}</b>
-        <div class="muted">{{ 'Đã quan sát' if p.score_status=='OBSERVED' else 'Tạm tính' }}</div></td>
-      <td class="small">{{ '%.1f'|format(p.daily_sales_velocity) if p.daily_sales_velocity is not none else 'Chờ snapshot' }}</td>
-      <td class="small">{% if p.affiliate_link %}<a href="{{ p.affiliate_link }}" target="_blank" rel="noopener">affiliate</a>{% endif %}
-        {% if p.product_link %}<div><a href="{{ p.product_link }}" target="_blank" rel="noopener">sản phẩm</a></div>{% endif %}</td>
-      <td class="small" style="min-width:260px">
+        <div class="muted">{{ 'Đã quan sát' if p.score_status=='OBSERVED' else 'Tạm tính' }}</div><div class="muted">{{ ('%.1f'|format(p.daily_sales_velocity) ~ ' bán/ngày') if p.daily_sales_velocity is not none else 'Chờ thêm quan sát' }}</div></td>
+      <td class="small" style="min-width:170px"><b>{{ {'recent':'Mới cập nhật','stale':'Cần cập nhật','cached':'Dữ liệu cache','unknown':'Chưa xác định'}.get(p.freshness_status or 'unknown','Chưa xác định') }}</b><div class="muted">{{ p.last_synced_local or '—' }}</div><details><summary>Sửa dữ liệu / media</summary>
         <input data-field="image_url" placeholder="Link ảnh sản phẩm (https://...)" value="{{ p.image_url or '' }}" onchange="upd('{{ p.id }}',{image_url:this.value})">
         <input data-field="tiktok_link" placeholder="Link TikTok Shop (https://...)" value="{{ p.tiktok_link or '' }}" style="margin-top:4px" onchange="upd('{{ p.id }}',{tiktok_link:this.value})">
         <details style="margin-top:6px"><summary>Dữ liệu trend / Xtra / quyền media</summary>
@@ -96,15 +111,21 @@
           </select>
           <button class="btn sm" type="button" onclick="saveIntel('{{ p.id }}',this)">Lưu snapshot</button>
         </details>
-      </td>
-      <td>{% if p.job_id %}<a class="btn sm" href="/jobs/{{ p.job_id }}">Xem video</a>{% else %}<span class="badge info">Mới</span>{% endif %}</td>
+      </details></td>
+      <td>{% if p.job_id %}<a class="btn sm" href="/jobs/{{ p.job_id }}">Xem video</a>{% else %}<a class="btn sm" href="/create?branch=product_review&catalog_id={{ p.id|urlencode }}">Viết review</a>{% endif %}</td>
     </tr>{% endfor %}
   </table>
   </div>
-  {% else %}<p class="muted">Chưa có sản phẩm. Nhập file CSV từ Shopee Affiliate ở trên.</p>{% endif %}
+  {% else %}<p class="muted">Chưa có sản phẩm phù hợp. Thêm link / ID ở trên hoặc bấm Đồng bộ ngay để khám phá sản phẩm.</p>{% endif %}
 </div>
 {% endblock %}
 {% block scripts %}<script>
+async function busyForm(form, action){const buttons=[...form.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{await action();}catch(error){}finally{buttons.forEach(b=>b.disabled=false);}}
+document.getElementById('addliveLookup').addEventListener('submit',event=>{event.preventDefault();const form=event.currentTarget;busyForm(form,async()=>{document.getElementById('lookup-status').textContent='Đang lấy dữ liệu…';const result=await api('/api/intelligence/addlive/lookup',{references:[form.elements.reference.value.trim()],cache_only:false,max_api:1});document.getElementById('lookup-status').textContent='Đã lưu '+(result.imported||0)+' sản phẩm.';if(result.imported)location.reload();});});
+document.getElementById('addliveConfig').addEventListener('submit',event=>{event.preventDefault();const form=event.currentTarget;busyForm(form,async()=>{const body=Object.fromEntries(new FormData(form));body.base_rate=body.base_rate===''?null:Number(body.base_rate);body.cap=Number(body.cap);const result=await api('/api/intelligence/addlive/config',body);form.elements.api_key.value='';toast('Đã lưu kết nối');location.reload();});});
+document.getElementById('autoSyncConfig').addEventListener('submit',event=>{event.preventDefault();const form=event.currentTarget;busyForm(form,async()=>{const body=Object.fromEntries(new FormData(form));body.enabled=form.elements.enabled.checked;for(const key of ['max_api','discovery_limit','max_items'])body[key]=Number(body[key]);await api('/api/shopee/sync/config',body,{ok:'Đã lưu lịch tự động',reload:true});});});
+async function syncNow(button){button.disabled=true;try{const result=await api('/api/shopee/sync',{});toast(result.message);setTimeout(()=>location.reload(),600);}catch(error){button.disabled=false;}}
+
 (function(){
   const el=document.getElementById("csv-drop"), input=el.querySelector("input");
   el.addEventListener("click",()=>input.click());
@@ -156,7 +177,7 @@ async function makeVideos(){
 }
 async function delSelected(){
   const ids=picked(); if(!ids.length) return;
-  if(!confirm(`Xoá ${ids.length} sản phẩm khỏi kho?`)) return;
+  if(!confirm(`Ẩn ${ids.length} sản phẩm khỏi danh sách và đồng bộ tự động? Có thể thêm lại bằng link.`)) return;
   await api("/api/catalog/delete",{ids},{reload:true});
 }
 </script>{% endblock %}

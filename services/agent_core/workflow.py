@@ -16,7 +16,8 @@ from .ai_client import AIClient, AIClientError
 from .affiliate_client import ShopeeAffiliateClient, ShopeeAffiliateError
 from .assets import pexels_video, product_image
 from .videogen import engine as gen_engine
-from .videogen.providers import get_provider
+from .videogen.providers import ProviderError, get_provider
+from .creation_branches import normalise_brief
 from .clips import clip_dir, describe_for_ai, is_allowed_source, list_clips
 from .db import (
     JOB_FIELDS,
@@ -33,7 +34,13 @@ from .editor.render import RenderError, extract_cover, render_timeline
 from .editor.scenes import build_segments, detect_cuts, segment_thumbnails
 from .media import extract_keyframes, probe_video
 from .product_matcher import rank_products
-from .quality import validate_facebook_reel, validate_rendered_video, validate_shopee_video
+from .quality import (
+    evaluate_creative_quality,
+    inspect_rendered_video,
+    validate_facebook_reel,
+    validate_rendered_video,
+    validate_shopee_video,
+)
 from .shopee_video import upload_shopee_video
 
 log = logging.getLogger("affiliate_agent.workflow")
@@ -132,16 +139,20 @@ def _parse_json_reply(reply: dict[str, Any]) -> dict[str, Any]:
 def _image_messages(prompt: str, frame_paths: list[Path], protocol: str) -> list[dict]:
     parts: list[dict] = [{"type": "text", "text": prompt}]
     for path in frame_paths:
-        encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        data = Path(path).read_bytes()
+        mime = ("image/png" if data.startswith(b"\x89PNG\r\n\x1a\n") else
+                "image/webp" if data.startswith(b"RIFF") and data[8:12] == b"WEBP" else
+                "image/jpeg")
+        encoded = base64.b64encode(data).decode("ascii")
         if protocol.lower() == "anthropic-messages":
             parts.append({
                 "type": "image",
-                "source": {"type": "base64", "media_type": "image/jpeg", "data": encoded},
+                "source": {"type": "base64", "media_type": mime, "data": encoded},
             })
         else:
             parts.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
+                "image_url": {"url": f"data:{mime};base64,{encoded}"},
             })
     return [{"role": "user", "content": parts}]
 
@@ -277,7 +288,9 @@ Nếu không cái nào khớp, index = -1.
 
 def create_trend_job(settings, topic: str, notes: str = "", keywords: list[str] | None = None,
                      offer: dict | None = None, trend_id: int | None = None,
-                     url: str = "") -> str:
+                     url: str = "", *, creation_branch: str | None = None,
+                     experience: dict | None = None, template: dict | None = None,
+                     product_context: dict | None = None) -> str:
     topic = " ".join((topic or "").split())
     if not topic and not offer:
         raise WorkflowError("A trend topic or a product is required")
@@ -286,14 +299,24 @@ def create_trend_job(settings, topic: str, notes: str = "", keywords: list[str] 
              "keywords": keywords or [], "trend_id": trend_id, "reference_url": url}
     if offer:
         brief["offer"] = offer
+    if creation_branch:
+        if creation_branch == "product_review" and not offer:
+            raise WorkflowError("Nhánh review cần chọn sản phẩm trước khi tạo job.")
+        if creation_branch == "template_series":
+            from .creative_series import get_template
+            # Snapshot owner-managed references, never paths supplied by a caller/model.
+            template = get_template(settings, (template or {}).get("id", "suri-family"))
+            brief["template_references"] = template.get("reference_assets") or []
+        brief.update(normalise_brief(creation_branch, experience=experience,
+                                    template=template, product_context=product_context))
+    link = str((offer or {}).get("affiliateLink") or "").strip()
+    if link and not _is_affiliate_link(link):
+        raise WorkflowError("Link affiliate phải là link Shopee hoặc TikTok")
     register_job(settings.database_path, {
         "id": job_id, "source_path": "", "sha256": f"trend:{job_id}",
         "file_name": (brief["topic"] or "trend")[:120], "mode": "trend", "brief": brief,
     })
-    link = str((offer or {}).get("affiliateLink") or "").strip()
-    if offer and link:
-        if not _is_affiliate_link(link):
-            raise WorkflowError("Link affiliate phải là link Shopee hoặc TikTok")
+    if offer and (link or creation_branch == "product_review"):
         product = offer_to_product(offer)
         update_job(settings.database_path, job_id, product_item_id=product["item_id"],
                    product_name=product["name"], affiliate_link=link,
@@ -355,6 +378,9 @@ def _process(settings, job: dict) -> dict:
     except AIClientError as exc:
         _stop(settings, job_id, "WAITING_FOR_AI_CREDENTIALS", exc,
               keyframes=[str(p) for p in frame_paths])
+
+    if brief.get("creation_branch"):
+        return _process_creation(settings, job, brief, client)
 
     # 2) analysis ------------------------------------------------------------
     analysis = None
@@ -465,11 +491,110 @@ def _process(settings, job: dict) -> dict:
                               affiliate_link, frame_paths, metadata)
 
 
+def _process_creation(settings, job, brief, client) -> dict:
+    """Explicit branches keep content-first creation independent of product search."""
+    branch = brief["creation_branch"]
+    analysis = json.loads(job.get("analysis_json") or "null")
+    product, affiliate_link = {}, str(job.get("affiliate_link") or "")
+    if branch == "product_review":
+        if not brief.get("offer"):
+            _stop(settings, job["id"], "NEEDS_PRODUCT_REVIEW", "Chọn sản phẩm để viết review.")
+        product = offer_to_product(brief["offer"])
+        if not brief.get("product_context"):
+            from .creation_context import build_product_context
+            brief["product_context"] = build_product_context(
+                settings, product["item_id"], experience=brief.get("experience"))
+            update_job(settings.database_path, job["id"],
+                       brief_json=json.dumps(brief, ensure_ascii=False))
+        if not isinstance(analysis, dict):
+            analysis = {"topic": brief.get("topic") or product["name"],
+                        "visual_summary": product["name"], "angle": brief.get("notes", ""),
+                        "product_search_keywords": [product["name"]]}
+    elif not isinstance(analysis, dict):
+        try:
+            analysis = _ask_json(client, settings, creative.branch_ideation_prompt(brief),
+                                 temperature=0.5, max_tokens=1800)
+        except AIClientError as exc:
+            _stop(settings, job["id"], _ai_status(exc), exc)
+        except Exception as exc:  # noqa: BLE001
+            _stop(settings, job["id"], "AI_ANALYSIS_FAILED", exc)
+    update_job(settings.database_path, job["id"], status="ANALYZED", ai_generated=1,
+               last_error=None, analysis_json=json.dumps(analysis, ensure_ascii=False))
+    return _create_and_render(settings, get_job(settings.database_path, job["id"]), client,
+                              analysis, product, affiliate_link, [], {})
+
+
+def _related_affiliates(settings, plan: dict, analysis: dict) -> list[dict]:
+    from .trend_intel.matcher import match_products
+    keywords = plan.get("affiliate_keywords") or []
+    if not keywords:
+        return []
+    return match_products(settings, {
+        "keyword": str(plan.get("title") or analysis.get("topic") or ""),
+        "intent": {"product_keywords": keywords},
+    }, limit=8)
+
+
+def attach_affiliate(settings, job_id: str, catalog_id: str) -> dict:
+    """Attach an owner catalog link after the story; never enqueue or rewrite media."""
+    from . import catalog
+    job = get_job(settings.database_path, job_id)
+    if not job:
+        raise WorkflowError("Không tìm thấy job.")
+    if job["status"] in FINISHED_STATUSES - {"READY_FOR_REVIEW"}:
+        raise WorkflowError("Job đã được duyệt/đăng; không đổi link sau khi duyệt.")
+    brief = json.loads(job.get("brief_json") or "{}")
+    branch = brief.get("creation_branch")
+    if not branch:
+        raise WorkflowError("Gắn affiliate sau nội dung chỉ áp dụng cho nhánh sáng tạo mới.")
+    if job["status"] not in {"READY_FOR_REVIEW", "NEEDS_MEDIA_REVIEW"}:
+        raise WorkflowError("Chờ job dựng xong hoặc dừng để kiểm tra trước khi gắn affiliate.")
+    product = catalog.get_product(settings.database_path, catalog_id)
+    if not product:
+        raise WorkflowError("Sản phẩm không có trong danh mục của bạn.")
+    if branch in {"viral_creator", "template_series"} and catalog_id not in {
+            s.get("product_id") for s in brief.get("affiliate_suggestions") or []}:
+        raise WorkflowError("Sản phẩm chưa được xác định liên quan với storyboard này.")
+    if branch == "product_review" and str(product["item_id"]) != str(job.get("product_item_id")):
+        raise WorkflowError("Link phải thuộc đúng sản phẩm đang review.")
+    link = str(product.get("affiliate_link") or product.get("tiktok_link") or "")
+    if not link or not _is_affiliate_link(link):
+        raise WorkflowError("Sản phẩm chưa có link affiliate Shopee/TikTok hợp lệ của bạn.")
+    content = json.loads(job.get("content_json") or "{}")
+    if content:
+        content["tiktok_link"] = product.get("tiktok_link") or ""
+        finalise_content(content, link)
+    brief["attached_affiliate"] = {"catalog_id": catalog_id, "item_id": product["item_id"]}
+    update_job(settings.database_path, job_id, product_item_id=product["item_id"],
+               product_name=product["name"], affiliate_link=link,
+               brief_json=json.dumps(brief, ensure_ascii=False),
+               content_json=json.dumps(content, ensure_ascii=False))
+    state_path = _plan_state_path(settings, job_id)
+    if state_path.is_file():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["affiliate_link"] = link
+        # The media product remains the storyboard's original product (or empty).
+        state["attached_affiliate"] = {"catalog_id": catalog_id, "item_id": product["item_id"]}
+        _save_plan_state(settings, job_id, state)
+    output = Path(job.get("output_path") or "")
+    manifest_path = output.parent / "manifest.json"
+    if output.is_file() and manifest_path.is_file() and content:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.update(affiliate_link=link, content=content,
+                        affiliate_product={"item_id": product["item_id"], "name": product["name"]})
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output.parent / "caption.txt").write_text(content["shopee_caption"], encoding="utf-8")
+        _write_review_page(output.parent, manifest)
+    return {"job_id": job_id, "catalog_id": catalog_id, "affiliate_attached": True,
+            "regenerated": False}
+
+
 def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                        frame_paths, metadata) -> dict:
     job_id, mode = job["id"], job.get("mode") or "base"
     db = settings.database_path
     brief = json.loads(job.get("brief_json") or "{}")
+    branch = brief.get("creation_branch")
     asset_dir = settings.work_dir / job_id / "assets"
     product_img = product_image(product, asset_dir)
     user_clips = list_clips(settings, job_id)[:8]
@@ -479,7 +604,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     provider = get_provider(settings) if mode == "trend" else None
     gen_limit = (min(settings.videogen_max_clips, gen_engine.remaining_today(settings))
                  if provider and provider.supports("video") else 0)
-    if (mode == "trend" and not product_img and not user_clips and not gen_limit
+    if (not branch and mode == "trend" and not product_img and not user_clips and not gen_limit
             and not settings.pexels_api_key.get_secret_value()):
         # Nothing to show on screen: ask for visuals before spending AI calls.
         _stop(settings, job_id, "NEEDS_MEDIA_REVIEW",
@@ -489,8 +614,25 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     # 4) creative plan ---------------------------------------------------------
     update_job(db, job_id, status="SCRIPTING")
     segments: list[dict] = []
+    references = []
     try:
-        if mode == "base":
+        if branch:
+            from .storyboard_support import prepare_references, reference_legend
+            references = prepare_references(settings, job_id, brief, product, product_img, user_clips)
+            prompt_brief = {**brief, "analysis": analysis,
+                            "available_references": [{"id": r["id"], "role": r["role"]}
+                                                     for r in references],
+                            "has_product_image": bool(product_img)}
+            prompt = creative.branch_plan_prompt(
+                prompt_brief, product, bool(gen_limit), bool(settings.pexels_api_key.get_secret_value()),
+                clips_text, 1, gen_limit) + "\n" + reference_legend(references)
+            # Clip indexes refer to the library, while reference IDs refer to ordered attachments.
+            raw = _ask_json(client, settings, prompt,
+                            [Path(r["path"]) for r in references] or None,
+                            temperature=0.7, max_tokens=7000)
+            plan = creative.normalise_plan({**raw, "creation_branch": branch,
+                                            "storyboard_version": 1}, "trend", None, n_clips)
+        elif mode == "base":
             source = Path(job["source_path"])
             cuts = detect_cuts(settings.ffmpeg_path, source)
             segments = build_segments(cuts, float(metadata["duration_sec"]))
@@ -518,15 +660,23 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         score = None
         if settings.viral_review:
             try:
-                review = _ask_json(client, settings, creative.review_prompt(
-                    plan, product, settings.viral_min_score), temperature=0.3)
+                review_prompt = (creative.branch_review_prompt(
+                    plan, product, settings.viral_min_score, prompt_brief) if branch else
+                    creative.review_prompt(plan, product, settings.viral_min_score))
+                review = _ask_json(client, settings, review_prompt, temperature=0.3,
+                                   max_tokens=7000 if branch else 2400)
                 score = float(review.get("score")) if review.get("score") is not None else None
                 if review.get("revised") and (score is None or score < settings.viral_min_score):
-                    plan = creative.normalise_plan(review["revised"], mode, segments, n_clips)
+                    revised = review["revised"]
+                    if branch:
+                        revised = {**revised, "creation_branch": branch, "storyboard_version": 1}
+                    plan = creative.normalise_plan(revised, mode, segments, n_clips)
                     plan["revised_after_review"] = review.get("issues") or True
                     try:  # score the rewrite so the UI shows the final script's score
-                        again = _ask_json(client, settings, creative.review_prompt(
-                            plan, product, 0), temperature=0.2, max_tokens=600)
+                        again_prompt = (creative.branch_review_prompt(plan, product, 0, prompt_brief)
+                                        if branch else creative.review_prompt(plan, product, 0))
+                        again = _ask_json(client, settings, again_prompt, temperature=0.2,
+                                          max_tokens=600)
                         score = float(again.get("score", score))
                     except Exception:  # noqa: BLE001
                         pass
@@ -540,11 +690,36 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         _stop(settings, job_id, "CONTENT_GENERATION_FAILED", exc)
 
     # 5) AI clips (Muse): submit and wait without blocking the worker -------
+    reference_issues = []
+    if branch:
+        from .storyboard_support import attach_references, reference_errors
+        try:
+            attach_references(plan, brief, references)
+            reference_issues = reference_errors(plan, brief, references)
+        except ProviderError as exc:
+            reference_issues = [str(exc)]
+        if branch in {"viral_creator", "template_series"}:
+            brief["affiliate_suggestions"] = _related_affiliates(settings, plan, analysis)
+            attached = brief.get("attached_affiliate", {}).get("catalog_id")
+            if attached and attached not in {s["product_id"] for s in brief["affiliate_suggestions"]}:
+                brief.pop("attached_affiliate", None)
+                affiliate_link = ""
+                update_job(db, job_id, product_item_id=None, product_name=None, affiliate_link="")
+            update_job(db, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
     _save_plan_state(settings, job_id, {"plan": plan, "score": score, "product": product,
                                         "affiliate_link": affiliate_link, "analysis": analysis,
                                         "clip_ids": [c["id"] for c in user_clips]})
-    if gen_limit:
-        waiting = gen_engine.plan_job(settings, job_id, plan, product_img, provider)
+    if reference_issues and any(s.get("visual") == "generate" for s in plan["scenes"]):
+        _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", "; ".join(reference_issues), viral_score=score)
+    can_plan = bool(provider and provider.supports("video"))
+    if branch and any(s.get("visual") == "generate" for s in plan["scenes"]) and not can_plan:
+        _stop(settings, job_id, "NEEDS_MEDIA_REVIEW",
+              "Storyboard đã lưu; cần bật Muse và đủ ngân sách cho toàn bộ cảnh generate.", viral_score=score)
+    if gen_limit or (branch and can_plan):
+        try:
+            waiting = gen_engine.plan_job(settings, job_id, plan, product_img, provider)
+        except ProviderError as exc:
+            _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", exc, viral_score=score)
         if waiting:
             _stop(settings, job_id, gen_engine.WAIT_STATUS, None, viral_score=score,
                   generation_tasks=waiting)
@@ -572,7 +747,14 @@ def _finish_timeline(settings, job, plan, score, product, affiliate_link, analys
                                   user_clips)
     except WorkflowError as exc:
         _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", exc)
-    content = _content_from_plan(plan, affiliate_link, str(product.get("tiktok_link") or ""))
+    tiktok_link = str(product.get("tiktok_link") or "")
+    current_job = get_job(settings.database_path, job_id) or job
+    attached = json.loads(current_job.get("brief_json") or "{}").get("attached_affiliate", {})
+    if attached.get("catalog_id"):
+        from . import catalog
+        affiliate_product = catalog.get_product(settings.database_path, attached["catalog_id"])
+        tiktok_link = str((affiliate_product or {}).get("tiktok_link") or "")
+    content = _content_from_plan(plan, affiliate_link, tiktok_link)
     update_job(settings.database_path, job_id,
                script_json=json.dumps(timeline, ensure_ascii=False),
                content_json=json.dumps(content, ensure_ascii=False), viral_score=score)
@@ -595,6 +777,18 @@ def resume_after_generation(settings, job_id: str) -> dict:
     # Same clips, same order as when the plan was written (plan "clip" fields are indexes).
     by_id = {c["id"]: c for c in list_clips(settings, job_id)}
     user_clips = [by_id[i] for i in state.get("clip_ids") or [] if i in by_id]
+    if state["plan"].get("creation_branch"):
+        missing = [i for i in state.get("clip_ids") or [] if i not in by_id]
+        if missing:
+            update_job(settings.database_path, job_id, status="NEEDS_MEDIA_REVIEW",
+                       last_error="Clip của storyboard đã bị xóa; cần bổ sung hoặc viết lại storyboard.")
+            return {"job_id": job_id, "status": "NEEDS_MEDIA_REVIEW"}
+        try:
+            generated = gen_engine.results_for_storyboard(settings, job_id, state["plan"])
+        except ProviderError as exc:
+            update_job(settings.database_path, job_id, status="NEEDS_MEDIA_REVIEW",
+                       last_error=str(exc)[:1000])
+            return {"job_id": job_id, "status": "NEEDS_MEDIA_REVIEW", "error": str(exc)}
     update_job(settings.database_path, job_id, status="RENDERING")
     try:
         return _finish_timeline(settings, job, state["plan"], state.get("score"), product,
@@ -631,12 +825,15 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
     generated_clips = generated_clips or {}
     mode = job.get("mode") or "base"
     user_clips = user_clips or []
+    strict = bool(plan.get("creation_branch"))
     scenes: list[dict] = []
     used_stock: set[str] = set()
     used_clips = {s["clip"] for s in plan["scenes"] if s.get("clip") is not None}
     spare_clips = [i for i in range(len(user_clips)) if i not in used_clips]
     for i, scene in enumerate(plan["scenes"]):
         item = {k: scene.get(k) for k in ("duration", "voiceover", "text", "motion")}
+        if strict:
+            item.update({k: scene[k] for k in ("shot", "reference_ids", "gen_prompt") if k in scene})
         if scene.get("clip") is not None and scene["clip"] < len(user_clips):
             item.update(_clip_scene(settings, job["id"], user_clips[scene["clip"]],
                                     scene.get("start_offset") or 0))
@@ -648,7 +845,11 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
             path, kind = None, "image"
             if visual == "generate" and generated_clips.get(i):
                 path, kind = generated_clips[i], "video"
-            if path is None and visual in {"stock", "generate"} and spare_clips:
+            if strict and visual == "generate" and (path is None or not Path(path).is_file()):
+                raise WorkflowError(f"Cảnh {i + 1} chưa có clip Muse; storyboard được giữ nguyên để kiểm tra.")
+            if strict and visual == "user_clip":
+                raise WorkflowError(f"Cảnh {i + 1} thiếu clip đã chọn; thêm lại clip trước khi dựng.")
+            if not strict and path is None and visual in {"stock", "generate"} and spare_clips:
                 # Hand-added clips beat stock footage for "stock"/"generate" scenes.
                 item.update(_clip_scene(settings, job["id"], user_clips[spare_clips.pop(0)]))
                 scenes.append(item)
@@ -656,6 +857,8 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
             if path is None and visual in {"stock", "generate"}:
                 path = pexels_video(settings, scene.get("stock_query") or "", asset_dir, used_stock)
                 kind = "video" if path else kind
+                if strict and path is None:
+                    raise WorkflowError(f"Cảnh {i + 1} chưa có stock hợp lệ; cần bổ sung nguồn hình.")
             if path is None:
                 path = product_img
                 kind = "card" if visual == "card" else "image"
@@ -665,6 +868,8 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
                     kind = "card" if kind == "image" else "image"
                     item["motion"] = ROTATE_MOTION.get(prev.get("motion") or "", "zoom_out")
             if path is None:
+                if strict:
+                    raise WorkflowError(f"Cảnh {i + 1} thiếu ảnh sản phẩm; cần bổ sung nguồn hình.")
                 continue
             item.update(kind=kind, source=str(path), start=0.0, visual=visual,
                         generated=kind == "video" and visual == "generate")
@@ -675,8 +880,13 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
     if not scenes:
         raise WorkflowError("Chưa có hình ảnh để dựng: thêm clip/ảnh ở tab Kịch bản, "
                             "link ảnh sản phẩm, hoặc key Pexels/video AI.")
-    return {"hook": plan.get("hook", ""), "cta": plan.get("cta") or settings.cta_text,
-            "music_mood": plan.get("music_mood", "upbeat"), "scenes": scenes}
+    result = {"hook": plan.get("hook", ""),
+              "cta": plan.get("cta", "") if strict else plan.get("cta") or settings.cta_text,
+              "music_mood": plan.get("music_mood", "upbeat"), "scenes": scenes}
+    if strict:
+        result.update({k: plan[k] for k in ("creation_branch", "storyboard_version", "style", "characters")
+                       if k in plan})
+    return result
 
 
 def _content_from_plan(plan: dict, affiliate_link: str, tiktok_link: str = "") -> dict:
@@ -695,6 +905,13 @@ def _content_from_plan(plan: dict, affiliate_link: str, tiktok_link: str = "") -
 
 def finalise_content(content: dict, affiliate_link: str) -> dict:
     caption = str(content.get("caption") or "").strip()
+    if not affiliate_link:
+        content["shopee_caption"] = caption
+        content["facebook_post"] = (str(content.get("facebook_description") or caption).strip()
+                                    + "\n" + " ".join(content.get("hashtags") or [])).strip()
+        content["tiktok_caption"] = (caption + " " + " ".join(content.get("hashtags") or [])).strip()[:2200]
+        content["affiliate_link"] = ""
+        return content
     content["shopee_caption"] = f"{caption}\n\nLink sản phẩm: {affiliate_link}\n{DISCLOSURE}"
     content["facebook_post"] = (
         f"{str(content.get('facebook_description') or caption).strip()}\n\n"
@@ -766,9 +983,10 @@ def render_job(settings, job_id: str, analysis: dict | None = None, product: dic
         content_json=json.dumps(content, ensure_ascii=False),
         script_json=json.dumps({**timeline, "render": {
             "duration": result.duration, "music": result.music, "voice": result.voice,
-            "scenes": result.scenes}}, ensure_ascii=False),
+            "scenes": result.scenes, "music_metadata": getattr(result, "music_metadata", None)}}, ensure_ascii=False),
         shopee_ready=int(shopee_ready), facebook_ready=int(facebook_ready),
         duration_sec=meta["duration_sec"], width=meta["width"], height=meta["height"],
+        viral_score=manifest["quality"].get("creative_qa", {}).get("total_score"),
         last_error=None if shopee_ready else "; ".join(manifest["quality"]["shopee"]["reasons"]),
     )
     return {
@@ -802,7 +1020,21 @@ def _write_review_page(output_dir: Path, manifest: dict) -> Path:
     )
     shopee = quality.get("shopee") or {}
     facebook = quality.get("facebook_reels") or {}
+    t_qa = quality.get("technical_qa") or {}
+    c_qa = quality.get("creative_qa") or {}
     hashtags = " ".join(content.get("hashtags") or [])
+    music_meta = manifest.get("music_metadata") or {}
+    music_html = ""
+    if music_meta:
+        reasons_text = esc("; ".join(music_meta.get("reasons") or []))
+        music_html = f"""<section><h2>Bản quyền âm nhạc (AI Background Music - Mixkit)</h2>
+<p><strong>{esc(music_meta.get("title"))}</strong> — Tác giả: <b>{esc(music_meta.get("author"))}</b></p>
+<p>Nguồn tải: <a href="{esc(music_meta.get("source_url"))}" target="_blank" rel="noopener noreferrer">{esc(music_meta.get("source_url"))}</a> (ID: {esc(music_meta.get("track_id"))})</p>
+<p>Giấy phép: <a href="{esc(music_meta.get("license_url"))}" target="_blank" rel="noopener noreferrer">{esc(music_meta.get("license"))}</a> (Miễn phí thương mại &amp; mạng xã hội)</p>
+<p>Điểm thẩm định: <b>{music_meta.get("score")}/100</b> <span class="status">{esc(music_meta.get("decision"))}</span></p>
+<p class="muted">Lý do chọn: {reasons_text}</p>
+<p class="muted"><i>Dọn dẹp tự động: File nhạc tạm đã được xóa ngay sau khi render xong để giải phóng dung lượng ổ cứng.</i></p></section>"""
+
     page = f"""<!doctype html>
 <html lang="vi">
 <head>
@@ -833,11 +1065,29 @@ section{{margin-top:26px}}h1{{line-height:1.2}}
 <section><h2>Nội dung Shopee</h2><pre>{esc(content.get("shopee_caption"))}</pre>
 <p>{esc(hashtags)}</p></section>
 <section><h2>Khung hình xem trước</h2><div class="grid">{''.join(frames)}</div></section>
-<section><h2>Kiểm tra chất lượng</h2>
-<p><span class="status">Shopee: {"PASS" if shopee.get("passed") else "CHECK"}</span>
+<section><h2>Đánh giá chất lượng sáng tạo 2.0 (Creative Quality Score)</h2>
+<p><b>Tổng điểm: {c_qa.get('total_score', 0)} / 100</b> — <span class="status">{c_qa.get('status', 'PENDING')}</span></p>
+<ul>
+  <li>Hook &amp; Khả năng giữ chân: {c_qa.get('hook', 0)} / 20</li>
+  <li>Storytelling &amp; Cấu trúc: {c_qa.get('storytelling', 0)} / 15</li>
+  <li>Cảm xúc &amp; Tâm lý: {c_qa.get('emotion', 0)} / 15</li>
+  <li>Sáng tạo &amp; Khác biệt: {c_qa.get('creativity', 0)} / 15</li>
+  <li>Hình ảnh &amp; Phân cảnh: {c_qa.get('storyboard', 0)} / 10</li>
+  <li>Voice &amp; Âm thanh: {c_qa.get('voice_audio', 0)} / 10</li>
+  <li>Editing &amp; Nhịp độ: {c_qa.get('editing', 0)} / 10</li>
+  <li>CTA &amp; Phù hợp ngữ cảnh: {c_qa.get('cta_fit', 0)} / 5</li>
+</ul>
+<p><b>Điểm mạnh:</b> {esc(", ".join(c_qa.get('strengths') or []))}</p>
+</section>
+<section><h2>Kiểm tra kỹ thuật file video thực tế (Technical QA)</h2>
+<p><span class="status">Kỹ thuật video: {"PASS" if t_qa.get("passed") else "CHECK"}</span>
+<span class="status">Shopee: {"PASS" if shopee.get("passed") else "CHECK"}</span>
 <span class="status">Facebook Reels: {"PASS" if facebook.get("passed") else "CHECK"}</span></p>
+<p class="muted">Âm thanh: Max {t_qa.get('audio_metrics', {}).get('max_volume_db', 'N/A')} dB, Mean {t_qa.get('audio_metrics', {}).get('mean_volume_db', 'N/A')} dB | Khoảng im lặng: {t_qa.get('audio_metrics', {}).get('silence_intervals', 0)} ({t_qa.get('audio_metrics', {}).get('total_silence_sec', 0)}s)</p>
+<p class="muted">Phụ đề: {t_qa.get('subtitle_metrics', {}).get('total_subtitles', 0)} dòng, Hook: {t_qa.get('subtitle_metrics', {}).get('has_hook', False)}, CTA: {t_qa.get('subtitle_metrics', {}).get('has_cta', False)}</p>
 <p class="muted">Shopee: {esc("; ".join(shopee.get("reasons") or [])) or "Basic file integrity passed"}</p>
 <p class="muted">Facebook: {esc("; ".join(facebook.get("reasons") or [])) or "Existing 9:16 QA passed"}</p></section>
+{music_html}
 <section><h2>Bước tiếp theo</h2>
 <p>Duyệt trong giao diện web (Duyệt &amp; đăng), hoặc dùng lệnh:</p>
 <pre>python -m agent_core.cli show {esc(manifest.get("job_id"))}
@@ -870,6 +1120,24 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
     shopee_qa.reasons.extend(render_qa.reasons)
     shopee_qa.passed = shopee_qa.passed and render_qa.passed
     facebook_qa = validate_facebook_reel(metadata, settings)
+
+    # 2.0: Technical QA on the rendered video
+    tech_qa = inspect_rendered_video(video_out, settings, timeline=timeline)
+    if tech_qa.critical_errors:
+        shopee_qa.reasons.extend(tech_qa.critical_errors)
+        shopee_qa.passed = False
+        facebook_qa.reasons.extend(tech_qa.critical_errors)
+        facebook_qa.passed = False
+
+    # 2.0: Creative Quality Score (100-point rubric)
+    brief = json.loads(job.get("brief_json") or "{}") if isinstance(job, dict) else {}
+    creative_qa = evaluate_creative_quality(
+        timeline,
+        content=content,
+        mode=job.get("mode") or "viral",
+        branch=brief.get("creation_branch") or "",
+    )
+
     facebook_out = None
     if facebook_qa.passed:
         fb_dir = settings.facebook_output / job["id"]
@@ -877,9 +1145,9 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
         facebook_out = fb_dir / video_out.name
         shutil.copy2(video_out, facebook_out)
 
-    warnings = []
+    warnings = list(tech_qa.warnings)
     if not result.music:
-        warnings.append(f"Chưa có nhạc nền: thêm nhạc bản quyền vào {settings.music}")
+        warnings.append(f"Chưa có nhạc nền riêng: dùng ambient floor thay thế ({settings.music})")
     if not result.voice:
         warnings.append("Không tạo được giọng đọc (TTS); video chỉ có phụ đề.")
     manifest = {
@@ -888,10 +1156,33 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
         "metadata": metadata, "analysis": analysis, "product": product,
         "affiliate_link": affiliate_link, "content": content, "timeline": timeline,
         "keyframes": saved_frames, "warnings": warnings,
+        "music_metadata": getattr(result, "music_metadata", None),
         "quality": {
             "shopee": {"passed": shopee_qa.passed, "reasons": shopee_qa.reasons},
             "facebook_reels": {"passed": facebook_qa.passed, "reasons": facebook_qa.reasons,
                                "output": str(facebook_out) if facebook_out else None},
+            "technical_qa": {
+                "passed": tech_qa.passed,
+                "critical_errors": tech_qa.critical_errors,
+                "warnings": tech_qa.warnings,
+                "audio_metrics": tech_qa.audio_metrics,
+                "video_metrics": tech_qa.video_metrics,
+                "subtitle_metrics": tech_qa.subtitle_metrics,
+            },
+            "creative_qa": {
+                "total_score": creative_qa.total,
+                "status": creative_qa.status,
+                "hook": creative_qa.hook,
+                "storytelling": creative_qa.storytelling,
+                "emotion": creative_qa.emotion,
+                "creativity": creative_qa.creativity,
+                "storyboard": creative_qa.storyboard,
+                "voice_audio": creative_qa.voice_audio,
+                "editing": creative_qa.editing,
+                "cta_fit": creative_qa.cta_fit,
+                "strengths": creative_qa.strengths,
+                "improvements": creative_qa.improvements,
+            },
         },
         "publishing": "manual_review_required",
         "created_at": now_iso(),

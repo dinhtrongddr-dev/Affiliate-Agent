@@ -37,7 +37,53 @@
   </div>
 </div>
 
-<div class="card" style="margin-bottom:16px">
+<section class="card" id="muse-profiles" style="margin-bottom:16px">
+  <div class="row space">
+    <h2>Profile · proxy · tài khoản Muse</h2>
+    {% if muse_profiles %}<button class="btn" id="mp-sync" onclick="syncProfiles(this)">Đồng bộ profile sang Muse</button>{% endif %}
+  </div>
+  <p class="small muted">Mỗi profile gắn một tài khoản Muse và một proxy riêng. Khi tạo video, Muse chạy trong phiên trình duyệt tách biệt qua proxy của profile đó. Nếu proxy lỗi, phiên đó dừng, không chuyển sang kết nối trực tiếp.</p>
+  {% if muse_profiles %}
+  <div style="overflow-x:auto;margin-bottom:16px">
+    <table class="small"><tr><th>Profile / account</th><th>Proxy</th><th>Cookie</th><th>Đồng bộ</th></tr>
+      {% for p in muse_profiles %}
+      <tr><td><b>{{ p.label }}</b><div class="muted">{{ p.profile_id }}{% if not p.enabled %} · đã tắt{% endif %}</div>
+          {% if p.account_id %}<div class="muted">Account: {{ p.account_id }}</div>{% endif %}</td>
+        <td><code>{{ p.proxy_server }}</code><div class="muted">{{ 'Có xác thực' if p.proxy_authenticated else 'Không cần xác thực' }}</div></td>
+        <td>{{ p.cookie_count }} cookie{% if p.session_expires %}<div class="muted">Hết hạn: {{ p.session_expires }}</div>{% endif %}</td>
+        <td>{% if p.pushed_at %}<span class="badge ok">Đã đồng bộ</span><div class="muted">{{ p.pushed_at[:19].replace('T',' ') }} UTC</div>{% else %}<span class="badge warn">Chờ đồng bộ</span>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+  <div class="grid g2">
+    <div><label for="mp-id">Mã profile</label><input id="mp-id" placeholder="muse-01" maxlength="64" autocomplete="off">
+      <p class="small muted" style="margin:4px 0">Dùng lại mã này để cập nhật cookie hoặc proxy của cùng account.</p></div>
+    <div><label for="mp-label">Tên tài khoản / profile</label><input id="mp-label" placeholder="Muse 01" maxlength="100" autocomplete="off"></div>
+    <div><label for="mp-server">Proxy HTTP / SOCKS5</label><input id="mp-server" placeholder="http://host:port hoặc socks5://host:port" autocomplete="off"></div>
+    <div class="grid g2"><div><label for="mp-user">Proxy username</label><input id="mp-user" autocomplete="off"></div>
+      <div><label for="mp-password">Proxy password</label><input id="mp-password" type="password" autocomplete="new-password"></div></div>
+  </div>
+  <label for="mp-json">JSON cookie Muse</label>
+  <p class="small muted" style="margin:4px 0 8px">Dán nguyên mảng cookie export từ Cookie-Editor như mẫu của bạn, hoặc chọn file JSON. Cần cookie <code>hatch_sess</code> còn hạn.</p>
+  <input id="mp-file" type="file" accept=".json,application/json" aria-label="Chọn file JSON cookie hoặc nhiều profile" onchange="readProfileFile(this)">
+  <textarea id="mp-json" rows="5" spellcheck="false" autocomplete="off" placeholder='[{"domain":".muse.ai","name":"hatch_sess","value":"...","expirationDate":4102444800}]' style="margin-top:8px"></textarea>
+  <p class="small muted">Cookie và mật khẩu proxy được mã hoá Windows trong app, không hiển thị lại sau khi lưu. Gateway giữ cấu hình để chạy Muse. Nhập profile không tự tạo video.</p>
+  <button class="btn primary" id="mp-import" onclick="importProfiles(this)">Lưu profile & đồng bộ</button>
+  <details style="margin-top:14px"><summary class="small">Nhập nhiều profile bằng một JSON</summary>
+    <p class="small muted">Với JSON gộp, thông tin profile và proxy nằm trong từng phần tử; các ô phía trên có thể để trống. Trường <code>cookies</code> nhận cả mảng export nguyên bản và object tên–giá trị.</p>
+    <pre class="small" style="white-space:pre-wrap;background:#f5f6f8;padding:12px;border-radius:8px">{"profiles":[{
+  "profile_id":"muse-01",
+  "label":"Muse 01",
+  "proxy":{"server":"http://host:port","username":"user","password":"pass"},
+  "cookies":[{"domain":".muse.ai","name":"hatch_sess","value":"...","expirationDate":4102444800}]
+}]}</pre>
+  </details>
+</section>
+
+<details class="card" style="margin-bottom:16px">
+<summary>Phiên Muse cũ (cookie đơn)</summary>
+<div style="margin-top:16px">
   <h2>Đăng nhập Muse bằng JSON</h2>
   {% if session %}
     <p><span class="badge ok">Đã nhập</span> {{ session.label }} · cookie: {{ session.useful|join(', ') }}
@@ -55,6 +101,7 @@
   <textarea id="ms-json" rows="4" placeholder='[{"domain": ".muse.ai", "name": "hatch_sess", "value": "...", ...}]' style="margin-top:6px"></textarea>
   <p></p><button class="btn" onclick="importSession()">{{ 'Thay phiên' if session else 'Nhập phiên' }}</button>
 </div>
+</details>
 
 <div class="card">
   {% if job_filter %}<p class="small">Đang lọc video <a href="/jobs/{{ job_filter }}">{{ job_filter }}</a> · <a href="/generation">bỏ lọc</a></p>{% endif %}
@@ -80,6 +127,34 @@
 </div>
 {% endblock %}
 {% block scripts %}<script>
+async function readProfileFile(input){
+  const file=input.files[0];
+  if(!file) return;
+  if(file.size>2000000){input.value="";return toast("File JSON tối đa 2 MB",true);}
+  try{ document.getElementById("mp-json").value=await file.text(); }
+  catch(_){ toast("Không đọc được file JSON",true); }
+}
+async function importProfiles(button){
+  const v=id=>document.getElementById(id).value.trim();
+  const text=v("mp-json");
+  if(!text) return toast("Dán JSON cookie hoặc chọn file JSON",true);
+  button.disabled=true;
+  try{
+    const r=await api("/api/muse/profiles",{json:text,profile_id:v("mp-id"),label:v("mp-label"),
+      proxy:{server:v("mp-server"),username:v("mp-user"),password:document.getElementById("mp-password").value}});
+    document.getElementById("mp-json").value="";
+    document.getElementById("mp-password").value="";
+    document.getElementById("mp-file").value="";
+    toast(r.push_error?"Đã lưu profile; chưa áp dụng lên gateway: "+r.push_error:
+      r.pushed?`Đã lưu và đồng bộ ${r.pushed.synced} profile`:"Đã lưu profile mã hoá; đồng bộ khi gateway sẵn sàng",!!r.push_error);
+    setTimeout(()=>location.reload(),r.push_error?7000:1200);
+  }catch(_){}finally{button.disabled=false;}
+}
+async function syncProfiles(button){
+  button.disabled=true;
+  try{const r=await api("/api/muse/profiles/push");toast(`Đã đồng bộ ${r.synced} profile`);setTimeout(()=>location.reload(),1000);}
+  catch(_){}finally{button.disabled=false;}
+}
 async function importSession(){
   const el=document.getElementById("ms-json");
   if(!el.value.trim()) return toast("Dán JSON cookie trước",true);

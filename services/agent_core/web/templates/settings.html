@@ -13,9 +13,23 @@
       {% elif f.kind == 'secret' %}
       <label>{{ f.label }} {% if f.value %}<span class="badge ok">đã lưu</span>{% else %}<span class="badge warn">trống</span>{% endif %}</label>
       <input type="password" data-key="{{ f.key }}" placeholder="{{ '••••••• (để trống = giữ nguyên)' if f.value else 'Dán giá trị' }}" autocomplete="off">
+      {% elif f.kind == 'tts_mode' %}
+      <label>{{ f.label }}</label>
+      <select data-key="{{ f.key }}">
+        <option value="fast" {{ 'selected' if f.value == 'fast' }}>Nhanh - VieNeu Nano (24kHz, nhẹ cho CPU)</option>
+        <option value="quality" {{ 'selected' if f.value == 'quality' }}>Chất lượng cao - VieNeu Turbo (48kHz, tự chọn FP32/INT8)</option>
+      </select>
       {% elif f.kind == 'voice' %}
       <label>{{ f.label }}</label>
-      <select data-key="{{ f.key }}">{% for v, name in voices.items() %}<option value="{{ v }}" {{ 'selected' if f.value == v }}>{{ name }}</option>{% endfor %}</select>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px">
+        <select data-key="{{ f.key }}" style="flex:1" onchange="previewVoice()">
+          {% for v, name in voices.items() %}
+          <option value="{{ v }}" {{ 'selected' if f.value == v }}>{{ name }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="btn sm" id="btn-preview-voice" onclick="previewVoice()" style="white-space:nowrap; padding:7px 14px">▶ Nghe thử</button>
+      </div>
+      <audio id="voice-preview-audio" controls style="display:none; width:100%; height:32px; margin-bottom:8px"></audio>
       {% else %}
       <label>{{ f.label }}</label><input data-key="{{ f.key }}" value="{{ f.value }}">
       {% endif %}
@@ -76,5 +90,43 @@ async function saveShopee(){
   const app_id=document.getElementById("sp-id").value, secret=document.getElementById("sp-secret").value;
   if(!app_id||!secret) return toast("Nhập đủ App ID và Secret",true);
   await api("/api/settings/shopee",{app_id,secret},{ok:"Đã lưu Shopee credentials",reload:true});
+}
+async function previewVoice(){
+  const voiceSelect=document.querySelector('[data-key="AA_TTS_VOICE"]');
+  const modeSelect=document.querySelector('[data-key="AA_TTS_MODE"]');
+  const rateInput=document.querySelector('[data-key="AA_TTS_RATE"]');
+  const voice=voiceSelect?voiceSelect.value:"Mai Anh";
+  const mode=modeSelect?modeSelect.value:"fast";
+  const rate=rateInput?rateInput.value:"+0%";
+  const btn=document.getElementById("btn-preview-voice");
+  const audio=document.getElementById("voice-preview-audio");
+  if(!btn||!audio) return;
+  const origText=btn.textContent;
+  btn.textContent="⏳ Đang đọc…";
+  btn.disabled=true;
+  try{
+    const res=await fetch("/api/tts/preview",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","X-Requested-With":"affiliate-agent"},
+      body:JSON.stringify({voice,mode,rate})
+    });
+    if(!res.ok){
+      const err=await res.json().catch(()=>({}));
+      throw new Error(err.error||"Không thể tạo giọng đọc nghe thử");
+    }
+    const blob=await res.blob();
+    if(audio.src&&audio.src.startsWith("blob:")){
+      URL.revokeObjectURL(audio.src);
+    }
+    audio.src=URL.createObjectURL(blob);
+    audio.style.display="block";
+    await audio.play();
+  }catch(err){
+    if(typeof toast==="function") toast(err.message,true);
+    else alert(err.message);
+  }finally{
+    btn.textContent=origText;
+    btn.disabled=false;
+  }
 }
 </script>{% endblock %}
