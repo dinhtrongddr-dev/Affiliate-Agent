@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Không gian sáng tạo · Affiliate Agent{% endblock %}
+{% block content %}
+<h1>Không gian sáng tạo</h1>
+<p class="sub">Chọn cách kể chuyện. Sản phẩm affiliate có thể gắn sau khi duyệt kịch bản.</p>
+<div id="creation-workspace">
+  <div class="tabs" role="tablist" aria-label="Nhánh sáng tạo">
+    <button type="button" data-branch="product_review" class="active">Review sản phẩm</button>
+    <button type="button" data-branch="viral_creator">Video viral</button>
+    <button type="button" data-branch="template_series">Series nhân vật</button>
+  </div>
+  <form id="creation-form" style="max-width:840px;padding:24px 0">
+    <section data-for="product_review">
+      <h2>Review dựa trên dữ liệu</h2>
+      <label for="catalog-id">Sản phẩm trong kho</label>
+      <select id="catalog-id"><option value="">Chọn sản phẩm…</option>{% for p in products %}<option value="{{ p.id }}" {{ 'selected' if p.id == selected_catalog_id }}>{{ p.name }}</option>{% endfor %}</select>
+      <p class="small muted">Chưa có sản phẩm? <a href="/catalog">Mở Sản phẩm Shopee</a> để chọn hoặc thêm bằng link.</p>
+      <label for="experience-basis">Cơ sở review</label>
+      <select id="experience-basis"><option value="product_facts">Thông tin sản phẩm đã có</option><option value="owner_experience">Trải nghiệm thật do tôi cung cấp</option></select>
+      <label for="experience-notes">Ghi chú trải nghiệm / điểm cần kiểm tra</label>
+      <textarea id="experience-notes" rows="4" maxlength="6000" placeholder="Điều đã quan sát, ưu nhược điểm thực tế, điều chưa biết…"></textarea>
+    </section>
+    <section data-for="viral_creator" hidden><h2>Kể chuyện từ một ý tưởng</h2><p class="muted">Lên nội dung và storyboard trước; chọn sản phẩm phù hợp ở bước sau.</p></section>
+    <section data-for="template_series" hidden>
+      <h2>Giữ nhân vật xuyên suốt các tập</h2>
+      <label for="template-id">Mẫu series</label>
+      <select id="template-id">{% for t in series %}<option value="{{ t.id }}">{{ t.label }} · v{{ t.version }} · {{ t.reference_assets|length }} ảnh tham khảo</option>{% endfor %}</select>
+      <p class="small muted">Gia đình Suri có 3 nhân vật; bé Suri 4 tuổi. Thêm ảnh cho từng nhân vật trước khi tạo tập; thiếu ảnh sẽ chặn tạo clip Muse. Mẫu lưu tối đa 6 nhân vật.</p>
+    </section>
+    <label for="creation-topic" style="margin-top:20px">Chủ đề / ý tưởng tập phim</label>
+    <textarea id="creation-topic" rows="3" maxlength="1000" placeholder="Một tình huống, vấn đề hoặc câu chuyện muốn kể…"></textarea>
+    <p class="small muted">Tác vụ sẽ lập storyboard rồi tạo video theo cấu hình hiện tại; có thể dùng hạn mức AI. Số cảnh AI được giới hạn trong Cài đặt.</p>
+    <button class="btn primary" type="submit" style="margin-top:18px">Tạo storyboard & video</button>
+  </form>
+  <details style="max-width:840px;border-top:1px solid #ddd;padding-top:20px">
+    <summary>Quản lý mẫu và ảnh nhân vật</summary>
+    <p class="small muted">Ảnh và phiên bản mẫu được chốt khi tạo tập. Thêm ảnh sau đó không đổi tập cũ; tạo tập mới để dùng ảnh vừa thêm.</p>
+    <label for="template-json">Mẫu series (JSON)</label><textarea id="template-json" rows="16" spellcheck="false"></textarea>
+    <button type="button" class="btn" id="save-template">Lưu phiên bản mới</button>
+    <form id="reference-form" style="margin-top:24px">
+      <label for="character-id">Nhân vật</label><select id="character-id"></select>
+      <label for="reference-image">Ảnh tham khảo PNG / JPEG / WebP (tối đa 10 MB)</label><input id="reference-image" type="file" accept="image/png,image/jpeg,image/webp" required>
+      <label for="reference-rights">Quyền sử dụng</label><select id="reference-rights"><option value="owned">Ảnh tôi sở hữu</option><option value="permission">Được cho phép</option><option value="licensed">Có giấy phép</option><option value="official">Tài sản chính thức được phép dùng</option></select>
+      <button class="btn" style="margin-top:12px">Thêm ảnh vào nhân vật</button>
+    </form>
+  </details>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const seriesData = {{ series | tojson }};
+let branch = {{ selected_branch | default('product_review') | tojson }};
+document.querySelectorAll('[data-branch]').forEach(button => button.addEventListener('click', () => {
+  branch = button.dataset.branch;
+  document.querySelectorAll('[data-branch]').forEach(b => b.classList.toggle('active', b === button));
+  document.querySelectorAll('[data-for]').forEach(panel => panel.hidden = panel.dataset.for !== branch);
+}));
+document.querySelector('[data-branch="'+branch+'"]').click();
+function loadSeries() {
+  const t = seriesData.find(t => t.id === document.getElementById('template-id').value);
+  document.getElementById('template-json').value = JSON.stringify(t, null, 2);
+  const chars = document.getElementById('character-id'); chars.replaceChildren();
+  (t.characters || []).forEach(c => chars.add(new Option(c.name, c.id)));
+}
+document.getElementById('template-id').addEventListener('change', loadSeries); loadSeries();
+document.getElementById('creation-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  try { await api('/api/create', {creation_branch:branch, topic:document.getElementById('creation-topic').value,
+    catalog_id:document.getElementById('catalog-id').value, template_id:document.getElementById('template-id').value,
+    experience:{basis:document.getElementById('experience-basis').value,notes:document.getElementById('experience-notes').value}}, {go:r=>'/jobs/'+r.job_id}); }
+  catch(e) {} finally {button.disabled = false;}
+});
+document.getElementById('save-template').addEventListener('click', async () => {
+  try {const body = JSON.parse(document.getElementById('template-json').value); await api('/api/creative-templates', body, {ok:'Đã lưu phiên bản mẫu',reload:true});}
+  catch(e) {if (e instanceof SyntaxError) toast('JSON chưa hợp lệ',true);}
+});
+document.getElementById('reference-form').addEventListener('submit', async event => {
+  event.preventDefault(); const fd = new FormData(); const file = document.getElementById('reference-image').files[0];
+  if (!file || file.size > 10*1024*1024) {toast('Ảnh cần nhỏ hơn 10 MB',true);return;}
+  fd.append('file',file);fd.append('character_id',document.getElementById('character-id').value);fd.append('rights',document.getElementById('reference-rights').value);
+  try {await api('/api/creative-templates/'+encodeURIComponent(document.getElementById('template-id').value)+'/references',fd,{ok:'Đã thêm ảnh nhân vật',reload:true});} catch(e) {}
+});
+</script>
+{% endblock %}
