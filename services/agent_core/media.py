@@ -58,7 +58,7 @@ def probe_video(path: Path, ffprobe_path: str = "ffprobe") -> dict[str, Any]:
     }
 
 
-def register_video(path: Path, settings) -> tuple[bool, dict[str, Any]]:
+def register_video(path: Path, settings, allow_deleted: bool = False) -> tuple[bool, dict[str, Any]]:
     path = path.resolve()
     if path.suffix.lower() not in VIDEO_EXTENSIONS:
         return False, {"path": str(path), "reason": "unsupported_extension"}
@@ -74,8 +74,12 @@ def register_video(path: Path, settings) -> tuple[bool, dict[str, Any]]:
         "source_path": str(path),
         "sha256": digest,
         "file_name": path.name,
+        "allow_deleted": allow_deleted,
         **metadata,
     }
+    if allow_deleted:
+        from .db import forget_deleted_source
+        forget_deleted_source(settings.database_path, digest)
     inserted = register_job(settings.database_path, job)
     return inserted, {
         "job_id": job["id"],

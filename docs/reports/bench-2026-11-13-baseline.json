@@ -1,0 +1,216 @@
+{
+ "at": "2026-11-13T21:12:03",
+ "matcher": {
+  "labelled_pairs": 36,
+  "precision_stored": 0.667,
+  "false_matches_stored": 12,
+  "good_lost": 0,
+  "per_trend": [
+   {
+    "trend": "cộng ielts",
+    "matcher_now": 1,
+    "stored": 1,
+    "bad_stored": 1
+   },
+   {
+    "trend": "đỗ mỹ linh",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 2
+   },
+   {
+    "trend": "khu du lịch đại nam",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 0
+   },
+   {
+    "trend": "lê quang liêm",
+    "matcher_now": 4,
+    "stored": 4,
+    "bad_stored": 0
+   },
+   {
+    "trend": "lịch thi đấu u23 việt nam",
+    "matcher_now": 3,
+    "stored": 1,
+    "bad_stored": 1
+   },
+   {
+    "trend": "máy xay mini",
+    "matcher_now": 3,
+    "stored": 3,
+    "bad_stored": 3
+   },
+   {
+    "trend": "ốp lưng",
+    "matcher_now": 10,
+    "stored": 10,
+    "bad_stored": 0
+   },
+   {
+    "trend": "oppo a7 ultra",
+    "matcher_now": 10,
+    "stored": 6,
+    "bad_stored": 0
+   },
+   {
+    "trend": "son môi",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 0
+   },
+   {
+    "trend": "tiền",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 2
+   },
+   {
+    "trend": "trần quyết chiến",
+    "matcher_now": 3,
+    "stored": 3,
+    "bad_stored": 3
+   }
+  ]
+ },
+ "existing_jobs": [
+  {
+   "job_id": "2a504923d13eadb63f22fcb0",
+   "branch": "",
+   "title": "Ủa, cún xúc xích lên ốp luôn nè!",
+   "hook": "Cún xúc xích lên ốp!",
+   "hook_opener": "cún",
+   "scenes": 4,
+   "generate_scenes": 0,
+   "planned_duration_s": 8.5,
+   "muse_prompt_chars_max": 0,
+   "muse_prompt_chars_avg": 0,
+   "banned_terms": [],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 4,
+   "text_layers": 4,
+   "music_mood": "upbeat, playful",
+   "hashtags": [
+    "#mecho",
+    "#doglover",
+    "#choxucxich",
+    "#oplungiphone",
+    "#oplungcute",
+    "#phukieniphone",
+    "#tiktokshopping"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "t1139968386e54a1087e71d6",
+   "branch": "viral_creator",
+   "title": "Ai Là Người Hiểu Mẹ Nhất Trong Nhà?",
+   "hook": "Ai mới thật sự hiểu mẹ?",
+   "hook_opener": "ai",
+   "scenes": 8,
+   "generate_scenes": 8,
+   "planned_duration_s": 50.0,
+   "muse_prompt_chars_max": 9014,
+   "muse_prompt_chars_avg": 8570,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 1,
+   "text_layers": 3,
+   "music_mood": "Begins with playful, upbeat sitcom-style plucked strings",
+   "hashtags": [
+    "#AiHieuMeNhat",
+    "#TinhCamGiaDinh",
+    "#MeLaTatCa",
+    "#GiaDinhVietNam",
+    "#ThauHieu",
+    "#TinhYeuThuong",
+    "#VideoCamDong",
+    "#ViralCreator"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "ta97c9e32e2ec48558332fcd",
+   "branch": "viral_creator",
+   "title": "Nhà Vô Địch Không Cần Cúp, Chỉ Cần Spotlight",
+   "hook": "KHOAN—NÓ ĐANG LAO VỀ PHÍA AI?",
+   "hook_opener": "khoan",
+   "scenes": 3,
+   "generate_scenes": 0,
+   "planned_duration_s": 18.0,
+   "muse_prompt_chars_max": 0,
+   "muse_prompt_chars_avg": 0,
+   "banned_terms": [],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 1,
+   "text_layers": 3,
+   "music_mood": "Playful energetic sports broadcast music, dramatic",
+   "hashtags": [
+    "#ChoCung",
+    "#DogRunning",
+    "#FunnyDog",
+    "#DogLovers",
+    "#ChoDeThuong",
+    "#CountrysideLife",
+    "#ViralCreator",
+    "#PetVideos"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "tb5c48c991889478cb4cb649",
+   "branch": "viral_creator",
+   "title": "Ai Là Người Hiểu Mẹ Nhất Trong Nhà?",
+   "hook": "Nếu mẹ được nghỉ đúng một ngày, mẹ muốn làm gì nhất? Cả nhà đều đoán s",
+   "hook_opener": "nếu",
+   "scenes": 3,
+   "generate_scenes": 3,
+   "planned_duration_s": 24.0,
+   "muse_prompt_chars_max": 8750,
+   "muse_prompt_chars_avg": 8288.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 2,
+   "text_layers": 3,
+   "music_mood": "Begins with light, p",
+   "hashtags": [
+    "#GiaDinh",
+    "#TinhCamGiaDinh",
+    "#MeLaTatCa",
+    "#ThauHieu",
+    "#TinhYeuThuong",
+    "#CauChuyenCamDong",
+    "#ViralCreator",
+    "#BuaComGiaDinh"
+   ],
+   "compile_error": null
+  }
+ ],
+ "existing_summary": {
+  "videos": 4,
+  "muse_prompt_chars_max": 9014,
+  "with_banned_terms": 2,
+  "generate_scenes": 11,
+  "scenes_with_refs": 0,
+  "duration_s": [
+   8.5,
+   50.0,
+   18.0,
+   24.0
+  ],
+  "voice_overfull_scenes": 8,
+  "max_text_layers": 4,
+  "distinct_hook_openers": 4
+ }
+}

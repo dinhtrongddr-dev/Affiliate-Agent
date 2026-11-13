@@ -194,8 +194,10 @@ def create_app(start_worker: bool = True) -> FastAPI:
              "optional": True},
             {"name": "Đăng nhập Shopee Creator", "ok": (s.project_root / "profiles" / "shopee").exists(),
              "hint": "Chạy scripts/open-shopee-login.cmd"},
-            {"name": f"Nhạc nền ({len(music)} bài)", "ok": bool(music),
-             "hint": f"Chép nhạc bản quyền vào {s.music}"},
+            {"name": (f"Nhạc nền: {len(music)} bài trong thư viện + Mixkit tự chọn theo nội dung"
+                      if music else "Nhạc nền: Mixkit tự chọn theo nội dung (thư viện riêng trống)"),
+             "ok": True,
+             "hint": f"Tuỳ chọn: chép nhạc có bản quyền vào {s.music}"},
             {"name": "Giọng đọc AI (VieNeu)", "ok": s.tts_enabled and find_spec("vieneu") is not None,
              "hint": "Bật TTS trong Cài đặt"},
             {"name": "Video stock (Pexels)", "ok": bool(s.pexels_api_key.get_secret_value()),
@@ -733,7 +735,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
             while chunk := await file.read(1024 * 1024):
                 out.write(chunk)
         from ..media import register_video
-        inserted, info = register_video(target, s)
+        inserted, info = register_video(target, s, allow_deleted=True)
         if info.get("job_id"):
             db.enqueue_task(s.database_path, "process", info["job_id"])
         return {"inserted": inserted, **info}
@@ -826,8 +828,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
     async def api_clip_update(job_id: str, clip_id: str, request: Request):
         job_or_404(job_id)
         body = await request.json()
-        update_clip(S(), job_id, clip_id, note=body.get("note"),
-                    ai_generated=body.get("ai_generated"))
+        if not update_clip(S(), job_id, clip_id, note=body.get("note"),
+                           ai_generated=body.get("ai_generated")):
+            raise HTTPException(404, "Không có clip này")
         return {"ok": True}
 
     @app.post("/api/jobs/{job_id}/clips/{clip_id}/delete")
@@ -836,6 +839,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
         script = json.loads(job.get("script_json") or "{}")
         if any(sc.get("clip_id") == clip_id for sc in script.get("scenes") or []):
             raise HTTPException(400, "Clip đang được dùng trong kịch bản: đổi cảnh đó trước")
+        if not any(c["id"] == clip_id for c in list_clips(S(), job_id)):
+            raise HTTPException(404, "Không có clip này")
         delete_clip(S(), job_id, clip_id)
         return {"ok": True}
 
@@ -856,9 +861,15 @@ def create_app(start_worker: bool = True) -> FastAPI:
         from ..trends import add_manual_trend
         body = await request.json()
         keywords = [k.strip() for k in str(body.get("keywords") or "").split(",") if k.strip()]
-        add_manual_trend(S(), str(body.get("title") or ""), str(body.get("url") or ""),
-                         str(body.get("notes") or ""), keywords,
-                         source=str(body.get("source") or "manual")[:30])
+        title = str(body.get("title") or "").strip()
+        if not title:
+            raise HTTPException(400, "Nhập tiêu đề trend")
+        try:
+            add_manual_trend(S(), title, str(body.get("url") or ""),
+                             str(body.get("notes") or ""), keywords,
+                             source=str(body.get("source") or "manual")[:30])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
         return {"ok": True}
 
     @app.post("/api/trends/{trend_id}/create-job")

@@ -96,15 +96,19 @@ def add_clip(settings, job_id: str, filename: str, stream, ai_generated: bool = 
 
 
 def update_clip(settings, job_id: str, clip_id: str, note: str | None = None,
-                ai_generated: bool | None = None) -> None:
+                ai_generated: bool | None = None) -> bool:
     clips = list_clips(settings, job_id)
+    found = False
     for clip in clips:
         if clip["id"] == clip_id:
+            found = True
             if note is not None:
                 clip["note"] = note[:200]
             if ai_generated is not None:
                 clip["ai_generated"] = bool(ai_generated)
-    _save(settings, job_id, clips)
+    if found:
+        _save(settings, job_id, clips)
+    return found
 
 
 def delete_clip(settings, job_id: str, clip_id: str) -> None:

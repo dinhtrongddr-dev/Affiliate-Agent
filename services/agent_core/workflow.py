@@ -157,11 +157,77 @@ def _image_messages(prompt: str, frame_paths: list[Path], protocol: str) -> list
     return [{"role": "user", "content": parts}]
 
 
+def _repair_json_locally(raw: str) -> dict | None:
+    """Common model slips: markdown fences, trailing commas, text after the object,
+    a reply cut off before the closing braces."""
+    text = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw.strip(), flags=re.IGNORECASE)
+    start = text.find("{")
+    if start < 0:
+        return None
+    text = re.sub(r",\s*([}\]])", r"\1", text[start:])
+    candidates = [text[:text.rfind("}") + 1]] if "}" in text else []
+    # Close a truncated object: balance open brackets outside strings.
+    stack, in_str, esc = [], False, False
+    for ch in text:
+        if in_str:
+            esc = (ch == "\\") and not esc
+            if ch == '"' and not esc:
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+    tail = text + ('"' if in_str else "")
+    tail = re.sub(r",\s*$", "", tail)
+    candidates.append(tail + "".join(reversed(stack)))
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
 def _ask_json(client: AIClient, settings, prompt: str, images: list[Path] | None = None,
               temperature: float = 0.4, max_tokens: int = 2400) -> dict:
     messages = (_image_messages(prompt, images, settings.ai_protocol) if images
                 else [{"role": "user", "content": prompt}])
-    return _parse_json_reply(client.chat(messages, temperature=temperature, max_tokens=max_tokens))
+    # Long storyboard replies with extended thinking need more than the default timeout.
+    base_timeout = getattr(client, "timeout", None)
+    if isinstance(base_timeout, (int, float)) and max_tokens >= 4000:
+        client.timeout = max(base_timeout, 420)
+    try:
+        reply = client.chat(messages, temperature=temperature, max_tokens=max_tokens)
+    finally:
+        if isinstance(base_timeout, (int, float)):
+            client.timeout = base_timeout
+    try:
+        return _parse_json_reply(reply)
+    except WorkflowError as first_error:
+        raw = _reply_text(reply)
+        repaired = _repair_json_locally(raw)
+        if repaired is not None:
+            log.info("AI JSON repaired locally")
+            return repaired
+        if not raw.strip():
+            raise
+        log.warning("AI JSON malformed (%s); asking for a corrected copy", first_error)
+        fix = client.chat([{"role": "user", "content": (
+            "Đoạn sau là JSON bị lỗi cú pháp hoặc bị cắt. Trả về DUY NHẤT JSON object hợp lệ, "
+            "giữ nguyên nội dung và các trường, không markdown:\n" + raw[:30000])}],
+            temperature=0, max_tokens=max_tokens)
+        try:
+            return _parse_json_reply(fix)
+        except WorkflowError:
+            repaired = _repair_json_locally(_reply_text(fix))
+            if repaired is not None:
+                return repaired
+            raise first_error from None
 
 
 def _analyse_prompt(job: dict, metadata: dict) -> str:
@@ -986,7 +1052,7 @@ def render_job(settings, job_id: str, analysis: dict | None = None, product: dic
             "scenes": result.scenes, "music_metadata": getattr(result, "music_metadata", None)}}, ensure_ascii=False),
         shopee_ready=int(shopee_ready), facebook_ready=int(facebook_ready),
         duration_sec=meta["duration_sec"], width=meta["width"], height=meta["height"],
-        viral_score=manifest["quality"].get("creative_qa", {}).get("total_score"),
+        qa_score=manifest["quality"].get("creative_qa", {}).get("total_score"),
         last_error=None if shopee_ready else "; ".join(manifest["quality"]["shopee"]["reasons"]),
     )
     return {
@@ -1136,6 +1202,8 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
         content=content,
         mode=job.get("mode") or "viral",
         branch=brief.get("creation_branch") or "",
+        rendered_duration=float(metadata.get("duration_sec") or 0) or None,
+        music_used=bool(getattr(result, "music", None)),
     )
 
     facebook_out = None

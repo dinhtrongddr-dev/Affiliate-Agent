@@ -169,13 +169,22 @@ def install_routes(app, settings, render):
         content = await file.read(20 * 1024 * 1024 + 1)
         if len(content) > 20 * 1024 * 1024:
             raise HTTPException(400, "File quá lớn")
+        if not content.strip():
+            raise HTTPException(400, "File CSV trống")
         def ingest():
             from ..shopee_intelligence.unified_catalog import reconcile
             s = settings()
             result = shopee_intelligence.import_products_csv(s.database_path, content, file.filename or "products.csv")
             reconcile(s)
             return result
-        return await run_in_threadpool(ingest)
+        try:
+            result = await run_in_threadpool(ingest)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        if not (result or {}).get("imported") and not (result or {}).get("updated")                 and (result or {}).get("errors"):
+            raise HTTPException(400, "Không nhập được dòng nào: " + "; ".join(
+                str(e) for e in result["errors"][:3]))
+        return result
 
     @app.post("/api/intelligence/products")
     def save_product(body: dict):

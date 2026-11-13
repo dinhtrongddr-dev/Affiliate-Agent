@@ -8,7 +8,8 @@
     <div class="small muted">{{ 'Từ trend' if job.mode == 'trend' else 'Video base' }} · {{ job.id }}</div></td>
   <td>{{ badge(job.status) }}{% if job.last_error and label(job.status)[1] in ('warn','err') %}
     <div class="small err-text">{{ job.last_error[:120] }}</div>{% endif %}</td>
-  <td class="small">{% if job.viral_score %}⭐ {{ '%.1f' % job.viral_score }}{% endif %}
+  <td class="small">{% if job.viral_score %}<span title="Điểm biên tập AI /10">⭐ {{ '%.1f' % job.viral_score }}</span>{% endif %}
+    {% if job.qa_score %}<span title="Điểm QA video /100"> · QA {{ '%.0f' % job.qa_score }}</span>{% endif %}
     {% if job.duration_sec %}<div class="muted">{{ '%.0f' % job.duration_sec }}s</div>{% endif %}</td>
   <td class="small muted">{{ job.updated_at[:16].replace('T', ' ') }}</td>
 </tr>

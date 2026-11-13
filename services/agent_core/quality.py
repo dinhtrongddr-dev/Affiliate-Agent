@@ -163,8 +163,15 @@ def check_generated_clip(settings, path) -> dict:
 # CREATIVE QUALITY SCORE (100-POINT RUBRIC)
 # ---------------------------------------------------------------------------
 
+# Target lengths per branch (seconds). Outside these a video cannot be "priority publish".
+DURATION_TARGETS = {"viral_creator": (15.0, 30.0), "product_review": (20.0, 40.0),
+                    "template_series": (20.0, 35.0), "": (12.0, 45.0)}
+
+
 def evaluate_creative_quality(timeline: dict, content: dict | None = None,
-                              mode: str = "viral", branch: str = "") -> CreativeScoreBreakdown:
+                              mode: str = "viral", branch: str = "",
+                              rendered_duration: float | None = None,
+                              music_used: bool | None = None) -> CreativeScoreBreakdown:
     """Evaluate creative quality across 8 professional dimensions (100 points total).
 
     Dimensions:
@@ -259,7 +266,10 @@ def evaluate_creative_quality(timeline: dict, content: dict | None = None,
 
     # 6. Voice & Audio (Max 10)
     audio_score = 8.0
-    if timeline.get("music_mood"):
+    if music_used is False:
+        audio_score -= 1.0
+        improvements.append("Video không có nhạc nền")
+    elif timeline.get("music_mood"):
         audio_score += 1.0
         strengths.append(f"Nhạc nền định hướng mood: {timeline.get('music_mood')}")
     if any(s.get("voiceover") for s in scenes):
@@ -295,7 +305,22 @@ def evaluate_creative_quality(timeline: dict, content: dict | None = None,
     score.total = round(score.hook + score.storytelling + score.emotion + score.creativity
                         + score.storyboard + score.voice_audio + score.editing + score.cta_fit, 1)
 
-    if score.total >= 90.0:
+    low, high = DURATION_TARGETS.get(branch, DURATION_TARGETS[""])
+    duration_ok = True
+    if rendered_duration:
+        if rendered_duration < low * 0.7 or rendered_duration > high * 1.3:
+            duration_ok = False
+            score.total = round(score.total - 15.0, 1)
+            improvements.append(f"Thời lượng {rendered_duration:.1f}s lệch xa mục tiêu "
+                                f"{low:.0f}-{high:.0f}s")
+        elif not low <= rendered_duration <= high:
+            score.total = round(score.total - 5.0, 1)
+            improvements.append(f"Thời lượng {rendered_duration:.1f}s ngoài mục tiêu "
+                                f"{low:.0f}-{high:.0f}s")
+
+    if not duration_ok:
+        score.status = "NEEDS_REVISION" if score.total >= 70.0 else "FAIL"
+    elif score.total >= 90.0:
         score.status = "PRIORITY_PUBLISH"
     elif score.total >= 80.0:
         score.status = "CONDITIONAL_PASS"

@@ -1,0 +1,221 @@
+{
+ "note": "Nhãn đúng/sai cho cặp trend-sản phẩm (bước 2). ok=false: ghép sai hoặc góc khiên cưỡng.",
+ "pairs": [
+  {
+   "trend": "cộng ielts",
+   "product_id": "shopee:25621882437",
+   "product_name": "Tai nghe nhét tai không dây giảm tiếng ồn trong suốt Air31 Bluetooth 5.3 mới có màn hình k",
+   "ok": false
+  },
+  {
+   "trend": "đỗ mỹ linh",
+   "product_id": "shopee:27378956445",
+   "product_name": "Túi xách nữ đeo chéo đeo vai basic trẻ trung túi công sở da pu trơn kèm gấu BABUMAP _TDC02",
+   "ok": false
+  },
+  {
+   "trend": "đỗ mỹ linh",
+   "product_id": "shopee:47007815004",
+   "product_name": "Móc Khoá Gấu Bông Dễ Thương Mini Treo Túi Xách Chìa Khoá",
+   "ok": false
+  },
+  {
+   "trend": "khu du lịch đại nam",
+   "product_id": "shopee:25647224477",
+   "product_name": "Túi Đựng Điện Thoại PVC Chống Nước Có Túi Khí, Kt 21 x 11 cm Bảo Vệ An Toàn Khi Mưa Bơi Ti",
+   "ok": true
+  },
+  {
+   "trend": "khu du lịch đại nam",
+   "product_id": "shopee:29163294214",
+   "product_name": "(HÀNG LOẠI 1) Khăn Tắm Sợi Bông Microfiber Siêu Thấm Hút Dài 140x70CM, Khăn Lau Người Mềm ",
+   "ok": true
+  },
+  {
+   "trend": "lê quang liêm",
+   "product_id": "shopee:22342033116",
+   "product_name": "Bộ Cờ Vua Nam Châm Mạ Vàng Bạc Cao Cấp Cực Đẹp, Cờ Vua Thi Đấu Quốc Tế, Bàn Cờ Vua Gập Gọn",
+   "ok": true
+  },
+  {
+   "trend": "lê quang liêm",
+   "product_id": "shopee:23379242886",
+   "product_name": "Cờ Vua Nam Châm Tiêu Chuẩn Quốc Tế Thi Đấu, Bộ Cờ Vua Cao Cấp Mạ Vàng Size Lớn Hàng Việt N",
+   "ok": true
+  },
+  {
+   "trend": "lê quang liêm",
+   "product_id": "shopee:25669954082",
+   "product_name": "[Tặng 2 Hậu] Bộ Cờ Vua Nâu Gỗ Lớn Có Nam Châm Loại Cao Cấp Đồ Chơi Trí Tuệ Thể Thao Boardg",
+   "ok": true
+  },
+  {
+   "trend": "lê quang liêm",
+   "product_id": "shopee:44707983994",
+   "product_name": "Bàn Cờ Vua 13x13cm Nam Châm Hít, Mini Gấp Gọn Bỏ Túi, Nhỏ Đẹp Cao Cấp, Màu Trắng Đen, Kiêm",
+   "ok": true
+  },
+  {
+   "trend": "lịch thi đấu u23 việt nam",
+   "product_id": "shopee:29157825404",
+   "product_name": "Loa Bluetooth M503 Công Suất Lớn Bass Siêu Trầm Loa Di Động Cầm Tay Cao Cấp",
+   "ok": false
+  },
+  {
+   "trend": "máy xay mini",
+   "product_id": "shopee:20312487928",
+   "product_name": "Đầu đọc thẻ nhớ Micro Sd cổng usb, đầu lọc thẻ nhớ mini dùng cho máy tính, laptop, otg, lo",
+   "ok": false
+  },
+  {
+   "trend": "máy xay mini",
+   "product_id": "shopee:43801207973",
+   "product_name": "Củ sạc vuông 5v USB dành cho tất cả các dòng máy",
+   "ok": false
+  },
+  {
+   "trend": "máy xay mini",
+   "product_id": "shopee:54818354362",
+   "product_name": "Cáp Sạc Android 1M Micro USB ( Chui Nhỏ) Sạc Nhanh  Cho Realme Xiaomi Máy Tính Bảng Cáp Đi",
+   "ok": false
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:28309604497",
+   "product_name": "Ốp Lưng iPhone TPU Đệm Nhung Chống bẩn, Bảo Vệ Camera - iP 7/8/X/XS/XR/11/12/13/14/15/16/1",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:29981184136",
+   "product_name": "Ốp lưng chống sốc IPhone trong suốt có ngăn đựng thẻ cho IPhone 7 8 Plus SE XS XSMax 11 12",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:48369238965",
+   "product_name": "Ốp lưng iPhone 15 bướm đơn giản mới về chống va đập phù hợp iPhone 18/17/16/15/14/13/Pro",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:52769180922",
+   "product_name": "Ốp lưng trong suốt cao cấp cho iPhone 18 16 15 14 13 12 11 Pro Max Plus XR XS, viền chống ",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:53368118570",
+   "product_name": "Chó Xúc Xích Chấm Tròn Nâu Cho IPhone 18 17 15 16 14 13 12 11 Pro Max Xr Xs 7 8 Plus Ốp Lư",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:54266088259",
+   "product_name": "Ốp Lưng Samsung Tab A9 A11 A9+ A11+ S7 S8 S10 Lite S11 FE Silicon Mềm Gập 3 Lớp Chống Sốc ",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:54307144730",
+   "product_name": "Ốp Lưng Iphone Trong Suốt Sạc Từ Tính , Chống Sốc, Bảo Vệ Camera - iP 7/8/X/XS/11/12/13/14",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:54566728308",
+   "product_name": "Bộ túi may mắn ốp lưng bao quanh kiểu ins hoạt hình chống ngã cho iPhone 11/12/13/15/14 17",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:55019614041",
+   "product_name": "Ốp lưng in đàn cá nhỏ tối giản chống sốc 4 góc dành cho iPhone 18/17/16/15/14/11/13 Pro Ma",
+   "ok": true
+  },
+  {
+   "trend": "ốp lưng",
+   "product_id": "shopee:55614322501",
+   "product_name": "Ốp lưng Xiaomi Redmi 10C - Redmi 9C - Redmi 10A  cạnh vuông chống sốc TPU dẻo nguyên khối,",
+   "ok": true
+  },
+  {
+   "trend": "oppo a7 ultra",
+   "product_id": "shopee:45318261601",
+   "product_name": "Bộ sạc nhanh HBT 20W Type C đầu ra C to C và C to Lightning chất liệu dây dù truyền dữ liệ",
+   "ok": true
+  },
+  {
+   "trend": "oppo a7 ultra",
+   "product_id": "shopee:46069242859",
+   "product_name": "Củ sạc nhanh 20W Type C kèm cáp sạc điện thoại C-C hoặc C-L, bộ sạc điện thoại sạc nhanh ổ",
+   "ok": true
+  },
+  {
+   "trend": "oppo a7 ultra",
+   "product_id": "shopee:48218060866",
+   "product_name": "Củ sạc giá rẻ  – 2 Cổng USB 5V/2A | Sạc Nhanh 10W, An Toàn",
+   "ok": true
+  },
+  {
+   "trend": "oppo a7 ultra",
+   "product_id": "shopee:52466001121",
+   "product_name": "Cáp sạc điện thoại bốn trong một, sạc nhanh 240W, chất liệu silicone,1.2M, cáp sạc nhanh b",
+   "ok": true
+  },
+  {
+   "trend": "oppo a7 ultra",
+   "product_id": "shopee:56118158113",
+   "product_name": "Bộ sạc nhanh HBT 35W gồm củ sạc USB C PD QC 3.0 và dây sạc type c, Cáp sạc type C to C hoặ",
+   "ok": true
+  },
+  {
+   "trend": "oppo a7 ultra",
+   "product_id": "shopee:56568010175",
+   "product_name": "Cáp bọc dù sạc nhanh cho Iphone, Samsung, Xiaomi... độ dài 2M hàng tốt",
+   "ok": true
+  },
+  {
+   "trend": "son môi",
+   "product_id": "shopee:24695210764",
+   "product_name": "Son Bóng 3CE Glazy Lip Glow Dưỡng Môi Căng Mọng, Mềm Mịn, Lên Màu Chuẩn Sắc, Không Bết Dín",
+   "ok": true
+  },
+  {
+   "trend": "son môi",
+   "product_id": "shopee:26617618076",
+   "product_name": "Son Kem Lì 3CE Blur Water Tint Mịn Môi Mờ Ảo, Không Lem, Lâu Trôi, Che Phủ Rãnh Môi, Bền M",
+   "ok": true
+  },
+  {
+   "trend": "tiền",
+   "product_id": "shopee:2887857050",
+   "product_name": "Ổ cắm điện đa năng du lịch Universal Travel Adapter nhiều đầu",
+   "ok": false
+  },
+  {
+   "trend": "tiền",
+   "product_id": "shopee:40600969418",
+   "product_name": "Bộ Kẹp Điện Thoại Dán Lên Mặt Đồng Hồ Xe Máy, Đế Cài Dễ Dàng Tháo Lắp Kèm Keo 3m",
+   "ok": false
+  },
+  {
+   "trend": "trần quyết chiến",
+   "product_id": "shopee:40767166983",
+   "product_name": "Găng Tay Tập Gym Đệm Khí HUWAY, Bao Tay Nửa Ngón Chống Trượt, Thoáng Khí, Có Velcro Điều C",
+   "ok": false
+  },
+  {
+   "trend": "trần quyết chiến",
+   "product_id": "shopee:47851613515",
+   "product_name": "Găng tay tập Gym, thiết kế thời trang, năng động, chống trơn trượt tối ưu",
+   "ok": false
+  },
+  {
+   "trend": "trần quyết chiến",
+   "product_id": "shopee:54520049311",
+   "product_name": "Găng Tay Móc Kim Loại Hỗ Trợ Tập Xà Đơn Kéo Tạ Quấn Cổ Tay Tập Gym Deadlift",
+   "ok": false
+  }
+ ]
+}

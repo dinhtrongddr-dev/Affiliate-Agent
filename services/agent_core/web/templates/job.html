@@ -11,7 +11,8 @@
   </div>
   <div class="row">
     {{ badge(job.status) }}
-    {% if job.viral_score %}<span class="badge info">⭐ Điểm viral {{ '%.1f' % job.viral_score }}</span>{% endif %}
+    {% if job.viral_score %}<span class="badge info">⭐ Biên tập AI {{ '%.1f' % job.viral_score }}/10</span>{% endif %}
+    {% if job.qa_score %}<span class="badge info">QA {{ '%.0f' % job.qa_score }}/100</span>{% endif %}
   </div>
 </div>
 

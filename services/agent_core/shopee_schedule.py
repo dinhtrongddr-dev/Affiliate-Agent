@@ -54,7 +54,23 @@ def _preamble(settings):
             "-and $task.Actions[0].WorkingDirectory -eq $root)};\n")
 
 
-def status(settings):
+_STATUS_CACHE: dict = {}
+STATUS_TTL = 60.0
+
+
+def status(settings, fresh: bool = False):
+    """Task Scheduler is queried through PowerShell (3-5 s); pages reuse a 60 s snapshot."""
+    import time
+    key = str(getattr(settings, "project_root", ""))
+    cached = _STATUS_CACHE.get(key)
+    if not fresh and cached and time.monotonic() - cached[0] < STATUS_TTL:
+        return dict(cached[1])
+    result = _status_uncached(settings)
+    _STATUS_CACHE[key] = (time.monotonic(), result)
+    return dict(result)
+
+
+def _status_uncached(settings):
     if sys.platform != "win32":
         return {"installed": False, "managed": False, "enabled": False,
                 "task_name": TASK_NAME, "error": "Lịch ngoài app cần Windows Task Scheduler."}
@@ -73,6 +89,7 @@ $info=Get-ScheduledTaskInfo -TaskName $taskName -TaskPath $taskPath;
 
 
 def install(settings, enabled=True, local_time="07:00"):
+    _STATUS_CACHE.clear()
     if sys.platform != "win32":
         raise ScheduleError("Chạy khi app đóng cần Windows Task Scheduler.")
     if (not isinstance(enabled, bool) or not isinstance(local_time, str)

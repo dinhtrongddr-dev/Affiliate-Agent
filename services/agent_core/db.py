@@ -111,7 +111,8 @@ MIGRATIONS = {
         "mode": "TEXT NOT NULL DEFAULT 'base'",
         "brief_json": "TEXT",
         "script_json": "TEXT",
-        "viral_score": "REAL",
+        "viral_score": "REAL",  # AI editorial review, 0-10
+        "qa_score": "REAL",     # rendered-video QA, 0-100
         "approved_at": "TEXT",
     },
     "platform_posts": {
@@ -124,7 +125,7 @@ JOB_FIELDS = {
     "affiliate_link", "output_path", "facebook_output_path", "analysis_json",
     "keyframes_json", "product_candidates_json", "content_json", "shopee_ready",
     "facebook_ready", "review_status", "last_error", "mode", "brief_json",
-    "script_json", "viral_score", "approved_at", "duration_sec", "width",
+    "script_json", "viral_score", "qa_score", "approved_at", "duration_sec", "width",
     "height", "fps",
 }
 
@@ -173,6 +174,9 @@ def init_db(db_path: Path) -> None:
             for name, declaration in columns.items():
                 if name not in existing:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+        # viral_score used to receive the /100 QA total; keep the two scales apart.
+        conn.execute("UPDATE jobs SET qa_score=viral_score, viral_score=NULL "
+                     "WHERE viral_score > 10 AND qa_score IS NULL")
     _initialised.add(key)
 
 
@@ -182,6 +186,10 @@ def register_job(db_path: Path, job: dict[str, Any]) -> bool:
     init_db(db_path)
     stamp = now_iso()
     with connect(db_path) as conn:
+        conn.execute(_DELETED_SOURCES)
+        if job.get("sha256") and not job.get("allow_deleted") and conn.execute(
+                "SELECT 1 FROM deleted_sources WHERE sha256=?", (job["sha256"],)).fetchone():
+            return False  # the user deleted this video; a rescan must not resurrect it
         cur = conn.execute(
             """
             INSERT OR IGNORE INTO jobs
@@ -220,9 +228,26 @@ def get_job(db_path: Path, job_id: str) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
+_DELETED_SOURCES = ("CREATE TABLE IF NOT EXISTS deleted_sources "
+                    "(sha256 TEXT PRIMARY KEY, deleted_at TEXT NOT NULL)")
+
+
+def forget_deleted_source(db_path: Path, sha256: str) -> None:
+    """A deliberate re-upload of a deleted video is allowed again."""
+    init_db(db_path)
+    with connect(db_path) as conn:
+        conn.execute(_DELETED_SOURCES)
+        conn.execute("DELETE FROM deleted_sources WHERE sha256=?", (sha256,))
+
+
 def delete_job(db_path: Path, job_id: str) -> None:
     init_db(db_path)
     with connect(db_path) as conn:
+        conn.execute(_DELETED_SOURCES)
+        row = conn.execute("SELECT source_sha256, mode FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row and row["source_sha256"] and (row["mode"] or "base") == "base":
+            conn.execute("INSERT OR REPLACE INTO deleted_sources VALUES (?, ?)",
+                         (row["source_sha256"], now_iso()))
         conn.execute("DELETE FROM platform_posts WHERE job_id=?", (job_id,))
         conn.execute("DELETE FROM tasks WHERE job_id=? AND status IN ('QUEUED','FAILED')", (job_id,))
         conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))

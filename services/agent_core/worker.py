@@ -143,10 +143,30 @@ class Worker:
             self.last_run["_shopee_due"] = now
             from .shopee_intelligence import auto_sync
             auto_sync.enqueue_due(self.settings)
+        self._requeue_ai_waits()
         for kind, interval in PERIODIC.items():
             if now - self.last_run.get(kind, -interval) >= interval:
                 self.last_run[kind] = now
                 enqueue_task(self.settings.database_path, kind)
+
+    AI_RETRY_EVERY = 15 * 60
+    AI_RETRY_MAX = 6
+
+    def _requeue_ai_waits(self) -> None:
+        """Jobs parked on WAITING_FOR_AI_SERVICE retry on their own (15 min apart, max 6)."""
+        now = time.monotonic()
+        if now - self.last_run.get("_ai_retry", -1e9) < self.AI_RETRY_EVERY:
+            return
+        self.last_run["_ai_retry"] = now
+        counts = self.last_run.setdefault("_ai_retry_counts", {})
+        for job in list_jobs_by_status(self.settings.database_path,
+                                       ["WAITING_FOR_AI_SERVICE"], 50):
+            if counts.get(job["id"], 0) >= self.AI_RETRY_MAX:
+                continue
+            if enqueue_task(self.settings.database_path, "process", job["id"]):
+                counts[job["id"]] = counts.get(job["id"], 0) + 1
+                log.info("Auto-retry AI for job %s (%s/%s)", job["id"],
+                         counts[job["id"]], self.AI_RETRY_MAX)
 
     def _poll_generation(self) -> None:
         """Advance AI clip tasks every ~20 s (only when some are active)."""

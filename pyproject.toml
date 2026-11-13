@@ -42,6 +42,7 @@ packages = ["agent_core", "agent_core.editor", "agent_core.web", "agent_core.sho
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["services"]
+markers = ["network: test calls a live website (Mixkit)"]
 
 [tool.ruff]
 line-length = 100
