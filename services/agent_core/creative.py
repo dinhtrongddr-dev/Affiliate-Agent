@@ -215,8 +215,10 @@ Nhân vật và giọng:
   Dùng dữ kiện thật (tên, công dụng ghi trên sản phẩm, giá, lượt bán, sao) nhưng nói tự nhiên
   ("hơn 14 nghìn người mua rồi", "chưa tới 100 nghìn"). TUYỆT ĐỐI KHÔNG nói các từ hệ thống:
   "dữ liệu", "listing", "brief", "ghi nhận", "hiển thị", "thông số đối chiếu".
-  Không nói đã dùng/đã thử trừ khi experience.basis=owner_experience; khi chưa dùng thì nói
-  "món này", "mình thấy", "nhìn là biết", không khẳng định độ bền/hiệu quả.
+  Không nói đã dùng/đã thử trừ khi experience.basis=owner_experience. Khi chưa dùng: tối đa MỘT câu ngắn
+  nói thật điều đó (thường ở cuối, vd "mình chưa xài lâu nên ai dùng rồi cmt giúp nha"); các cảnh còn
+  lại cho thấy món đồ trong tình huống thật và cách dùng theo đúng công dụng ghi trên sản phẩm,
+  nói "món này giúp…", "kiểu này tiện ở chỗ…"; không khẳng định độ bền/hiệu quả, không lặp lời rào đón.
   audience_gender theo người dùng sản phẩm (đồ nữ=female, đồ nam=male, đồ chung=unisex).
 - Trẻ em có age thật (vd "4"); không cho trẻ làm việc nguy hiểm.
 
@@ -351,7 +353,7 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
             extra["talking"] = False
     result = {
         "title": _text(plan.get("title"), 120),
-        "hook": _text(plan.get("hook"), 70),
+        "hook": short_hook(plan.get("hook")) if explicit else _text(plan.get("hook"), 70),
         "music_mood": _text(plan.get("music_mood"), 60) or "upbeat",
         "scenes": scenes,
         "cta": _text(plan.get("cta"), 100),
@@ -394,6 +396,19 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
             text for text in (_text(v, 100) for v in plan["affiliate_keywords"][:8]) if text))
             if isinstance(plan["affiliate_keywords"], list) else [])
     return result
+
+
+def short_hook(value, max_words: int = 8) -> str:
+    """On-screen hook stays readable in 2 s: the first clause, or the first words."""
+    text = _text(value, 70)
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    import re as _re
+    first = _re.split(r"[,;:—–\-]\s", text)[0].strip()
+    if 3 <= len(first.split()) <= max_words:
+        return first.rstrip(".!?…")
+    return " ".join(words[:max_words]).rstrip(",.;:") + "…"
 
 
 # System words that must never be spoken in a video (they make it sound like a report).

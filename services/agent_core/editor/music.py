@@ -610,6 +610,10 @@ def evaluate_music_candidate(
 SEASONAL = re.compile(r"christmas|xmas|halloween|fright|spooky|wedding|holiday|santa|jingle|horror",
                       re.I)
 
+# High-energy titles/tags that clash with a calm or emotional story.
+LOUD = re.compile(r"epic|games?|party|rock|hip ?hop|trap|dance|club|house|edm|dubstep|metal|"
+                  r"action|trailer|sport|race|battle|fight", re.I)
+
 # Mixkit pages that actually filter (checked 2026-11): mood/<x>, tag/<x>, genre slugs.
 MOOD_PAGES = {
     "emotional": ["mood/sad", "mood/romantic", "mood/peaceful"],
@@ -688,11 +692,13 @@ def discover_and_select_music(
     candidates: list[MixkitCandidate] = []
     recent = recent_track_ids(settings, exclude_job=job_id)
     rng = random.Random(job_id)
+    calm = any(k in brief.primary_mood.lower() for k in ("emotional", "warm", "chill", "calm", "sad"))
     for page in mood_pages(brief, timeline):
         found = client.get_category_candidates(page, limit=24)
         rng.shuffle(found)
         for c in found:
             if (c.track_id in recent or SEASONAL.search(c.title or "")
+                    or (calm and LOUD.search(f"{c.title} {' '.join(c.tags or [])}"))
                     or any(existing.track_id == c.track_id for existing in candidates)):
                 continue
             candidates.append(c)

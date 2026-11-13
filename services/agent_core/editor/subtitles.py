@@ -105,6 +105,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Sub,{font},{fs_sub},&H0000E5FF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,{int(6*scale)},{int(3*scale)},2,{margin_lr},{margin_lr},{margin_sub_v},1
 Style: Hook,{font},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00141414,&H00000000,-1,0,0,0,100,100,0,0,3,{int(18*scale)},0,8,{margin_lr},{margin_lr},{margin_hook_v},1
 Style: Label,{font},{fs_label},&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,-1,0,0,0,100,100,0,0,1,{int(5*scale)},{int(2*scale)},8,{margin_lr},{margin_lr},{margin_label_v},1
+Style: HookLite,{font},{int(84*scale)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,{int(7*scale)},{int(3*scale)},8,{margin_lr},{margin_lr},{int(150*scale)},1
 Style: CTA,{font},{fs_cta},&H00141414,&H00141414,&H0000D7FF,&H00000000,-1,0,0,0,100,100,0,0,3,{int(22*scale)},0,5,{margin_lr},{margin_lr},0,1
 
 [Events]
@@ -179,7 +180,7 @@ def _single_layer(path, header, captions, hook, hook_end, cta, total) -> Path:
     lines = []
     clean_hook = _plain(hook)
     if clean_hook:
-        lines.append(f"Dialogue: 3,{_ts(0)},{_ts(hook_end)},Hook,,0,0,0,,"
+        lines.append(f"Dialogue: 3,{_ts(0)},{_ts(hook_end)},HookLite,,0,0,0,,"
                      r"{\fad(60,120)}" + _wrap(clean_hook, 20))
     subs = phrase_events(captions, total)
     clean_cta = _plain(cta)
