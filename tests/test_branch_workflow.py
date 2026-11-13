@@ -85,7 +85,7 @@ def test_product_review_retains_factual_provenance_and_separate_owner_notes(sett
     from agent_core.creative import branch_plan_prompt
     prompt = branch_plan_prompt(brief, {}, True, False)
     assert "Tôi dùng hai ngày" in prompt
-    assert "không nói đã dùng" in prompt
+    assert "không nói đã dùng" in prompt.lower()
     assert "real_usage_evidence" in prompt
 
 

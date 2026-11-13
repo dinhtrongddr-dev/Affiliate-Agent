@@ -277,3 +277,23 @@ def test_missing_cast_photos_are_generated_first_and_reused(setup_plan, tmp_path
     plan_once(settings, plan, provider)
     again = [t for t in engine.list_tasks(settings.database_path) if t["kind"] == "image"]
     assert len(again) == 2 and all(t["status"] == "DOWNLOADED" for t in again)
+
+
+def test_cast_photo_is_not_failed_by_the_storyboard_revalidation(setup_plan, tmp_path):
+    settings, plan, provider = setup_plan
+    settings.videogen_character = True
+    settings.work_dir = tmp_path / "work"
+    settings.videogen_daily_limit = 50
+    register_job(settings.database_path, {"id": "job-storyboard", "source_path": "",
+                 "sha256": "", "file_name": "storyboard", "mode": "trend",
+                 "brief": {"creation_branch": "template_series"}})
+    plan["scenes"][0]["cast"] = ["a"]
+    plan_once(settings, plan, provider)
+    state = settings.work_dir / "job-storyboard" / "plan_state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({"plan": plan}), encoding="utf-8")
+    sheet = next(t for t in engine.list_tasks(settings.database_path) if t["kind"] == "image")
+    with patch.object(OfflineProvider, "submit_image", create=True, return_value="r1") as submit:
+        engine._submit(settings, provider, sheet)
+    submit.assert_called_once()
+    assert engine.get_task(settings.database_path, sheet["id"])["status"] == "SUBMITTED"

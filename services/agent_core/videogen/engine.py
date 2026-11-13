@@ -22,7 +22,7 @@ log = logging.getLogger("affiliate_agent.videogen")
 
 ACTIVE = ("PENDING", "SUBMITTING", "SUBMITTED")
 WAIT_STATUS = "WAITING_FOR_GENERATION"
-MAX_ATTEMPTS = 2  # first try + one retry
+MAX_ATTEMPTS = 3  # first try + two retries (Muse sometimes answers with text only)
 SUBMIT_ERRORS_BEFORE_FAIL = 3
 
 SCHEMA = """
@@ -317,6 +317,9 @@ def _plan_storyboard(settings, job_id: str, plan: dict, provider) -> int:
             prev = task_id(job_id, -(k + 1), "image", prompt, [])
     retained = {task_id(job_id, i, "video", prompt, refs)
                 for i, prompt, refs, _ in compiled}
+    wanted_sheets = {(i, prompt) for i, prompt, _ in sheets}
+    retained.update(t["id"] for t in list_tasks(db, job_id, 10000)
+                    if t["kind"] == "image" and (t["scene_index"], t["prompt"]) in wanted_sheets)
     retained.update(task_id(job_id, i, "image", prompt, []) for i, prompt, _ in sheets)
     retained.update(t["id"] for t in existing)
     # a character photo that was already made (any attempt) is reused, never regenerated
@@ -329,11 +332,21 @@ def _plan_storyboard(settings, job_id: str, plan: dict, provider) -> int:
             f"AND id NOT IN ({','.join('?' * len(retained))})",
             ("Kịch bản mới thay thế", now_iso(), job_id, *ACTIVE, *retained))
     last_sheet = None
+    rows = list_tasks(db, job_id, 10000)
     for index, prompt, depends in sheets:
         tid = task_id(job_id, index, "image", prompt, [])
         if (index, prompt) not in done_sheets:
-            _insert(db, job_id=job_id, scene_index=index, kind="image", provider=provider.name,
-                    depends_on=depends, prompt=prompt, refs=[])
+            tries = sorted((t for t in rows if t["kind"] == "image" and t["scene_index"] == index
+                            and t["prompt"] == prompt), key=lambda t: t["attempt"])
+            if tries and tries[-1]["status"] in ("FAILED", "CANCELLED"):
+                tid = _insert(db, job_id=job_id, scene_index=index, kind="image",
+                              provider=provider.name, depends_on=depends, prompt=prompt, refs=[],
+                              attempt=tries[-1]["attempt"] + 1)   # a failed photo is made again
+            elif tries:
+                tid = tries[-1]["id"]
+            else:
+                _insert(db, job_id=job_id, scene_index=index, kind="image", provider=provider.name,
+                        depends_on=depends, prompt=prompt, refs=[])
         last_sheet = tid
     # Consecutive shots in the same location group continue from the previous shot's last
     # frame; different groups start in parallel (a full chain of 8 shots takes ~40 min).
@@ -411,7 +424,7 @@ def _older_than(ts: str | None, minutes: float) -> bool:
 def _retry_or_fail(settings, t: dict, error: str, qc: dict | None = None) -> None:
     db = settings.database_path
     _update(db, t["id"], status="FAILED", error=error[:500], qc_json=qc)
-    if t["kind"] == "video" and t["attempt"] < MAX_ATTEMPTS:
+    if t["kind"] in ("video", "image") and t["attempt"] < MAX_ATTEMPTS:
         _insert(db, job_id=t["job_id"], scene_index=t["scene_index"], kind=t["kind"],
                 provider=t["provider"], prompt=t["prompt"], refs=t["refs"],
                 duration=t["duration"], depends_on=t["depends_on"], attempt=t["attempt"] + 1)
@@ -420,7 +433,7 @@ def _retry_or_fail(settings, t: dict, error: str, qc: dict | None = None) -> Non
 
 def _submit(settings, provider, t: dict) -> None:
     db = settings.database_path
-    if t["status"] == "PENDING":
+    if t["status"] == "PENDING" and t["kind"] == "video":
         job = get_job(db, t["job_id"])
         if job and json.loads(job.get("brief_json") or "{}").get("creation_branch"):
             try:

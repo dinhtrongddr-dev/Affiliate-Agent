@@ -94,7 +94,7 @@ def test_prompts_keep_branch_honesty_budget_and_storyboard_contract(branch):
     assert "Tối đa 2 cảnh generate" in plan
     assert "2-6 giây" in plan
     assert "reference_ids" in plan and '"group"' in plan and '"lines"' in plan and '"talking"' in plan
-    assert "không nói đã dùng" in plan
+    assert "không nói đã dùng" in plan.lower()
     assert "không có CTA bán hàng" in review
     if branch != "product_review":
         assert "không ép" in idea.lower()

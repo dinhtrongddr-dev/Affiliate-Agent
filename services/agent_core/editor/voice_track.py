@@ -64,35 +64,74 @@ def _retime(ffmpeg: str, src: Path, out: Path, tempo: float = 1.0, pitch: float 
 
 
 def speech_windows(ffmpeg: str, clip: Path, start: float, length: float,
-                   noise_db: int = -32, min_silence: float = 0.25) -> list[tuple[float, float]]:
-    """Non-silent stretches of the clip's own audio in [start, start+length], relative times."""
-    cmd = [ffmpeg, "-hide_banner", "-nostats", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
-           "-i", str(clip), "-vn", "-af", f"silencedetect=n={noise_db}dB:d={min_silence}",
-           "-f", "null", "-"]
+                   min_len: float = 0.35, max_gap: float = 0.3) -> list[tuple[float, float]]:
+    """Stretches where someone speaks in the clip's own audio, relative to ``start``.
+
+    AI clips carry room tone or music, so a fixed silence threshold sees one long "speech".
+    The audio is band-passed to the voice range and each 50 ms frame is compared with the
+    clip's own noise floor (20th percentile) instead.
+    """
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                             errors="replace", timeout=120).stderr
-    except (OSError, subprocess.SubprocessError):
+        import numpy as np
+        raw = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
+             "-i", str(clip), "-vn", "-ac", "1", "-ar", "8000",
+             "-af", "highpass=f=250,lowpass=f=3400", "-f", "s16le", "-"],
+            capture_output=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError, ImportError):
         return []
-    if "Audio:" not in out:
+    if len(raw) < 1600:
         return []
-    silences, current = [], None
-    for line in out.splitlines():
-        if m := re.search(r"silence_start: (-?[\d.]+)", line):
-            current = max(0.0, float(m.group(1)))
-        elif (m := re.search(r"silence_end: ([\d.]+)", line)) and current is not None:
-            silences.append((current, float(m.group(1))))
-            current = None
-    if current is not None:
-        silences.append((current, length))
-    windows, cursor = [], 0.0
-    for s0, s1 in silences:
-        if s0 - cursor >= 0.35:
-            windows.append((round(cursor, 3), round(s0, 3)))
-        cursor = s1
-    if length - cursor >= 0.35:
-        windows.append((round(cursor, 3), round(length, 3)))
-    return windows
+    pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+    hop = 400  # 50 ms at 8 kHz
+    frames = pcm[: len(pcm) // hop * hop].reshape(-1, hop)
+    db = 20 * np.log10(np.sqrt((frames ** 2).mean(axis=1)) + 1e-3)
+    floor, peak = float(np.percentile(db, 20)), float(np.percentile(db, 95))
+    if peak - floor < 6:          # flat audio: no clear speech to follow
+        return []
+    active = db > floor + max(6.0, (peak - floor) * 0.45)
+    windows, begin, gap = [], None, 0
+    for i, on in enumerate(active):
+        if on:
+            begin = i if begin is None else begin
+            gap = 0
+        elif begin is not None:
+            gap += 1
+            if gap * 0.05 > max_gap:
+                windows.append((begin * 0.05, (i - gap + 1) * 0.05))
+                begin, gap = None, 0
+    if begin is not None:
+        windows.append((begin * 0.05, (len(active) - gap) * 0.05))
+    return [(round(w0, 3), round(w1, 3)) for w0, w1 in windows if w1 - w0 >= min_len]
+
+
+def fit_lines(durations: list[float], windows: list[tuple[float, float]]) -> dict[int, tuple[float, float]]:
+    """Each line takes the next speech stretch(es): the run of windows whose total span best
+    matches the voice. Speed is changed only within FIT_MIN..FIT_MAX; a voice up to 40 %
+    shorter than the mouth movement plays at normal speed from the first window.
+    Returns {line index: (start, tempo)} for the lines that fit."""
+    out, w = {}, 0
+    for j, dur in enumerate(durations):
+        if w >= len(windows):
+            break
+        best = None
+        for end_i in range(w, len(windows)):
+            span = max(0.3, windows[end_i][1] - windows[w][0])
+            tempo = dur / span
+            if tempo < 0.6:
+                break
+            score = abs(1 - min(max(tempo, FIT_MIN), FIT_MAX)) + abs(tempo - min(max(tempo, FIT_MIN), FIT_MAX)) * 3
+            if best is None or score < best[0]:
+                best = (score, end_i, tempo)
+        if best is None:
+            break
+        _, end_i, tempo = best
+        if FIT_MIN <= tempo <= FIT_MAX:
+            out[j] = (windows[w][0], round(tempo, 4))
+        elif 0.6 <= tempo < FIT_MIN:
+            out[j] = (windows[w][0], 1.0)
+        w = end_i + 1
+    return out
 
 
 def scene_voice(settings, scene: dict, cast: dict, work_dir: Path, index: int,
@@ -131,16 +170,9 @@ def scene_voice(settings, scene: dict, cast: dict, work_dir: Path, index: int,
         if not windows:
             result.revoice = "no_speech_found"
         else:
-            if len(windows) > len(on_cam) and on_cam:   # merge extra windows into the last line
-                windows = windows[:len(on_cam) - 1] + [(windows[len(on_cam) - 1][0], windows[-1][1])]
+            fitted = fit_lines([raw[k][1].duration for k in on_cam], windows)
+            fitted = {on_cam[j]: v for j, v in fitted.items()}
             ok = True
-            for k, (w0, w1) in zip(on_cam, windows, strict=False):
-                speech = raw[k][1]
-                tempo = speech.duration / max(0.3, w1 - w0)
-                if FIT_MIN <= tempo <= FIT_MAX:
-                    fitted[k] = (w0, tempo)
-                else:
-                    ok = False
             result.revoice = "fitted" if ok and len(fitted) == len(on_cam) else "unfitted"
 
     cursor = 0.12

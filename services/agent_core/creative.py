@@ -210,8 +210,14 @@ Nhân vật và giọng:
 - "talking": true CHỈ khi nhân vật nói thẳng vào camera (khẩu hình). Tối đa 2 cảnh talking mỗi video
   (thường là hook hoặc câu thoại then chốt). Các cảnh khác talking=false: lời là giọng dẫn hoặc độc thoại
   đặt trên cảnh hành động/phản ứng/tay/góc nhìn thứ nhất.
-- product_review: người review xưng "mình"; chỉ nói điều có trong dữ liệu sản phẩm, không nói đã dùng
-  trừ khi experience.basis=owner_experience. audience_gender theo người dùng sản phẩm (đồ nữ=female, đồ nam=male).
+- product_review: MỘT người review (nhân vật "creator") xưng "mình", nói như người thật đang giới thiệu
+  món đồ cho bạn bè: tình huống/nỗi phiền trong nhà -> món này làm gì -> cách dùng -> điểm đáng chú ý -> giá.
+  Dùng dữ kiện thật (tên, công dụng ghi trên sản phẩm, giá, lượt bán, sao) nhưng nói tự nhiên
+  ("hơn 14 nghìn người mua rồi", "chưa tới 100 nghìn"). TUYỆT ĐỐI KHÔNG nói các từ hệ thống:
+  "dữ liệu", "listing", "brief", "ghi nhận", "hiển thị", "thông số đối chiếu".
+  Không nói đã dùng/đã thử trừ khi experience.basis=owner_experience; khi chưa dùng thì nói
+  "món này", "mình thấy", "nhìn là biết", không khẳng định độ bền/hiệu quả.
+  audience_gender theo người dùng sản phẩm (đồ nữ=female, đồ nam=male, đồ chung=unisex).
 - Trẻ em có age thật (vd "4"); không cho trẻ làm việc nguy hiểm.
 
 Hình ảnh:
@@ -388,6 +394,24 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
             text for text in (_text(v, 100) for v in plan["affiliate_keywords"][:8]) if text))
             if isinstance(plan["affiliate_keywords"], list) else [])
     return result
+
+
+# System words that must never be spoken in a video (they make it sound like a report).
+META_WORDS = ("dữ liệu", "listing", "brief", "ghi nhận", "hiển thị", "thông số đối chiếu",
+              "theo thông tin", "trường dữ liệu")
+
+
+def meta_word_lines(plan: dict) -> list[str]:
+    hits = []
+    for scene in plan.get("scenes") or []:
+        for line in scene.get("lines") or []:
+            low = str(line.get("text") or "").lower()
+            if any(w in low for w in META_WORDS):
+                hits.append(line["text"])
+    for key in ("hook", "caption", "title"):
+        if any(w in str(plan.get(key) or "").lower() for w in META_WORDS):
+            hits.append(str(plan[key]))
+    return hits
 
 
 def _storyboard_v2_fields(scene: dict, raw: dict) -> None:

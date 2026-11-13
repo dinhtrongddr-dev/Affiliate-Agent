@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -328,8 +329,12 @@ class MixkitMusicClient:
             waveform_m = re.search(r'data-audio-player-waveform-url-value="([^"]+)"', block)
             waveform_url = waveform_m.group(1).strip() if waveform_m else ""
 
-            title_m = re.search(r'<h2[^>]*class="[^"]*item-grid-card__title[^"]*"[^>]*>\s*(.*?)\s*</h2>', block, re.DOTALL)
-            title = re.sub(r'<[^>]+>', '', title_m.group(1)).strip() if title_m else f"Mixkit Track {track_id}"
+            title_m = (re.search(r'item-grid-card__title[^>]*>\s*([^<]{2,80})', block)
+                       or re.search(r'<h2[^>]*>\s*([^<]{2,80})', block))
+            if not title_m:  # the card markup nests deeper than the item block: look ahead
+                pos = html.find(f'data-audio-player-item-id-value="{track_id}"')
+                title_m = re.search(r'item-grid-card__title[^>]*>\s*([^<]{2,80})', html[pos:pos + 6000])                     if pos >= 0 else None
+            title = " ".join(title_m.group(1).split()) if title_m else f"Mixkit Track {track_id}"
 
             author_m = re.search(r'<p[^>]*class="[^"]*author[^"]*"[^>]*>\s*by\s*(.*?)\s*</p>', block, re.DOTALL)
             author = re.sub(r'<[^>]+>', '', author_m.group(1)).strip() if author_m else "Mixkit Creator"
@@ -602,6 +607,70 @@ def evaluate_music_candidate(
 # STEP 6: DYNAMIC DISCOVERY, EVALUATION & RETRY LOOP
 # ---------------------------------------------------------------------------
 
+SEASONAL = re.compile(r"christmas|xmas|halloween|fright|spooky|wedding|holiday|santa|jingle|horror",
+                      re.I)
+
+# Mixkit pages that actually filter (checked 2026-11): mood/<x>, tag/<x>, genre slugs.
+MOOD_PAGES = {
+    "emotional": ["mood/sad", "mood/romantic", "mood/peaceful"],
+    "funny": ["mood/funny", "tag/ukulele", "mood/happy"],
+    "happy": ["mood/happy", "tag/ukulele", "tag/acoustic"],
+    "chill": ["chillout", "mood/peaceful", "tag/acoustic"],
+    "dramatic": ["mood/dramatic"],
+    "review": ["mood/happy", "tag/acoustic", "chillout"],
+}
+
+
+def mood_pages(brief: "MusicBrief", timeline: dict | None = None) -> list[str]:
+    text = f"{brief.primary_mood} {brief.genre} {(timeline or {}).get('music_mood') or ''}".lower()
+    keys = []
+    for key, words in (("emotional", ("emotional", "warm", "sad", "nostalg")),
+                       ("funny", ("funny", "comedy", "playful")),
+                       ("dramatic", ("suspense", "dramatic", "epic", "mysterious")),
+                       ("chill", ("chill", "relaxed", "calm")),
+                       ("review", ("corporate", "inspirational", "lifestyle")),
+                       ("happy", ("happy", "upbeat", "positive", "cheerful"))):
+        if any(w in text for w in words):
+            keys.append(key)
+    pages = []
+    for key in keys or ["happy"]:
+        pages += [p for p in MOOD_PAGES[key] if p not in pages]
+    return pages
+
+
+def recent_track_ids(settings, exclude_job: str = "", limit: int = 8) -> set[str]:
+    """Tracks used by the latest videos, so consecutive videos do not sound the same."""
+    import json
+    import sqlite3
+    db = getattr(settings, "database_path", None)
+    if not db or not Path(db).is_file():
+        return set()
+    conn = None
+    try:
+        conn = sqlite3.connect(db)   # closed explicitly: "with" only commits on Windows
+        rows = conn.execute("SELECT id, script_json FROM jobs WHERE script_json LIKE '%music_metadata%' "
+                            "ORDER BY updated_at DESC LIMIT 40").fetchall()
+    except sqlite3.Error:
+        return set()
+    finally:
+        if conn is not None:
+            conn.close()
+    used = []
+    for job_id, raw in rows:
+        if job_id == exclude_job:
+            continue
+        try:
+            meta = (json.loads(raw).get("render") or {}).get("music_metadata") or {}
+        except (TypeError, ValueError):
+            continue
+        tid = str(meta.get("track_id") or "")
+        if tid and tid not in used:
+            used.append(tid)
+        if len(used) >= limit:
+            break
+    return set(used)
+
+
 def discover_and_select_music(
     timeline: dict,
     job_id: str,
@@ -617,24 +686,20 @@ def discover_and_select_music(
     log.info("AI Music Brief for %s: Mood='%s', Target=%0.1fs", job_id, brief.primary_mood, brief.target_duration_sec)
 
     candidates: list[MixkitCandidate] = []
-    # Collect candidates from queries
-    for q in brief.search_queries:
-        found = client.search_candidates(q, limit=4)
+    recent = recent_track_ids(settings, exclude_job=job_id)
+    rng = random.Random(job_id)
+    for page in mood_pages(brief, timeline):
+        found = client.get_category_candidates(page, limit=24)
+        rng.shuffle(found)
         for c in found:
-            if not any(existing.track_id == c.track_id for existing in candidates):
-                candidates.append(c)
-        if len(candidates) >= max_candidates:
-            break
-
-    # Fallback to categories if queries returned few results
-    if len(candidates) < max_candidates:
-        for cat in brief.categories:
-            cat_found = client.get_category_candidates(cat, limit=4)
-            for c in cat_found:
-                if not any(existing.track_id == c.track_id for existing in candidates):
-                    candidates.append(c)
+            if (c.track_id in recent or SEASONAL.search(c.title or "")
+                    or any(existing.track_id == c.track_id for existing in candidates)):
+                continue
+            candidates.append(c)
             if len(candidates) >= max_candidates:
                 break
+        if len(candidates) >= max_candidates:
+            break
 
     if not candidates:
         log.warning("Mixkit returned no candidates for job %s", job_id)

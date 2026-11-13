@@ -623,6 +623,13 @@ def _cast_plan_voices(settings, plan: dict, brief: dict) -> None:
                                     getattr(settings, "style_profile", "") or None)
     pinned = {c["id"]: c["voice"] for c in (brief.get("template") or {}).get("characters") or []
               if isinstance(c, dict) and c.get("voice")}
+    chars = [c for c in plan.get("characters") or [] if isinstance(c, dict) and c.get("id")]
+    if plan.get("creation_branch") == "product_review" and len(chars) == 1:
+        # one reviewer: the "narrator" is that same person, so one voice for the whole video
+        for scene in plan.get("scenes") or []:
+            for line in scene.get("lines") or []:
+                if line.get("speaker") == "narrator":
+                    line["speaker"] = chars[0]["id"]
     plan["voice_cast"] = cast_voices(plan, settings.tts_voice, pinned)
 
 
@@ -777,6 +784,21 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                         score = float(again.get("score", score))
                     except Exception:  # noqa: BLE001
                         pass
+                hits = creative.meta_word_lines(plan) if branch else []
+                if hits:  # sounds like a report: one forced rewrite of the spoken lines
+                    fix_prompt = creative.branch_review_prompt(plan, product, 10, prompt_brief) + (
+                        "\nBẮT BUỘC viết lại (revised): các câu sau nghe như báo cáo, cấm từ hệ thống "
+                        + json.dumps(list(creative.META_WORDS), ensure_ascii=False) + ": "
+                        + json.dumps(hits[:8], ensure_ascii=False))
+                    fixed = _ask_json(client, settings, fix_prompt, temperature=0.4, max_tokens=7000)
+                    if isinstance(fixed.get("revised"), dict):
+                        candidate = creative.normalise_plan(
+                            {**fixed["revised"], "creation_branch": branch,
+                             "storyboard_version": plan.get("storyboard_version", 2)},
+                            mode, segments, n_clips)
+                        if len(creative.meta_word_lines(candidate)) < len(hits):
+                            plan = candidate
+                            plan["revised_after_review"] = ["lời như báo cáo"]
             except AIClientError:
                 raise
             except Exception as exc:  # noqa: BLE001

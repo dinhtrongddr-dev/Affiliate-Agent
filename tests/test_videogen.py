@@ -197,15 +197,15 @@ class EngineTests(unittest.TestCase):
         self.assertIn("gateway down", task["error"])
         self.assertFalse(engine.has_active(self.s.database_path))
 
-    def test_black_clip_retried_once_then_falls_back(self):
+    def test_black_clip_retried_then_falls_back(self):
         gw = FakeGateway(self.s, self.clip, self.image, bad_clip=self.black, bad_times=5)
         self.s.videogen_character = False
         engine.plan_job(self.s, "jobmuse01", {"scenes": PLAN["scenes"][:1]}, None, gw)
         self.wait_status()
-        for _ in range(5):
+        for _ in range(7):
             engine.poll(self.s, gw)
         tasks = engine.list_tasks(self.s.database_path, "jobmuse01")
-        self.assertEqual(sorted(t["attempt"] for t in tasks), [1, 2])
+        self.assertEqual(sorted(t["attempt"] for t in tasks), list(range(1, engine.MAX_ATTEMPTS + 1)))
         self.assertTrue(all(t["status"] == "FAILED" for t in tasks))
         self.assertIn("khung đen", tasks[0]["error"])
         self.assertEqual(engine.results_for_job(self.s.database_path, "jobmuse01"), {})

@@ -206,7 +206,15 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
             try:
                 src_len = probe(settings.ffprobe_path, Path(scene["source"]))["duration_sec"]
                 available = max(0.5, src_len - float(scene.get("start") or 0))
-                if scene.get("generated"):
+                if scene.get("generated") and scene.get("talking"):
+                    # start the cut just before the character starts talking
+                    from .voice_track import speech_windows
+                    found = speech_windows(getattr(settings, "ffmpeg_path", "ffmpeg"),
+                                           Path(scene["source"]), 0.0, src_len)
+                    if found and found[0][0] > 0.4:
+                        shift = round(found[0][0] - 0.3, 3)
+                        scene = scenes[i] = {**scene, "start": shift}
+                        available = max(0.5, src_len - shift)
                     clip_window = (Path(scene["source"]), float(scene.get("start") or 0), available)
             except Exception:  # noqa: BLE001 - probe failure: keep old behaviour
                 available = None

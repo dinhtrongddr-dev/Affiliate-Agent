@@ -152,3 +152,37 @@ def test_speech_windows_from_silence(tmp_path):
                     str(clip)], check=True)
     windows = speech_windows("ffmpeg", clip, 0, 3.5)
     assert len(windows) == 1 and abs(windows[0][0] - 1.0) < 0.15 and abs(windows[0][1] - 2.5) < 0.15
+
+
+def test_fit_lines_follows_the_mouth():
+    from agent_core.editor.voice_track import fit_lines
+    assert fit_lines([3.88], [(3.85, 4.8), (5.1, 5.65), (6.55, 9.0)]) == {0: (3.85, 1.0)}
+    assert fit_lines([3.49], [(2.75, 4.75), (5.05, 6.65)])[0][0] == 2.75
+    two = fit_lines([1.5, 2.0], [(0.5, 2.0), (2.5, 4.4)])
+    assert two[0][0] == 0.5 and two[1][0] == 2.5
+    assert fit_lines([5.0], [(0, 1.0)]) == {}       # far too long for the mouth: not forced
+
+
+def test_report_words_are_detected():
+    plan = {"hook": "Cây lau nhà 99k", "scenes": [{"lines": [
+        {"speaker": "me", "text": "Giá hiển thị trong dữ liệu là 99.000 đồng"},
+        {"speaker": "me", "text": "Chưa tới 100 nghìn thôi nè"}]}]}
+    assert creative.meta_word_lines(plan) == ["Giá hiển thị trong dữ liệu là 99.000 đồng"]
+
+
+def test_music_pages_by_mood_skip_seasonal_and_recent(tmp_path):
+    import sqlite3
+    from types import SimpleNamespace
+    from agent_core.editor.music import SEASONAL, generate_music_brief, mood_pages, recent_track_ids
+    sad = {"music_mood": "emotional", "title": "mẹ", "scenes": []}
+    fun = {"music_mood": "funny", "title": "chó con", "scenes": []}
+    assert mood_pages(generate_music_brief(sad), sad)[0] == "mood/sad"
+    assert mood_pages(generate_music_brief(fun), fun)[0] == "mood/funny"
+    assert SEASONAL.search("A Very Happy Christmas") and not SEASONAL.search("Piano Reflections")
+    db = tmp_path / "d.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE jobs (id TEXT, script_json TEXT, updated_at TEXT)")
+        conn.execute("INSERT INTO jobs VALUES ('a', ?, '2')",
+                     (json.dumps({"render": {"music_metadata": {"track_id": "738"}}}),))
+    assert recent_track_ids(SimpleNamespace(database_path=db)) == {"738"}
+    assert recent_track_ids(SimpleNamespace(database_path=db), exclude_job="a") == set()

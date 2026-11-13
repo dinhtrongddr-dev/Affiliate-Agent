@@ -262,7 +262,7 @@ def test_discover_and_select_music_retry_and_cleanup(tmp_path):
             return AudioAnalysisMetrics(duration_sec=60.0, mean_volume_db=-6.0, max_volume_db=0.0, dynamic_range_db=5.0)
         return AudioAnalysisMetrics(duration_sec=120.0, mean_volume_db=-18.0, max_volume_db=-2.0, dynamic_range_db=15.0)
 
-    with patch.object(MixkitMusicClient, "search_candidates", return_value=[cand1, cand2]), \
+    with patch.object(MixkitMusicClient, "get_category_candidates", return_value=[cand1, cand2]), \
          patch("agent_core.editor.music.download_candidate_track", side_effect=fake_download), \
          patch("agent_core.editor.music.analyze_audio_file", side_effect=fake_analyze):
 
