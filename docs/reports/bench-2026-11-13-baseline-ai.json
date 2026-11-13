@@ -1,0 +1,479 @@
+{
+ "at": "2026-11-13T21:36:23",
+ "matcher": {
+  "labelled_pairs": 36,
+  "precision_stored": 0.667,
+  "false_matches_stored": 12,
+  "good_lost": 0,
+  "per_trend": [
+   {
+    "trend": "cộng ielts",
+    "matcher_now": 1,
+    "stored": 1,
+    "bad_stored": 1
+   },
+   {
+    "trend": "đỗ mỹ linh",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 2
+   },
+   {
+    "trend": "khu du lịch đại nam",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 0
+   },
+   {
+    "trend": "lê quang liêm",
+    "matcher_now": 4,
+    "stored": 4,
+    "bad_stored": 0
+   },
+   {
+    "trend": "lịch thi đấu u23 việt nam",
+    "matcher_now": 3,
+    "stored": 1,
+    "bad_stored": 1
+   },
+   {
+    "trend": "máy xay mini",
+    "matcher_now": 3,
+    "stored": 3,
+    "bad_stored": 3
+   },
+   {
+    "trend": "ốp lưng",
+    "matcher_now": 10,
+    "stored": 10,
+    "bad_stored": 0
+   },
+   {
+    "trend": "oppo a7 ultra",
+    "matcher_now": 10,
+    "stored": 6,
+    "bad_stored": 0
+   },
+   {
+    "trend": "son môi",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 0
+   },
+   {
+    "trend": "tiền",
+    "matcher_now": 2,
+    "stored": 2,
+    "bad_stored": 2
+   },
+   {
+    "trend": "trần quyết chiến",
+    "matcher_now": 3,
+    "stored": 3,
+    "bad_stored": 3
+   }
+  ]
+ },
+ "existing_jobs": [
+  {
+   "job_id": "2a504923d13eadb63f22fcb0",
+   "branch": "",
+   "title": "Ủa, cún xúc xích lên ốp luôn nè!",
+   "hook": "Cún xúc xích lên ốp!",
+   "hook_opener": "cún",
+   "scenes": 4,
+   "generate_scenes": 0,
+   "planned_duration_s": 8.5,
+   "muse_prompt_chars_max": 0,
+   "muse_prompt_chars_avg": 0,
+   "banned_terms": [],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 4,
+   "text_layers": 4,
+   "music_mood": "upbeat, playful",
+   "hashtags": [
+    "#mecho",
+    "#doglover",
+    "#choxucxich",
+    "#oplungiphone",
+    "#oplungcute",
+    "#phukieniphone",
+    "#tiktokshopping"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "t1139968386e54a1087e71d6",
+   "branch": "viral_creator",
+   "title": "Ai Là Người Hiểu Mẹ Nhất Trong Nhà?",
+   "hook": "Ai mới thật sự hiểu mẹ?",
+   "hook_opener": "ai",
+   "scenes": 8,
+   "generate_scenes": 8,
+   "planned_duration_s": 50.0,
+   "muse_prompt_chars_max": 9014,
+   "muse_prompt_chars_avg": 8570,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 1,
+   "text_layers": 3,
+   "music_mood": "Begins with playful, upbeat sitcom-style plucked strings",
+   "hashtags": [
+    "#AiHieuMeNhat",
+    "#TinhCamGiaDinh",
+    "#MeLaTatCa",
+    "#GiaDinhVietNam",
+    "#ThauHieu",
+    "#TinhYeuThuong",
+    "#VideoCamDong",
+    "#ViralCreator"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "t3968151306b64d7083479c7",
+   "branch": "viral_creator",
+   "title": "Ba Sẽ Cứu Xe Hay Cứu Con?",
+   "hook": "Ba ơi, nếu nước lên nhanh thì ba cứu xe hay cứu con trước?",
+   "hook_opener": "ba",
+   "scenes": 8,
+   "generate_scenes": 8,
+   "planned_duration_s": 51.0,
+   "muse_prompt_chars_max": 7040,
+   "muse_prompt_chars_avg": 6560.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 4,
+   "text_layers": 3,
+   "music_mood": "Cinematic emotional piano, restrained tension during the",
+   "hashtags": [
+    "#NhaTrang",
+    "#MuaLu",
+    "#AnToanMuaLu",
+    "#GiaDinh",
+    "#TinhThanGiaDinh",
+    "#CauChuyenCamDong",
+    "#ViralCreator"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "ta97c9e32e2ec48558332fcd",
+   "branch": "viral_creator",
+   "title": "Nhà Vô Địch Không Cần Cúp, Chỉ Cần Spotlight",
+   "hook": "KHOAN—NÓ ĐANG LAO VỀ PHÍA AI?",
+   "hook_opener": "khoan",
+   "scenes": 3,
+   "generate_scenes": 0,
+   "planned_duration_s": 18.0,
+   "muse_prompt_chars_max": 0,
+   "muse_prompt_chars_avg": 0,
+   "banned_terms": [],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 1,
+   "text_layers": 3,
+   "music_mood": "Playful energetic sports broadcast music, dramatic",
+   "hashtags": [
+    "#ChoCung",
+    "#DogRunning",
+    "#FunnyDog",
+    "#DogLovers",
+    "#ChoDeThuong",
+    "#CountrysideLife",
+    "#ViralCreator",
+    "#PetVideos"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "tb5c48c991889478cb4cb649",
+   "branch": "viral_creator",
+   "title": "Ai Là Người Hiểu Mẹ Nhất Trong Nhà?",
+   "hook": "Nếu mẹ được nghỉ đúng một ngày, mẹ muốn làm gì nhất? Cả nhà đều đoán s",
+   "hook_opener": "nếu",
+   "scenes": 3,
+   "generate_scenes": 3,
+   "planned_duration_s": 24.0,
+   "muse_prompt_chars_max": 8750,
+   "muse_prompt_chars_avg": 8288.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 2,
+   "text_layers": 3,
+   "music_mood": "Begins with light, p",
+   "hashtags": [
+    "#GiaDinh",
+    "#TinhCamGiaDinh",
+    "#MeLaTatCa",
+    "#ThauHieu",
+    "#TinhYeuThuong",
+    "#CauChuyenCamDong",
+    "#ViralCreator",
+    "#BuaComGiaDinh"
+   ],
+   "compile_error": null
+  },
+  {
+   "job_id": "tfbc2e399a590446993f5c99",
+   "branch": "product_review",
+   "title": "Review minh bạch: Xốt Trứng Muối Hoàng Kim Tanzy Foods 500g",
+   "hook": "500g, 64.000đ: biết gì?",
+   "hook_opener": "500g",
+   "scenes": 9,
+   "generate_scenes": 9,
+   "planned_duration_s": 54.0,
+   "muse_prompt_chars_max": 4113,
+   "muse_prompt_chars_avg": 3751.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic",
+    "studio"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 0,
+   "text_layers": 4,
+   "music_mood": "Upbeat, curious, friendly food-review background music with",
+   "hashtags": [
+    "#TanzyFoods",
+    "#XotTrungMuoi",
+    "#XotTrungMuoiHoangKim",
+    "#ReviewSanPham",
+    "#ReviewDoAn",
+    "#FoodReview",
+    "#ShopeeFinds"
+   ],
+   "compile_error": null
+  }
+ ],
+ "existing_summary": {
+  "videos": 6,
+  "muse_prompt_chars_max": 9014,
+  "with_banned_terms": 4,
+  "generate_scenes": 28,
+  "scenes_with_refs": 0,
+  "duration_s": [
+   8.5,
+   50.0,
+   51.0,
+   18.0,
+   24.0,
+   54.0
+  ],
+  "voice_overfull_scenes": 12,
+  "max_text_layers": 4,
+  "distinct_hook_openers": 6
+ },
+ "ai_drafts": [
+  {
+   "brief": "Ai là người hiểu mẹ nhất",
+   "ideation_s": 27.9,
+   "storyboard_s": 184.1,
+   "ai_calls": 2,
+   "branch": "viral_creator",
+   "title": "Ai Là Người Hiểu Mẹ Nhất Nhà?",
+   "hook": "Ai thật sự hiểu mẹ?",
+   "hook_opener": "ai",
+   "scenes": 9,
+   "generate_scenes": 9,
+   "planned_duration_s": 56.0,
+   "muse_prompt_chars_max": 8922,
+   "muse_prompt_chars_avg": 7774.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 6,
+   "text_layers": 3,
+   "music_mood": "Playful comedic sitcom music with light percussion and",
+   "hashtags": [
+    "#AiHieuMeNhat",
+    "#TinhCamGiaDinh",
+    "#MeLaTatCa",
+    "#BuaComGiaDinh",
+    "#ChuyenGiaDinh",
+    "#VideoCamDong",
+    "#GiaDinhVietNam"
+   ],
+   "compile_error": null
+  },
+  {
+   "brief": "Con chó chạy ngoài đồng",
+   "ideation_s": 27.3,
+   "storyboard_s": 157.9,
+   "ai_calls": 2,
+   "branch": "viral_creator",
+   "title": "Chú Chó Vàng Chạy Như Bay Và Bí Mật Đáng Yêu",
+   "hook": "Nó đang vội đi đâu?",
+   "hook_opener": "nó",
+   "scenes": 7,
+   "generate_scenes": 7,
+   "planned_duration_s": 43.0,
+   "muse_prompt_chars_max": 7469,
+   "muse_prompt_chars_avg": 6464.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 0,
+   "text_layers": 3,
+   "music_mood": "Playful, curious, funny at the beginning, gradually",
+   "hashtags": [
+    "#ChoVang",
+    "#VitCon",
+    "#TinhBanDongVat",
+    "#ChuyenQue",
+    "#DongVatDeThuong",
+    "#CuteAnimals",
+    "#HeartwarmingStory",
+    "#ViralCreator"
+   ],
+   "compile_error": null
+  },
+  {
+   "brief": "cờ vua",
+   "ideation_s": 26.3,
+   "storyboard_s": 209.0,
+   "ai_calls": 2,
+   "branch": "product_review",
+   "title": "Review Bộ Cờ Vua Nâu Gỗ Có Nam Châm – Tặng 2 Quân Hậu",
+   "hook": "Một bàn cờ, hai bộ óc!",
+   "hook_opener": "một",
+   "scenes": 8,
+   "generate_scenes": 8,
+   "planned_duration_s": 48.0,
+   "muse_prompt_chars_max": 5316,
+   "muse_prompt_chars_avg": 4874.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic",
+    "studio"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 0,
+   "text_layers": 3,
+   "music_mood": "Thoughtful, playful, warm and inspiring, with a gentle",
+   "hashtags": [
+    "#CoVua",
+    "#BoCoVua",
+    "#Boardgame",
+    "#DoChoiTriTue",
+    "#CoVuaNamCham",
+    "#ToyKingdom",
+    "#ReviewSanPham"
+   ],
+   "compile_error": null
+  },
+  {
+   "brief": "ốp lưng",
+   "ideation_s": 22.8,
+   "storyboard_s": 202.1,
+   "ai_calls": 2,
+   "branch": "product_review",
+   "title": "Review Ốp Lưng iPhone TPU Đệm Nhung: 3 Chi Tiết Cần Kiểm Tra",
+   "hook": "Đừng chọn ốp chỉ vì màu!",
+   "hook_opener": "đừng",
+   "scenes": 8,
+   "generate_scenes": 8,
+   "planned_duration_s": 54.0,
+   "muse_prompt_chars_max": 4744,
+   "muse_prompt_chars_avg": 4530.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic",
+    "studio"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 4,
+   "text_layers": 4,
+   "music_mood": "Modern technology review, upbeat and curious, light",
+   "hashtags": [
+    "#OpLungIphone",
+    "#OpLungTPU",
+    "#OpLungDemNhung",
+    "#BaoVeCamera",
+    "#PhuKienIphone",
+    "#ReviewSanPham",
+    "#SHINCASE"
+   ],
+   "compile_error": null
+  },
+  {
+   "brief": "Suri giúp bố nấu cơm",
+   "ideation_s": 41.1,
+   "storyboard_s": 179.0,
+   "ai_calls": 2,
+   "branch": "template_series",
+   "title": "Suri Giúp Bố Nấu Cơm – Cuộc Thi Đếm Gạo",
+   "hook": "Một cốc gạo, đếm bao lâu?",
+   "hook_opener": "một",
+   "scenes": 6,
+   "generate_scenes": 6,
+   "planned_duration_s": 38.0,
+   "muse_prompt_chars_max": 5151,
+   "muse_prompt_chars_avg": 4524.0,
+   "banned_terms": [
+    "Dialogue is script context only",
+    "Reference manifest digest",
+    "cinematic",
+    "photorealistic"
+   ],
+   "scenes_with_refs": 0,
+   "scenes_voice_overfull": 0,
+   "text_layers": 2,
+   "music_mood": "funny",
+   "hashtags": [
+    "#GiaDinhSuri",
+    "#SuriGiupBo",
+    "#HaiGiaDinh",
+    "#ChuyenNhaMinh",
+    "#GiaDinhVietNam",
+    "#ComedyFamily"
+   ],
+   "compile_error": null
+  }
+ ],
+ "ai_summary": {
+  "videos": 5,
+  "muse_prompt_chars_max": 8922,
+  "with_banned_terms": 5,
+  "generate_scenes": 38,
+  "scenes_with_refs": 0,
+  "duration_s": [
+   56.0,
+   43.0,
+   48.0,
+   54.0,
+   38.0
+  ],
+  "voice_overfull_scenes": 10,
+  "max_text_layers": 4,
+  "distinct_hook_openers": 4
+ }
+}

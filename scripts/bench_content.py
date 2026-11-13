@@ -45,7 +45,14 @@ def plan_metrics(settings, plan: dict) -> dict:
     if plan.get("creation_branch"):
         brief = {"creation_branch": plan["creation_branch"]}
         if not plan.get("reference_manifest"):
-            attach_references(plan, brief, [])
+            try:
+                attach_references(plan, brief, [])
+            except Exception:  # noqa: BLE001 - series cast images not created yet
+                for scene in plan.get("scenes") or []:
+                    scene["reference_ids"] = []
+                for character in plan.get("characters") or []:
+                    character.pop("reference_id", None)
+                attach_references(plan, brief, [])
         try:
             compiled = engine._compile_storyboard(settings, plan)
             prompts = [c[1] for c in compiled]
@@ -138,7 +145,15 @@ def draft_with_ai(settings) -> list[dict]:
     from agent_core.creation_branches import normalise_brief
     client = workflow._client(settings)
     results = []
+    cache_path = ROOT / "cache" / "bench_drafts.json"
+    cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
     for raw in BRIEFS:
+        key = json.dumps(raw, ensure_ascii=False, sort_keys=True)
+        if key in cache:
+            cached = cache[key]
+            results.append({**cached["meta"], **plan_metrics(settings, cached["plan"])})
+            print(f"  cached: {cached['meta']['brief']}", flush=True)
+            continue
         branch = raw["creation_branch"]
         brief = {**normalise_brief(branch), **{k: v for k, v in raw.items() if k != "catalog_query"}}
         product = {}
@@ -161,8 +176,11 @@ def draft_with_ai(settings) -> list[dict]:
         timings["storyboard_s"], calls = round(time.time() - t, 1), calls + 1
         plan = creative.normalise_plan({**raw_plan, "creation_branch": branch,
                                         "storyboard_version": 1}, "trend", None, 0)
-        results.append({"brief": raw.get("topic") or raw.get("catalog_query"), **timings,
-                        "ai_calls": calls, **plan_metrics(settings, plan)})
+        meta = {"brief": raw.get("topic") or raw.get("catalog_query"), **timings, "ai_calls": calls}
+        cache[key] = {"meta": meta, "plan": plan}
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        results.append({**meta, **plan_metrics(settings, plan)})
         print(f"  drafted: {results[-1]['brief']} ({timings})", flush=True)
     return results
 
