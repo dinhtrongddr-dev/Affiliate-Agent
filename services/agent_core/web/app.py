@@ -93,7 +93,7 @@ EDITABLE_SETTINGS = [
     ("AA_VIRAL_MIN_SCORE", "Điểm viral tối thiểu (0-10)", "text", "Dựng video"),
     ("AA_PEXELS_API_KEY", "Pexels API key (video stock miễn phí)", "secret", "Nguồn hình"),
     ("AA_VIDEOGEN_PROVIDER", "Nhà cung cấp video AI (none | muse2api | http)", "text", "Nguồn hình"),
-    ("AA_VIDEOGEN_BASE_URL", "Video AI base URL (muse2api: http://127.0.0.1:18610)", "text", "Nguồn hình"),
+    ("AA_VIDEOGEN_BASE_URL", "Video AI base URL (gateway Muse kèm app tự đặt http://127.0.0.1:18620)", "text", "Nguồn hình"),
     ("AA_MUSE_EMBEDDED", "Tự chạy cổng muse2api tích hợp trong app", "bool", "Nguồn hình"),
     ("AA_VIDEOGEN_MAX_CLIPS", "Số clip AI tối đa mỗi video", "text", "Nguồn hình"),
     ("AA_VIDEOGEN_DAILY_LIMIT", "Số clip + ảnh AI tối đa mỗi ngày", "text", "Nguồn hình"),

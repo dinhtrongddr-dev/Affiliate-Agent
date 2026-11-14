@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # Stock footage and AI video generation (optional)
     pexels_api_key: SecretStr = SecretStr("")
     videogen_provider: str = "none"  # none | muse2api | http
-    videogen_base_url: str = ""  # muse2api default: http://127.0.0.1:18610
+    videogen_base_url: str = ""  # embedded Muse gateway sets http://127.0.0.1:18620 itself
     videogen_api_key: SecretStr = SecretStr("")
     videogen_model: str = ""
     videogen_timeout_seconds: int = 600

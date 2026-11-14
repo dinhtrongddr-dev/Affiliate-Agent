@@ -36,6 +36,28 @@ function Refresh-Path {
                 [Environment]::GetEnvironmentVariable('Path', 'User')
 }
 function Has-Winget { return [bool](Get-Command winget -ErrorAction SilentlyContinue) }
+function Repair-Venv($venvDir) {
+    # A half-made or copied .venv (no pyvenv.cfg, or its base Python is gone) makes python.exe pop up
+    # "Python venv launcher is sorry to say ... failed to locate pyvenv.cfg" and hang the script.
+    # Check the files first - never run a broken launcher - and delete the .venv so it is rebuilt.
+    if (-not (Test-Path $venvDir)) { return }
+    $cfg = Join-Path $venvDir 'pyvenv.cfg'
+    $why = ''
+    if (-not (Test-Path (Join-Path $venvDir 'Scripts\python.exe'))) { $why = 'thieu python.exe' }
+    elseif (-not (Test-Path $cfg)) { $why = 'thieu pyvenv.cfg' }
+    else {
+        $home_ = (Get-Content $cfg | Where-Object { $_ -match '^\s*home\s*=' } | Select-Object -First 1)
+        $home_ = if ($home_) { ($home_ -split '=', 2)[1].Trim() } else { '' }
+        if (-not $home_ -or -not (Test-Path -LiteralPath ($home_.TrimEnd('\') + '\python.exe'))) { $why = "Python goc ($home_) khong con" }
+    }
+    if ($why) {
+        Write-Host "$venvDir bi hong ($why): xoa de tao lai..." -ForegroundColor Yellow
+        Get-Process python*, pythonw* -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($venvDir, [StringComparison]::OrdinalIgnoreCase) } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+        Remove-Item $venvDir -Recurse -Force
+    }
+}
 
 # ------------------------------------------------------------------ Python 3.12+
 Step 'Python'
@@ -114,6 +136,7 @@ if (-not $vc -or $vc -lt [version]'14.40.0') {
 # ------------------------------------------------------------------ .venv + packages
 Step 'Thu vien Python (.venv)'
 $venvPy = Join-Path $Root '.venv\Scripts\python.exe'
+Repair-Venv (Join-Path $Root '.venv')
 if (Test-Path $venvPy) {   # an old .venv made by an unsupported Python is rebuilt
     $vv = (& $venvPy -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null)
     if (@('3.12', '3.13') -notcontains "$vv".Trim()) {
@@ -172,6 +195,19 @@ Set-EnvValue 'AA_MEDIA_ROOT' $media
 New-Item -ItemType Directory -Force -Path $media | Out-Null
 $ok.Add("Thu muc video: $media")
 
+# Video AI: the Muse gateway (muse2api) ships with the app and runs as a child process on
+# 127.0.0.1:18620 while the app is open. A fresh .env says "none", so it never started.
+$vp = (Get-EnvValue 'AA_VIDEOGEN_PROVIDER').ToLower()
+if (-not $vp -or $vp -eq 'none') { Set-EnvValue 'AA_VIDEOGEN_PROVIDER' 'muse2api'; $vp = 'muse2api' }
+if ($vp -eq 'muse2api') {
+    $emb = (Get-EnvValue 'AA_MUSE_EMBEDDED').ToLower()
+    if ($emb -in @('false', '0', 'no')) {
+        $ok.Add('Video AI: muse2api ngoai (AA_MUSE_EMBEDDED=false) - tu chay gateway cua ban')
+    } else {
+        $ok.Add('Video AI: Muse (gateway kem app, cong 18620, tu chay khi mo app)')
+    }
+}
+
 # ------------------------------------------------------------------ ChatGPT2API (AI gateway)
 Step 'ChatGPT2API (AI viet kich ban)'
 $C2AUrl = 'https://github.com/dinhtrongddr-dev/chatgpt2api-web.git'
@@ -193,7 +229,8 @@ if (-not $ChatGPT2ApiDir -and -not $SkipChatGPT2Api) {
 }
 if ($ChatGPT2ApiDir -and (Test-Path (Join-Path $ChatGPT2ApiDir 'main.py'))) {
     # its own setup: Python 3.13 + packages + .env with a random key (repairs if needed)
-    $c2aPy = @((Join-Path $ChatGPT2ApiDir 'runtime\python\python.exe'), (Join-Path $ChatGPT2ApiDir '.venv\Scripts\python.exe')) |
+    Repair-Venv (Join-Path $ChatGPT2ApiDir '.venv')
+    $c2aPy =@((Join-Path $ChatGPT2ApiDir 'runtime\python\python.exe'), (Join-Path $ChatGPT2ApiDir '.venv\Scripts\python.exe')) |
         Where-Object { Test-Path $_ } | Select-Object -First 1
     $c2aOk = $false
     if ($c2aPy -and (Test-Path (Join-Path $ChatGPT2ApiDir '.env'))) {
@@ -261,6 +298,12 @@ if (-not $SkipModels) {
 }
 & $venvPy -c "from agent_core.editor.encoder import nvenc_available; import sys; sys.exit(0 if nvenc_available('ffmpeg') else 1)"
 if ($LASTEXITCODE -eq 0) { $ok.Add('Ma hoa GPU (NVENC): co') } else { $ok.Add('Ma hoa GPU (NVENC): khong co, dung x264 (cham hon, van chay)') }
+
+# Muse gateway: start it once to prove it runs (stopped again; the app starts it itself)
+Step 'Gateway Muse (video AI)'
+& $venvPy (Join-Path $Root 'scripts\check_muse.py')
+if ($LASTEXITCODE -eq 0) { $ok.Add('Gateway Muse: khoi dong thu OK') }
+else { $todo.Add("Gateway Muse chua chay duoc: xem $Root\logs\muse-gateway.log (can Chrome/Edge), roi chay lai setup.") }
 
 # ------------------------------------------------------------------ shortcuts
 Step 'Loi tat tren Desktop'
