@@ -95,3 +95,45 @@ Tests:
 - An upload with an unknown outcome is marked for reconciliation, and blind retries are refused.
 - The web UI binds to 127.0.0.1, and API calls require an anti-CSRF header.
 - Secrets live only in `.env` and `config/shopee-skill/credentials.json`, are never shown back in the UI, and are git-ignored.
+
+## Chuyển sang máy khác / cài máy mới
+
+Mã nguồn chỉ khoảng 2 MB; phần lớn dung lượng trên máy là cache, `.venv`, model giọng, đều tạo lại được.
+
+**Trên máy cũ**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\export.ps1                 # khoảng 1 MB: CSDL, cấu hình (không key), ảnh nhân vật series
+powershell -ExecutionPolicy Bypass -File scripts\export.ps1 -IncludeVideos  # thêm clip AI và video đã làm
+```
+
+**Trên máy mới**
+
+1. Clone ChatGPT2API (`https://github.com/dinhtrongddr-dev/chatgpt2api-web`), chạy `setup.ps1` trong đó, rồi `start.cmd` và đăng nhập ChatGPT.
+2. Chép thư mục AffiliateAgent (git clone), đặt cạnh `chatgpt2api-web`, rồi chạy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Import D:ffiliate-export-xxxx.zip
+```
+
+`setup.ps1` chạy lại bao nhiêu lần cũng được. Nó tự kiểm tra và cài hoặc sửa những gì thiếu:
+- Python 3.12 và ffmpeg (qua winget);
+- `.venv` cùng thư viện (`pip check`, tự cài lại nếu lỗi);
+- Playwright Chromium;
+- Chrome/Edge cho Muse;
+- model giọng VieNeu;
+- NVENC.
+
+Nó cũng tự nối key ChatGPT2API, chọn thư mục video, nhập gói xuất (có sao lưu CSDL cũ), rồi in danh sách việc còn lại.
+
+**Không chép sang được, phải nhập lại trong Cài đặt:** Muse cookie, AddLive key, Facebook token, YouTube/Trends-MCP key, và đăng nhập Shopee Creator. Các mục này được mã hoá Windows DPAPI theo user của máy cũ.
+
+**Dọn dung lượng**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\clean.ps1 -Days 7 -WhatIf   # xem trước
+powershell -ExecutionPolicy Bypass -File scripts\clean.ps1 -Days 7
+```
+
+Xoá file tạm của job cũ hơn N ngày (clip Muse, file dựng), cache pip/test và log cũ. Giữ nguyên CSDL, video thành phẩm, cấu hình và key.
+

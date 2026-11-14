@@ -3,7 +3,12 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $EnvPath = Join-Path $Root '.env'
 $ExamplePath = Join-Path $Root 'config\.env.example'
-$ChatGPT2ApiEnv = 'D:\chatgpt2api-web\.env'
+# ChatGPT2API folder: -ChatGPT2ApiDir, else next to this repo, else D:\chatgpt2api-web
+$ChatGPT2ApiDir = if ($args.Count -gt 0) { $args[0] } else {
+    @((Join-Path (Split-Path -Parent $Root) 'chatgpt2api-web'), 'D:\chatgpt2api-web', 'C:\chatgpt2api-web') |
+        Where-Object { Test-Path (Join-Path $_ '.env') } | Select-Object -First 1
+}
+$ChatGPT2ApiEnv = if ($ChatGPT2ApiDir) { Join-Path $ChatGPT2ApiDir '.env' } else { 'chatgpt2api-web\.env' }
 $CredentialPath = Join-Path $Root 'config\shopee-skill\credentials.json'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
