@@ -107,7 +107,29 @@ powershell -ExecutionPolicy Bypass -File scripts\export.ps1                 # kh
 powershell -ExecutionPolicy Bypass -File scripts\export.ps1 -IncludeVideos  # thêm clip AI và video đã làm
 ```
 
-**Trên máy mới**
+**Cài trọn gói trên máy mới (một dòng, PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/dinhtrongddr-dev/Affiliate-Agent/main/scripts/install.ps1 | iex
+```
+
+Có gói dữ liệu từ máy cũ hoặc muốn chọn thư mục cài:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dinhtrongddr-dev/Affiliate-Agent/main/scripts/install.ps1))) -Dir D:\AffiliateSuite -Import D:\affiliate-export-xxxx.zip
+```
+
+Lệnh này tự làm:
+1. Cài Git nếu thiếu.
+2. Tải `Affiliate-Agent` và `chatgpt2api-web` vào cùng một thư mục (mặc định `D:\AffiliateSuite`).
+3. Cài Python, ffmpeg, thư viện, Playwright và model giọng.
+4. Cài và khởi động ChatGPT2API, nối khoá vào app.
+5. Tạo lối tắt Desktop: "Affiliate Agent", "Cập nhật Affiliate Agent", "ChatGPT2API".
+6. Gọi thử AI để kiểm tra.
+
+Chạy lại bao nhiêu lần cũng an toàn. Việc còn phải làm tay: đăng nhập ChatGPT trong ChatGPT2API, nhập lại key trong Cài đặt, đăng nhập Shopee Creator.
+
+**Trên máy mới (cài từng bước)**
 
 1. Clone ChatGPT2API (`https://github.com/dinhtrongddr-dev/chatgpt2api-web`), chạy `setup.ps1` trong đó, rồi `start.cmd` và đăng nhập ChatGPT.
 2. Chép thư mục AffiliateAgent (git clone), đặt cạnh `chatgpt2api-web`, rồi chạy:
