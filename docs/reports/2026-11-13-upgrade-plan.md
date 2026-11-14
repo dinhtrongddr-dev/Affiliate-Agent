@@ -511,3 +511,19 @@ services/agent_core/
 - hook A/B;
 - lời review vẫn dè dặt khi chưa có trải nghiệm thật;
 - series Suri chưa chạy thử với Muse thật.
+
+**Giai đoạn 2: xong (14/11/2026).**
+
+| Việc | Kết quả |
+|---|---|
+| Ghép sản phẩm (P2.5) | AI xác nhận mọi cặp, gom 15 cặp một lần gọi, lưu 7 ngày. Ngưỡng ý định mua 40; dưới ngưỡng chỉ giữ sản phẩm đúng đối tượng (fit ≥ 75). Từ chung chung không còn tự khớp. Bộ 36 cặp có nhãn: độ chính xác **66,7% → 100%** (giữ đúng 15 cặp, không cặp sai nào) |
+| Kiểm link (P2.5) | Chặn duyệt khi video review thiếu link, link không hợp lệ hoặc link của sản phẩm khác. Báo khi link từ kho chưa có Sub_id |
+| Hook A/B (P2.2) | Storyboard sinh thêm 2 hook. Thân video dựng một lần, mỗi bản chỉ làm lại phần chữ. Trang video có trình phát và nút "Dùng bản này" |
+| Chống lặp (P2.3) | Hook gần đây được đưa vào prompt; hashtag 3–5 cái, bỏ tên nội bộ và tiếng Anh chung chung; nhạc không lặp trong 8 video gần nhất |
+| Thời lượng và cắt (P2.1) | Viral 15–30 s, review 20–40 s; cảnh không nói lấy đoạn chuyển động rõ nhất của clip 10 s |
+| Review tự nhiên | Không còn từ hệ thống; tối đa một câu rào đón |
+| Con vật chính | Có ảnh tham chiếu riêng như nhân vật người |
+
+Video thật:
+- **Chó con "Bông":** QA 91,8; ngoại hình giữ đúng 9/10.
+- **Review cây lau nhà:** QA 88,5; sản phẩm khớp ảnh thật 10/10.
