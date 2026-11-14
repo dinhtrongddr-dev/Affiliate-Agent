@@ -805,7 +805,9 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                 if hits:  # sounds like a report: one forced rewrite of the spoken lines
                     fix_prompt = creative.branch_review_prompt(plan, product, 10, prompt_brief) + (
                         "\nBẮT BUỘC viết lại (revised): các câu sau nghe như báo cáo, cấm từ hệ thống "
-                        + json.dumps(list(creative.META_WORDS), ensure_ascii=False) + ": "
+                        + json.dumps(list(creative.META_WORDS), ensure_ascii=False)
+                        + "; lời rào đón (" + json.dumps(list(creative.HEDGE_WORDS), ensure_ascii=False)
+                        + ") tối đa MỘT câu cả video; thay bằng tình huống dùng và cách dùng: "
                         + json.dumps(hits[:8], ensure_ascii=False))
                     fixed = _ask_json(client, settings, fix_prompt, temperature=0.4, max_tokens=7000)
                     if isinstance(fixed.get("revised"), dict):

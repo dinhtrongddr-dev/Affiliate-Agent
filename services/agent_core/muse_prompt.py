@@ -35,6 +35,14 @@ def scene_cast(scene: dict, plan: dict) -> list[dict]:
     return [chars[cid] for cid in ids[:3]]
 
 
+ANIMALS = ("dog", "puppy", "cat", "kitten", "chó", "cún", "mèo", "pet", "bird", "chim", "rabbit", "thỏ")
+
+
+def is_animal(c: dict) -> bool:
+    text = f"{c.get('role') or ''} {c.get('species') or ''}".lower()
+    return any(a in text for a in ANIMALS)
+
+
 def _person(c: dict) -> str:
     bits = [c.get("gender"), f"age {c['age']}" if c.get("age") else ""]
     head = ", ".join(b for b in bits if b)
@@ -114,6 +122,12 @@ def strip_internal(prompt: str) -> str:
 
 def character_sheet_prompt(character: dict, plan: dict, override_style: str | None = None) -> str:
     style = style_profiles.get(plan.get("style_profile"), plan.get("creation_branch"), override_style)
+    if is_animal(character):
+        return _clip(
+            "Vertical photo of one real animal, whole body clearly visible, standing on a plain floor "
+            "in natural daylight, taken with a smartphone, real fur texture. "
+            f"{_person(character)}. Keep markings, colour and size exactly as described. "
+            f"{style['avoid']}.", MAX_CHARS) + f"\n{INTERNAL}cast:{character['id']}"
     return _clip(
         "Vertical photo, waist-up portrait of one real Vietnamese person facing the camera, "
         "plain light wall behind, taken with a smartphone in natural window light, "

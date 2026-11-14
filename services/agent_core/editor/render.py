@@ -383,6 +383,8 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     if alt_hooks:   # one decode, two encodes: the hook-free picture is reused for A/B hooks
         filters.append(f"[{vchain}]split=2[vsub][vclean]")
         filters.append("[vsub]ass=subs.ass[vout]")
+        filters[-3] = filters[-3].replace("[aout]", "[amix_out]")   # the audio mix line
+        filters.append("[amix_out]asplit=2[aout][aclean]")
     else:
         filters.append(f"[{vchain}]ass=subs.ass[vout]")
 
@@ -396,7 +398,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
             "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
             "-profile:v", "high", "-movflags", "+faststart",
             "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "final.mp4",
-            *(["-map", "[vclean]", "-map", "[aout]", "-t", f"{total:.3f}", "-c:v", "libx264",
+            *(["-map", "[vclean]", "-map", "[aclean]", "-t", f"{total:.3f}", "-c:v", "libx264",
                "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
                "clean.mp4"] if alt_hooks else []),
         ], cwd=work_dir)

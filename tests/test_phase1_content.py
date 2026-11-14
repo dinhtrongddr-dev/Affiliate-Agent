@@ -186,3 +186,18 @@ def test_music_pages_by_mood_skip_seasonal_and_recent(tmp_path):
                      (json.dumps({"render": {"music_metadata": {"track_id": "738"}}}),))
     assert recent_track_ids(SimpleNamespace(database_path=db)) == {"738"}
     assert recent_track_ids(SimpleNamespace(database_path=db), exclude_job="a") == set()
+
+
+def test_more_than_one_hedge_counts_as_report_talk():
+    plan = {"scenes": [{"lines": [{"speaker": "me", "text": "Ảnh từ trang bán thôi nha"},
+                                  {"speaker": "me", "text": "Độ thấm chưa xác minh"},
+                                  {"speaker": "me", "text": "Vắt một cái là khô"}]}]}
+    assert len(creative.meta_word_lines(plan)) == 2
+    plan["scenes"][0]["lines"].pop(1)
+    assert creative.meta_word_lines(plan) == []     # one honest hedge is fine
+
+
+def test_animal_lead_gets_an_animal_reference_photo():
+    dog = {"id": "cun", "name": "Cún", "role": "dog", "appearance": "golden puppy, white chest"}
+    text = muse_prompt.character_sheet_prompt(dog, {})
+    assert "real animal" in text and "Vietnamese person" not in text and "cast:cun" in text

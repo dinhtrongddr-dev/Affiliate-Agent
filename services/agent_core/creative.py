@@ -204,7 +204,8 @@ Thời lượng tổng {low:.0f}-{high:.0f} giây. Mỗi cảnh 2-6 giây (clip 
 Tối đa {limit} cảnh generate.
 
 Nhân vật và giọng:
-- "characters": mỗi người xuất hiện; gender, age, appearance, wardrobe cụ thể và giữ nguyên mọi cảnh.
+- "characters": mỗi người VÀ con vật chính xuất hiện (con vật: role "dog"/"cat"..., appearance gồm giống,
+  màu lông, vết đốm, kích cỡ); gender, age, appearance, wardrobe cụ thể và giữ nguyên mọi cảnh.
 - Mỗi cảnh: "cast" = id người có mặt; "group" = id địa điểm (cảnh liên tiếp cùng group được nối hình).
 - "lines": từng câu nói kèm "speaker" (id nhân vật hoặc "narrator" = người dẫn/người review).
   Mỗi câu <= 12 từ; tổng số từ của cảnh <= duration x 3; lời tự nhiên như nói chuyện, không văn mẫu.
@@ -220,6 +221,8 @@ Nhân vật và giọng:
   nói thật điều đó (thường ở cuối, vd "mình chưa xài lâu nên ai dùng rồi cmt giúp nha"); các cảnh còn
   lại cho thấy món đồ trong tình huống thật và cách dùng theo đúng công dụng ghi trên sản phẩm,
   nói "món này giúp…", "kiểu này tiện ở chỗ…"; không khẳng định độ bền/hiệu quả, không lặp lời rào đón.
+  product_context.missing_info và constraints là GHI CHÚ NỘI BỘ cho bạn, KHÔNG đọc ra thành lời
+  (không nói "chưa xác minh", "chưa xác nhận", "ảnh từ trang bán", "chưa kết luận").
   audience_gender theo người dùng sản phẩm (đồ nữ=female, đồ nam=male, đồ chung=unisex).
 - Trẻ em có age thật (vd "4"); không cho trẻ làm việc nguy hiểm.
 
@@ -420,15 +423,23 @@ def short_hook(value, max_words: int = 8) -> str:
 # System words that must never be spoken in a video (they make it sound like a report).
 META_WORDS = ("dữ liệu", "listing", "brief", "ghi nhận", "hiển thị", "thông số đối chiếu",
               "theo thông tin", "trường dữ liệu")
+# Hedges are fine once (honesty), but a video made of them sells nothing.
+HEDGE_WORDS = ("chưa xác minh", "chưa xác nhận", "chưa kết luận", "trang bán", "ảnh từ trang",
+               "chưa có ảnh", "chưa có hình", "chưa thể")
 
 
 def meta_word_lines(plan: dict) -> list[str]:
+    """Spoken lines that sound like a report: system words, or more than one hedge."""
     hits = []
     for scene in plan.get("scenes") or []:
         for line in scene.get("lines") or []:
             low = str(line.get("text") or "").lower()
             if any(w in low for w in META_WORDS):
                 hits.append(line["text"])
+    hedges = [line["text"] for scene in plan.get("scenes") or [] for line in scene.get("lines") or []
+              if any(w in str(line.get("text") or "").lower() for w in HEDGE_WORDS)]
+    if len(hedges) > 1:
+        hits.extend(hedges)
     for key in ("hook", "caption", "title"):
         if any(w in str(plan.get(key) or "").lower() for w in META_WORDS):
             hits.append(str(plan[key]))
