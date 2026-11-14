@@ -49,6 +49,8 @@ def handle_task(settings, task: dict):
     if kind == "publish":
         return workflow.publish_platform(settings, job_id, payload["platform"],
                                          payload.get("action", "draft"))
+    if kind == "affiliate_suggest":
+        return workflow.suggest_affiliates(settings, job_id)
     if kind == "prepare_audio":
         return workflow.prepare_audio(settings, job_id)
     if kind == "render_generated":
@@ -85,14 +87,26 @@ def queue_new_jobs(settings) -> int:
     return count
 
 
+# Lanes run side by side: a long render never holds up another job's script or the
+# background refreshes, and Muse clips keep moving while anything else runs.
+LANES = {
+    "ai": ("process", "regenerate", "select_product", "manual_product", "affiliate_suggest"),
+    "media": ("render", "render_generated", "prepare_audio", "publish", "scan"),
+    "background": ("fetch_trends", "trend_analyse", "sync_conversions", "sync_shopee"),
+}
+GEN_POLL_SECONDS = 10
+
+
 class Worker:
     def __init__(self, settings, watch: bool = True):
         self.settings = settings
         self.watch = watch
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
+        self.threads: list[threading.Thread] = []
         self.observer = None
         self.current: dict | None = None
+        self.running: dict[str, dict] = {}
         self.last_run: dict[str, float] = {}
 
     # ------------------------------------------------------------ lifecycle
@@ -102,6 +116,10 @@ class Worker:
             self._start_watcher()
         self.thread = threading.Thread(target=self.run, name="affiliate-worker", daemon=True)
         self.thread.start()
+        for lane in ("ai", "media", "background"):
+            t = threading.Thread(target=self.run_lane, args=(lane,), name=f"worker-{lane}", daemon=True)
+            t.start()
+            self.threads.append(t)
         from .videogen import gateway
         if gateway.enabled(self.settings):
             # Embedded Muse gateway: start in the background so the UI comes up at once.
@@ -174,9 +192,9 @@ class Worker:
                          counts[job["id"]], self.AI_RETRY_MAX)
 
     def _poll_generation(self) -> None:
-        """Advance AI clip tasks every ~20 s (only when some are active)."""
+        """Advance AI clip tasks every ~10 s (only when some are active)."""
         now = time.monotonic()
-        if now - self.last_run.get("_gen", -1e9) < 20:
+        if now - self.last_run.get("_gen", -1e9) < GEN_POLL_SECONDS:
             return
         self.last_run["_gen"] = now
         from .videogen import engine, gateway
@@ -191,24 +209,34 @@ class Worker:
             reconcile(self.settings)
         except Exception:  # noqa: BLE001
             log.exception("Shopee catalog reconciliation requires attention")
+        # This thread only schedules and moves Muse clips along; tasks run in the lanes.
         while not self.stop_event.is_set():
             try:
                 self._periodic()
                 self._poll_generation()
-                task = claim_task(self.settings.database_path)
             except Exception:  # noqa: BLE001
-                log.exception("Queue error")
+                log.exception("Scheduler error")
+            self.stop_event.wait(2)
+        log.info("Worker stopped")
+
+    def run_lane(self, lane: str) -> None:
+        kinds = LANES[lane]
+        while not self.stop_event.is_set():
+            try:
+                task = claim_task(self.settings.database_path, kinds)
+            except Exception:  # noqa: BLE001
+                log.exception("Queue error (%s)", lane)
                 self.stop_event.wait(self.settings.worker_poll_seconds)
                 continue
             if not task:
-                self.stop_event.wait(self.settings.worker_poll_seconds)
+                self.stop_event.wait(min(2, self.settings.worker_poll_seconds))
                 continue
             self.run_task(task)
-        log.info("Worker stopped")
 
     def run_task(self, task: dict) -> None:
         db = self.settings.database_path
         self.current = task
+        self.running[task["kind"]] = task
         log.info("Task %s %s job=%s attempt=%s", task["id"], task["kind"], task.get("job_id"),
                  task["attempts"])
         try:
@@ -234,7 +262,8 @@ class Worker:
             else:
                 fail_task(db, task, str(exc), retry_in=60 * task["attempts"])
         finally:
-            self.current = None
+            self.running.pop(task["kind"], None)
+            self.current = next(iter(self.running.values()), None)
 
 
 def run_forever(settings) -> None:

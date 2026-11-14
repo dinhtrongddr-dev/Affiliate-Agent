@@ -86,7 +86,8 @@ def _fill_916(label_in: str, w: int, h: int, prescale: float) -> str:
     )
 
 
-def best_cut(settings, source: Path, length: float, duration: float) -> float:
+def best_cut(settings, source: Path, length: float, duration: float,
+             avoid: list[tuple[float, float]] | None = None) -> float:
     """Start time of the most lively `duration`-second stretch of an AI clip (the take is
     ~10 s; the edit keeps 2-6 s). Skips the first 0.3 s and the last 0.5 s where generated
     clips often hold still. Returns 0.0 when the clip cannot be read."""
@@ -109,7 +110,14 @@ def best_cut(settings, source: Path, length: float, duration: float) -> float:
     first, last = int(0.3 * fps), len(motion) - int(0.5 * fps) - win
     if last <= first:
         return 0.0
-    sums = [motion[k:k + win].sum() for k in range(first, last + 1)]
+    avoid = avoid or []
+    sums = []
+    for k in range(first, last + 1):
+        s0, s1 = k / fps, (k + win) / fps
+        overlap = any(s0 < b and a < s1 for a, b in avoid)   # a second cut of the same clip
+        sums.append(-1.0 if overlap else float(motion[k:k + win].sum()))
+    if max(sums) < 0:
+        return round(first / fps, 2)
     best = first + int(np.argmax(sums))
     return round(best / fps, 2)
 
@@ -235,6 +243,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     #    plus 0.3 s, so a freeze frame can no longer cover a long line).
     voices = []
     durations: list[float] = []
+    used_windows: dict[str, list[tuple[float, float]]] = {}
     for i, scene in enumerate(scenes):
         available = None
         clip_window = None
@@ -245,7 +254,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
                 if (scene.get("generated") and not scene.get("talking")
                         and not float(scene.get("start") or 0) and src_len > float(scene.get("duration") or 4) + 1):
                     shift = best_cut(settings, Path(scene["source"]), src_len,
-                                     float(scene.get("duration") or 4))
+                                     float(scene.get("duration") or 4), used_windows.get(scene["source"]))
                     if shift:
                         scene = scenes[i] = {**scene, "start": shift}
                         available = max(0.5, src_len - shift)
@@ -269,6 +278,9 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         if available is not None:
             duration = min(duration, available + 0.3) if needed <= available + 0.3 else duration
         durations.append(round(min(MAX_SCENE + 4.5, duration), 3))
+        if scene.get("kind", "video") == "video":
+            start = float(scene.get("start") or 0)
+            used_windows.setdefault(scene["source"], []).append((start, start + durations[-1]))
     speeches = [Speech(None, v.end, v.words) for v in voices]
 
     # 2) Normalised scene clips
@@ -385,7 +397,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     norm = "loudnorm=I=-14:TP=-1.5:LRA=11," if has_sound else ""
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0:dropout_transition=0,"
                    f"{norm}aresample=44100[aout]")
-    alt_hooks = [h for h in (timeline.get("hook_variants") or [])
+    alt_hooks = [] if timeline.get("fast_mode") else [h for h in (timeline.get("hook_variants") or [])
                  if h and h != timeline.get("hook")][: max(0, int(getattr(settings, "variants", 1)) - 1)]
     if alt_hooks:   # one decode, two encodes: the hook-free picture is reused for A/B hooks
         filters.append(f"[{vchain}]split=2[vsub][vclean]")

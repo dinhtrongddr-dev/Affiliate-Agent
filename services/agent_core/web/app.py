@@ -249,6 +249,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       clips=list_clips(s, job_id), voices=VOICES,
                       link_info=workflow.link_check(s, job),
                       hook_variants=_hook_variants(s, job),
+                      stage_times=workflow.stage_times(s, job_id),
                       perf_fields=learning.METRIC_FIELDS,
                       perf_rows=performance_learning.get_video_performance(s.database_path, job_id),
                       storyboard=storyboard(s, job_id),

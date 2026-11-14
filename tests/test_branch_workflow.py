@@ -199,7 +199,7 @@ def test_review_affiliate_can_only_attach_original_item(settings):
 def test_missing_muse_still_saves_creator_storyboard_without_searching_product(settings):
     job_id = workflow.create_trend_job(settings, "Bố giấu đồ chơi", creation_branch="viral_creator")
     plan = storyboard("viral_creator")
-    replies = [{"topic": "Bố giấu đồ chơi", "product_search_keywords": []}, plan]
+    replies = [plan]   # the storyboard call does the ideation too (one AI call)
     with patch.object(workflow, "_client", return_value=Mock()), \
             patch.object(workflow, "_ask_json", side_effect=replies), \
             patch.object(workflow, "product_image", return_value=None), \
@@ -270,6 +270,9 @@ def test_rewritten_unrelated_story_clears_previous_affiliate_before_generation(s
         result = workflow.process_job(settings, job_id)
     assert result["status"] == "NEEDS_MEDIA_REVIEW"
     dispatch.assert_not_called()
+    # suggestions (and dropping a no-longer-related link) run as a background task
+    assert any(t["kind"] == "affiliate_suggest" for t in db.list_tasks(settings.database_path, 20))
+    workflow.suggest_affiliates(settings, job_id)
     job = db.get_job(settings.database_path, job_id)
     assert not job["affiliate_link"] and job["product_item_id"] is None and job["product_name"] is None
     updated_brief = json.loads(job["brief_json"])
@@ -285,7 +288,7 @@ def test_zero_remaining_budget_still_consults_engine_for_retained_tasks(settings
     provider = Mock()
     provider.supports.return_value = True
     with patch.object(workflow, "_client", return_value=Mock()), \
-            patch.object(workflow, "_ask_json", side_effect=[{"topic": "Original story"}, plan]), \
+            patch.object(workflow, "_ask_json", side_effect=[plan]), \
             patch.object(workflow, "product_image", return_value=None), \
             patch.object(workflow, "get_provider", return_value=provider), \
             patch.object(workflow.gen_engine, "remaining_today", return_value=0), \

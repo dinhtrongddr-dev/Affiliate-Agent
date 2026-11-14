@@ -260,8 +260,8 @@ def test_missing_cast_photos_are_generated_first_and_reused(setup_plan, tmp_path
     sheets = sorted((t for t in tasks if t["kind"] == "image"), key=lambda t: -t["scene_index"])
     video = next(t for t in tasks if t["kind"] == "video")
     assert [t["scene_index"] for t in sheets] == [-1, -2]
-    assert sheets[1]["depends_on"] == sheets[0]["id"]          # chained
-    assert video["depends_on"] == sheets[1]["id"]              # clip waits for the photos
+    assert sheets[0]["depends_on"] is None and sheets[1]["depends_on"] is None   # made in parallel
+    assert video["depends_on"] is None          # the clip waits for its photos via charref
     assert "charref:a" in video["refs"] and "charref:b" in video["refs"]
     assert "cast:a" in sheets[0]["prompt"] and "cast:a" not in engine.muse_prompt.strip_internal(
         sheets[0]["prompt"]) if hasattr(engine, "muse_prompt") else True

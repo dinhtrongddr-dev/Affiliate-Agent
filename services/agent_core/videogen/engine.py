@@ -310,11 +310,9 @@ def _plan_storyboard(settings, job_id: str, plan: dict, provider) -> int:
     style = getattr(settings, "style_profile", "") or None
     sheets = []   # (scene_index, prompt, depends_on) - chained so cast photos come first
     if provider.supports("image"):
-        prev = None
         for k, character in enumerate(_sheet_characters(plan, compiled)):
             prompt = character_sheet_prompt(character, plan, style)
-            sheets.append((-(k + 1), prompt, prev))
-            prev = task_id(job_id, -(k + 1), "image", prompt, [])
+            sheets.append((-(k + 1), prompt, None))   # cast photos are made in parallel
     retained = {task_id(job_id, i, "video", prompt, refs)
                 for i, prompt, refs, _ in compiled}
     wanted_sheets = {(i, prompt) for i, prompt, _ in sheets}
@@ -348,16 +346,21 @@ def _plan_storyboard(settings, job_id: str, plan: dict, provider) -> int:
                 _insert(db, job_id=job_id, scene_index=index, kind="image", provider=provider.name,
                         depends_on=depends, prompt=prompt, refs=[])
         last_sheet = tid
-    # Consecutive shots in the same location group continue from the previous shot's last
-    # frame; different groups start in parallel (a full chain of 8 shots takes ~40 min).
-    use_chain = bool(getattr(settings, "videogen_continuity_chain", True))
+    # Every clip starts at once (cast photos keep faces consistent). Only a shot the
+    # storyboard marks "continuous" waits for the previous shot's last frame (chains of 2).
+    use_chain = bool(getattr(settings, "videogen_continuity_chain", False))
     scenes = plan.get("scenes") or []
     prev_index, prev_task = None, None
+    chained: dict[int, bool] = {}
     for index, prompt, refs, duration in compiled:
         group = str(scenes[index].get("group") or "") if index < len(scenes) else ""
-        same_group = bool(use_chain and prev_task and group and prev_index == index - 1
-                          and str(scenes[prev_index].get("group") or "") == group)
-        depends = prev_task if same_group else last_sheet
+        continuous = bool(scenes[index].get("continuous")) if index < len(scenes) else False
+        same_group = bool(prev_task and prev_index == index - 1 and (continuous or use_chain)
+                          and not chained.get(prev_index)
+                          and (not group or str(scenes[prev_index].get("group") or "") == group))
+        # cast photos are awaited per clip (charref), so the clip itself does not chain on them
+        depends = prev_task if same_group else (None if sheets else last_sheet)
+        chained[index] = same_group
         created_id = _insert(db, job_id=job_id, scene_index=index, kind="video",
                              provider=provider.name, prompt=prompt, refs=refs,
                              duration=duration, depends_on=depends)
@@ -614,11 +617,19 @@ def poll(settings, provider=None) -> dict:
             _update(db, t["id"], status="FAILED", error="Chưa cấu hình nhà cung cấp video AI")
             touched.add(t["job_id"])
         return {"tasks": len(rows), "resumed": _finish_jobs(settings, touched)}
+    # Muse renders several clips at once; cap what is in flight so the account is not flooded.
+    cap = max(1, int(getattr(settings, "videogen_parallel", 6) or 6))
+    in_flight = sum(1 for t in rows if t["status"] == "SUBMITTED" and t["remote_id"])
     for t in rows:
         touched.add(t["job_id"])
         try:
             if t["status"] in ("PENDING", "SUBMITTING") or not t["remote_id"]:
+                if t["status"] == "PENDING" and in_flight >= cap:
+                    continue
+                before = t["status"]
                 _submit(settings, provider, t)
+                if before == "PENDING" and (get_task(db, t["id"]) or {}).get("status") == "SUBMITTED":
+                    in_flight += 1
             else:
                 _check(settings, provider, t)
         except Exception as exc:  # noqa: BLE001 - one bad task must not stop the others

@@ -575,6 +575,7 @@ def _process(settings, job: dict) -> dict:
 def _process_creation(settings, job, brief, client) -> dict:
     """Explicit branches keep content-first creation independent of product search."""
     branch = brief["creation_branch"]
+    _mark(settings, job["id"], "script_start")
     analysis = json.loads(job.get("analysis_json") or "null")
     product, affiliate_link = {}, str(job.get("affiliate_link") or "")
     if branch == "product_review":
@@ -592,13 +593,10 @@ def _process_creation(settings, job, brief, client) -> dict:
                         "visual_summary": product["name"], "angle": brief.get("notes", ""),
                         "product_search_keywords": [product["name"]]}
     elif not isinstance(analysis, dict):
-        try:
-            analysis = _ask_json(client, settings, creative.branch_ideation_prompt(brief),
-                                 temperature=0.5, max_tokens=1800)
-        except AIClientError as exc:
-            _stop(settings, job["id"], _ai_status(exc), exc)
-        except Exception as exc:  # noqa: BLE001
-            _stop(settings, job["id"], "AI_ANALYSIS_FAILED", exc)
+        # The storyboard call does the ideation itself (one AI call instead of two).
+        topic = str(brief.get("topic") or "")
+        analysis = {"topic": topic, "angle": brief.get("notes", ""), "visual_summary": topic,
+                    "product_search_keywords": brief.get("keywords") or []}
     update_job(settings.database_path, job["id"], status="ANALYZED", ai_generated=1,
                last_error=None, analysis_json=json.dumps(analysis, ensure_ascii=False))
     return _create_and_render(settings, get_job(settings.database_path, job["id"]), client,
@@ -739,6 +737,8 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
     provider = get_provider(settings) if mode == "trend" else None
     gen_limit = (min(settings.videogen_max_clips, gen_engine.remaining_today(settings))
                  if provider and provider.supports("video") else 0)
+    if brief.get("fast_mode"):
+        gen_limit = min(gen_limit, 3)   # fast mode: 3 AI clips, the rest cuts/photos
     if (not branch and mode == "trend" and not product_img and not user_clips and not gen_limit
             and not settings.pexels_api_key.get_secret_value()):
         # Nothing to show on screen: ask for visuals before spending AI calls.
@@ -766,7 +766,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
             # Clip indexes refer to the library, while reference IDs refer to ordered attachments.
             raw = _ask_json(client, settings, prompt,
                             [Path(r["path"]) for r in references] or None,
-                            temperature=0.7, max_tokens=7000)
+                            temperature=0.7, max_tokens=5000)
             plan = creative.normalise_plan({**raw, "creation_branch": branch,
                                             "storyboard_version": 1}, "trend", None, n_clips)
         elif mode == "base":
@@ -789,7 +789,35 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         else:
             raise WorkflowError("Job trend cần nhánh sáng tạo; chạy lại để chuyển nhánh.")
         score = None
-        if settings.viral_review:
+        if branch:
+            _mark(settings, job_id, "script_draft")
+            creative.fix_visual_sources(plan, bool(settings.pexels_api_key.get_secret_value()),
+                                        bool(gen_limit), bool(product_img))
+            score = (plan.get("self_review") or {}).get("score")
+            issues = creative.storyboard_issues(plan)
+            if issues and settings.viral_review:
+                try:   # one targeted fix only when a hard rule fails
+                    fix_prompt = creative.branch_review_prompt(plan, product, 10, prompt_brief) + (
+                        "\nBẮT BUỘC sửa trong revised, giữ nguyên phần không lỗi: "
+                        + json.dumps(issues, ensure_ascii=False))
+                    fixed = _ask_json(client, settings, fix_prompt, temperature=0.4, max_tokens=5000)
+                    if isinstance(fixed.get("revised"), dict):
+                        candidate = creative.normalise_plan(
+                            {**fixed["revised"], "creation_branch": branch,
+                             "storyboard_version": plan.get("storyboard_version", 2)},
+                            mode, segments, n_clips)
+                        creative.fix_visual_sources(candidate, bool(settings.pexels_api_key.get_secret_value()),
+                                                    bool(gen_limit), bool(product_img))
+                        if len(creative.storyboard_issues(candidate)) < len(issues):
+                            plan = candidate
+                            plan["revised_after_review"] = issues
+                        if fixed.get("score") is not None:
+                            score = float(fixed["score"])
+                except AIClientError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Storyboard fix skipped: %s", exc)
+        elif settings.viral_review:
             try:
                 review_prompt = (creative.branch_review_prompt(
                     plan, product, settings.viral_min_score, prompt_brief) if branch else
@@ -850,13 +878,10 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         except ProviderError as exc:
             reference_issues = [str(exc)]
         if branch in {"viral_creator", "template_series"}:
-            brief["affiliate_suggestions"] = _related_affiliates(settings, plan, analysis)
-            attached = brief.get("attached_affiliate", {}).get("catalog_id")
-            if attached and attached not in {s["product_id"] for s in brief["affiliate_suggestions"]}:
-                brief.pop("attached_affiliate", None)
-                affiliate_link = ""
-                update_job(db, job_id, product_item_id=None, product_name=None, affiliate_link="")
-            update_job(db, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
+            # product suggestions need an AI check; it runs beside Muse instead of before it
+            enqueue_task(db, "affiliate_suggest", job_id)
+    if branch:
+        _mark(settings, job_id, "script_done")
     _save_plan_state(settings, job_id, {"plan": plan, "score": score, "product": product,
                                         "affiliate_link": affiliate_link, "analysis": analysis,
                                         "clip_ids": [c["id"] for c in user_clips]})
@@ -872,6 +897,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         except ProviderError as exc:
             _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", exc, viral_score=score)
         if waiting:
+            _mark(settings, job_id, "muse_start")
             if settings.tts_enabled:   # voices are made while Muse renders the clips
                 enqueue_task(db, "prepare_audio", job_id)
             _stop(settings, job_id, gen_engine.WAIT_STATUS, None, viral_score=score,
@@ -880,6 +906,56 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         gen_engine.cancel_job_tasks(db, job_id)
     return _finish_timeline(settings, job, plan, score, product, affiliate_link, analysis,
                             product_img, asset_dir, user_clips, {}, frame_paths)
+
+
+def _mark(settings, job_id: str, stage: str) -> None:
+    """Stage timestamps (job page shows how long each step took)."""
+    path = settings.work_dir / job_id / "timings.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        data[stage] = now_iso()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except (OSError, ValueError):
+        pass
+
+
+def stage_times(settings, job_id: str) -> list[tuple[str, float]]:
+    path = settings.work_dir / job_id / "timings.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    order = [("script_start", "script_draft", "AI viết kịch bản"), ("script_draft", "script_done", "Kiểm và sửa kịch bản"),
+             ("muse_start", "muse_done", "Muse tạo clip"), ("render_start", "render_done", "Dựng video + QA")]
+    out = []
+    for a, b, label in order:
+        if data.get(a) and data.get(b):
+            out.append((label, round((datetime.fromisoformat(data[b]) - datetime.fromisoformat(data[a])).total_seconds())))
+    return out
+
+
+def suggest_affiliates(settings, job_id: str) -> dict:
+    """Viral/series product suggestions (AI-checked), filled in while Muse works."""
+    db = settings.database_path
+    job = get_job(db, job_id)
+    state_path = _plan_state_path(settings, job_id)
+    if not job or not state_path.is_file():
+        return {"suggestions": 0}
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    brief = json.loads(job.get("brief_json") or "{}")
+    brief["affiliate_suggestions"] = _related_affiliates(settings, state.get("plan") or {},
+                                                         state.get("analysis") or {})
+    attached = brief.get("attached_affiliate", {}).get("catalog_id")
+    fields = {}
+    if attached and attached not in {s["product_id"] for s in brief["affiliate_suggestions"]}:
+        brief.pop("attached_affiliate", None)
+        fields.update(product_item_id=None, product_name=None, affiliate_link="")
+        state["affiliate_link"] = ""   # the render reads the link from the plan state too
+        state.pop("attached_affiliate", None)
+        _save_plan_state(settings, job_id, state)
+    update_job(db, job_id, brief_json=json.dumps(brief, ensure_ascii=False), **fields)
+    return {"suggestions": len(brief["affiliate_suggestions"])}
 
 
 def prepare_audio(settings, job_id: str) -> dict:
@@ -927,6 +1003,11 @@ def _finish_timeline(settings, job, plan, score, product, affiliate_link, analys
 
 
 def resume_after_generation(settings, job_id: str) -> dict:
+    _mark(settings, job_id, "muse_done")
+    return _resume_after_generation(settings, job_id)
+
+
+def _resume_after_generation(settings, job_id: str) -> dict:
     """Continue a job once its AI clips are downloaded (or failed: those scenes fall back)."""
     job = get_job(settings.database_path, job_id)
     if not job:
@@ -1011,6 +1092,9 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
             path, kind = None, "image"
             if visual == "generate" and generated_clips.get(i):
                 path, kind = generated_clips[i], "video"
+            if visual == "reuse" and generated_clips.get(scene.get("reuse_of")):
+                path, kind = generated_clips[scene["reuse_of"]], "video"   # another cut, same clip
+                visual = "generate"
             if strict and visual == "generate" and (path is None or not Path(path).is_file()):
                 raise WorkflowError(f"Cảnh {i + 1} chưa có clip Muse; storyboard được giữ nguyên để kiểm tra.")
             if strict and visual == "user_clip":
@@ -1046,13 +1130,15 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
     if not scenes:
         raise WorkflowError("Chưa có hình ảnh để dựng: thêm clip/ảnh ở tab Kịch bản, "
                             "link ảnh sản phẩm, hoặc key Pexels/video AI.")
+    if json.loads(job.get("brief_json") or "{}").get("fast_mode"):
+        plan = {**plan, "fast_mode": True}
     result = {"hook": plan.get("hook", ""),
               "cta": plan.get("cta", "") if strict else plan.get("cta") or settings.cta_text,
               "music_mood": plan.get("music_mood", "upbeat"), "scenes": scenes}
     if strict:
         result.update({k: plan[k] for k in ("creation_branch", "storyboard_version", "style", "characters",
                                             "voice_cast", "style_profile", "audience_gender",
-                                            "hook_variants",
+                                            "hook_variants", "fast_mode",
                                             "duration_target_seconds", "content_mode")
                        if k in plan})
     return result
@@ -1123,6 +1209,7 @@ def render_job(settings, job_id: str, analysis: dict | None = None, product: dic
 
     output_dir = settings.shopee_output / job_id
     final = output_dir / f"{job_id}.mp4"
+    _mark(settings, job_id, "render_start")
     update_job(db, job_id, status="RENDERING", last_error=None)
     try:
         result = render_timeline(settings, timeline, settings.work_dir / job_id / "render",
@@ -1158,6 +1245,7 @@ def render_job(settings, job_id: str, analysis: dict | None = None, product: dic
         qa_score=manifest["quality"].get("creative_qa", {}).get("total_score"),
         last_error=None if shopee_ready else "; ".join(manifest["quality"]["shopee"]["reasons"]),
     )
+    _mark(settings, job_id, "render_done")
     try:   # what this video is made of, for the channel learning loop
         from .learning import features_from_timeline, save_features
         save_features(db, job_id, features_from_timeline(timeline, result.duration))

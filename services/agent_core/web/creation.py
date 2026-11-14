@@ -14,6 +14,7 @@ class Creation(BaseModel):
     catalog_id: str = Field(default='', max_length=100)
     experience: dict = Field(default_factory=dict)
     template_id: str = Field(default='', max_length=64)
+    fast_mode: bool = False
 
 
 def product_offer(settings, product):
@@ -62,6 +63,11 @@ def install_routes(app, settings, render):
             job_id = workflow.create_trend_job(s, topic, **options)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
+        if body.fast_mode:
+            job = db.get_job(s.database_path, job_id)
+            brief = json.loads(job.get('brief_json') or '{}')
+            brief['fast_mode'] = True
+            db.update_job(s.database_path, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
         db.enqueue_task(s.database_path, 'process', job_id)
         return {'job_id': job_id}
 

@@ -87,8 +87,9 @@ class Settings(BaseSettings):
     videogen_daily_limit: int = 15       # clips + reference images per day (Muse weekly quota)
     videogen_clip_seconds: int = 6
     videogen_character: bool = True      # make one character reference image first
-    videogen_task_timeout_minutes: int = 30
-    videogen_continuity_chain: bool = True   # same-location consecutive shots continue from last frame
+    videogen_task_timeout_minutes: int = 15
+    videogen_continuity_chain: bool = False  # chain every same-place shot (slow); "continuous" shots always chain
+    videogen_parallel: int = 6               # Muse clips in flight at once
     style_profile: str = ""                   # ugc_phone | sitcom_bright | cinematic; empty = by branch
     use_listing_images: bool = True           # product listing photos (data API) may be used as references
     voice_revoice: bool = True                # fit TTS lines to the mouth movement of talking AI shots

@@ -118,6 +118,7 @@
     <div class="tab active" id="t-publish">
       {% if job.status in ('READY_FOR_REVIEW', 'APPROVED') %}
       <p class="muted small">Xem video bên trái. Khi hài lòng, chọn nơi đăng rồi bấm duyệt. Shopee mặc định lưu <b>bản nháp</b>.</p>
+      {% if stage_times %}<p class="small muted">⏱ {% for label, sec in stage_times %}{{ label }}: {{ (sec // 60)|int }}p{{ '%02d' % (sec % 60) }}s{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
       {% if hook_variants|length > 1 %}
       <h3>Hook A/B ({{ hook_variants|length }} bản, cùng thân video)</h3>
       <p class="small muted">Chỉ khác chữ 2 giây đầu. Bản đang chọn sẽ được duyệt/đăng.</p>

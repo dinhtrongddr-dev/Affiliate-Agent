@@ -25,11 +25,12 @@
       <h2>Giữ nhân vật xuyên suốt các tập</h2>
       <label for="template-id">Mẫu series</label>
       <select id="template-id">{% for t in series %}<option value="{{ t.id }}">{{ t.label }} · v{{ t.version }} · {{ t.reference_assets|length }} ảnh tham khảo</option>{% endfor %}</select>
-      <p class="small muted">Gia đình Suri có 3 nhân vật; bé Suri 4 tuổi. Thêm ảnh cho từng nhân vật trước khi tạo tập; thiếu ảnh sẽ chặn tạo clip Muse. Mẫu lưu tối đa 6 nhân vật.</p>
+      <p class="small muted">Gia đình Suri có 3 nhân vật; bé Suri 4 tuổi. Nhân vật chưa có ảnh sẽ được Muse tạo ảnh trước rồi dùng cho mọi cảnh. Mẫu lưu tối đa 6 nhân vật.</p>
     </section>
     <label for="creation-topic" style="margin-top:20px">Chủ đề / ý tưởng tập phim</label>
     <textarea id="creation-topic" rows="3" maxlength="1000" placeholder="Một tình huống, vấn đề hoặc câu chuyện muốn kể…"></textarea>
     <p class="small muted">Tác vụ sẽ lập storyboard rồi tạo video theo cấu hình hiện tại; có thể dùng hạn mức AI. Số cảnh AI được giới hạn trong Cài đặt.</p>
+    <label class="check" style="margin-top:10px"><input type="checkbox" id="fast-mode"> ⚡ Chế độ nhanh: tối đa 3 clip AI, 1 hook (khoảng 6–8 phút thay vì 12–18 phút)</label>
     <button class="btn primary" type="submit" style="margin-top:18px">Tạo storyboard & video</button>
   </form>
   <details style="max-width:840px;border-top:1px solid #ddd;padding-top:20px">
@@ -67,6 +68,7 @@ document.getElementById('creation-form').addEventListener('submit', async event 
   event.preventDefault(); const button = event.submitter; button.disabled = true;
   try { await api('/api/create', {creation_branch:branch, topic:document.getElementById('creation-topic').value,
     catalog_id:document.getElementById('catalog-id').value, template_id:document.getElementById('template-id').value,
+    fast_mode:document.getElementById('fast-mode').checked,
     experience:{basis:document.getElementById('experience-basis').value,notes:document.getElementById('experience-notes').value}}, {go:r=>'/jobs/'+r.job_id}); }
   catch(e) {} finally {button.disabled = false;}
 });

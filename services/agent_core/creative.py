@@ -187,10 +187,12 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
                     "lines": [{"speaker": "narrator", "text": "câu tiếng Việt đời thường"}],
                     "shot": {"action": "English, đúng 1 hành động", "setting": "English, bối cảnh Việt Nam cụ thể",
                              "camera": "English, góc điện thoại", "lighting": "", "emotion": "", "sound": ""},
-                    "reference_ids": [], "stock_query": ""}],
+                    "reference_ids": [], "continuous": False, "reuse_of": None}],
         "cta": "", "caption": "", "hashtags": ["#..."], "facebook_description": "", "cover_ratio": .1,
-        "affiliate_keywords": [],
+        "affiliate_keywords": [], "self_review": {"score": 8.0, "issues": []},
     }
+    if has_stock:
+        schema["scenes"][0]["stock_query"] = "english keywords"
     avoid = ""
     if recent_hooks:
         avoid = "Hook đã dùng gần đây, KHÔNG lặp ý/từ mở đầu: " + json.dumps(recent_hooks[:15], ensure_ascii=False)
@@ -233,6 +235,11 @@ Hình ảnh:
 - Nguồn hình: user_clip nếu có clip; product_image/card chỉ khi có ảnh sản phẩm ({has_image});
   stock chỉ khi có Pexels ({has_stock}); generate khi ngân sách > 0.
 - reference_ids: tối đa 6 ID từ manifest được cung cấp; không tạo đường dẫn/URL.
+- Tiết kiệm clip AI: một clip AI dài 10 giây cho được 2 đoạn cắt. Cảnh cùng nhân vật, cùng bối cảnh
+  với một cảnh generate TRƯỚC ĐÓ có thể đặt "reuse_of": số thứ tự (0-based) của cảnh đó để lấy đoạn khác
+  của cùng clip (vd hành động rồi phản ứng). Video 30 giây thường chỉ cần khoảng 5 cảnh generate.
+- "continuous": true chỉ khi cảnh này phải nối liền khung hình cuối của cảnh ngay trước (hiếm dùng).
+- "self_review": tự chấm 0-10 và nêu vấn đề còn lại (hook, nhịp, payoff, độ đời thường).
 
 Chữ trên màn hình: chỉ "hook" (0-2 giây) và phụ đề do app tạo từ lines. Không thêm chữ khác, không emoji.
 "hook_variants": 2 hook KHÁC KIỂU với "hook" (vd tò mò / đồng cảm / bất ngờ), cùng khớp hình mở đầu,
@@ -303,7 +310,8 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
             if mode != "base":
                 clip = _int(raw.get("clip"))
                 valid_clip = clip is not None and 0 <= clip < n_clips
-                if not valid_clip and raw.get("visual") not in {"product_image", "card", "stock", "generate"}:
+                if not valid_clip and raw.get("visual") not in {"product_image", "card", "stock", "generate",
+                                                                 "reuse"}:
                     raise ValueError("Storyboard scene must have a valid visual source")
         branch_generated = (bool(plan.get("creation_branch")) and mode != "base"
                             and raw.get("visual") == "generate")
@@ -341,6 +349,9 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
             })
         if explicit:
             _storyboard_v2_fields(scene, raw)
+            reuse = _int(raw.get("reuse_of"))
+            if reuse is not None and mode != "base":
+                scene["reuse_of"] = reuse   # validated against the final scene list below
         if isinstance(raw.get("shot"), dict):
             scene["shot"] = {key: _text(raw["shot"].get(key), 600) for key in
                              ("action", "setting", "camera", "lighting", "emotion", "continuity",
@@ -354,6 +365,10 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
     if plan.get("creation_branch") and len(scenes) > 10:
         raise ValueError("Storyboard exceeds 10 scenes; no scenes were silently removed")
     scenes = scenes[:10]
+    for i, scene in enumerate(scenes):   # "reuse" = another cut of an earlier generated clip
+        ref = scene.pop("reuse_of", None)
+        if ref is not None and 0 <= ref < i and scenes[ref].get("visual") == "generate":
+            scene["visual"], scene["reuse_of"] = "reuse", ref
     if explicit:  # at most two on-camera talking shots; the rest is voice-over
         talking = [s for s in scenes if s.get("talking")]
         for extra in talking[2:]:
@@ -397,6 +412,10 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
         result["duration_target_seconds"] = _num(plan["duration_target_seconds"], 25, 8, 90)
     if isinstance(plan.get("voice_cast"), dict):
         result["voice_cast"] = plan["voice_cast"]
+    review = plan.get("self_review") if isinstance(plan.get("self_review"), dict) else {}
+    if review.get("score") is not None:
+        result["self_review"] = {"score": _num(review.get("score"), 7.0, 0.0, 10.0),
+                                 "issues": [_text(i, 200) for i in (review.get("issues") or [])[:6]]}
     if "style" in plan:
         result["style"] = _text(plan.get("style"), 1500)
     if "characters" in plan:
@@ -406,6 +425,44 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
             text for text in (_text(v, 100) for v in plan["affiliate_keywords"][:8]) if text))
             if isinstance(plan["affiliate_keywords"], list) else [])
     return result
+
+
+def fix_visual_sources(plan: dict, has_stock: bool, can_generate: bool, has_image: bool) -> int:
+    """The model sometimes picks a source this machine does not have (stock without Pexels).
+    Re-map instead of failing the job later. Returns how many scenes changed."""
+    changed = 0
+    for scene in plan.get("scenes") or []:
+        visual = scene.get("visual")
+        want = visual
+        if visual == "stock" and not has_stock:
+            want = "generate" if can_generate else ("product_image" if has_image else "card")
+        elif visual in {"product_image", "card"} and not has_image:
+            want = "generate" if can_generate else visual
+        if want != visual:
+            scene["visual"] = want
+            if want == "generate" and not (scene.get("shot") or {}).get("action"):
+                scene.setdefault("shot", {})["action"] = scene.get("stock_query") or scene.get("voiceover") or ""
+            changed += 1
+    return changed
+
+
+def storyboard_issues(plan: dict) -> list[str]:
+    """Hard rules checked in code; only when one fails is the AI asked for a fix."""
+    issues = []
+    branch = plan.get("creation_branch")
+    if branch in DURATION_TARGETS:
+        low, high = DURATION_TARGETS[branch]
+        total = sum(float(s.get("duration") or 0) for s in plan.get("scenes") or [])
+        if total < low * 0.85 or total > high * 1.15:
+            issues.append(f"Tổng thời lượng {total:.0f}s ngoài mục tiêu {low:.0f}-{high:.0f}s")
+    for i, scene in enumerate(plan.get("scenes") or []):
+        words = sum(len(str(ln.get("text") or "").split()) for ln in scene.get("lines") or [])
+        if scene.get("duration") and words > float(scene["duration"]) * 3.3:
+            issues.append(f"Cảnh {i + 1}: {words} từ cho {scene['duration']}s, cần rút gọn")
+    hits = meta_word_lines(plan)
+    if hits:
+        issues.append("Câu nghe như báo cáo/rào đón (tối đa 1 câu rào đón): " + json.dumps(hits[:6], ensure_ascii=False))
+    return issues
 
 
 def short_hook(value, max_words: int = 8) -> str:
@@ -464,6 +521,7 @@ def _storyboard_v2_fields(scene: dict, raw: dict) -> None:
     scene["talking"] = bool(raw.get("talking")) and any(
         ln["speaker"] in scene["cast"] for ln in scene["lines"])
     scene["product_visible"] = bool(raw.get("product_visible"))
+    scene["continuous"] = bool(raw.get("continuous"))
     scene["hands_only"] = bool(raw.get("hands_only"))
 
 

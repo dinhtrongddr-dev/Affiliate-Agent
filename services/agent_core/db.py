@@ -378,17 +378,19 @@ def enqueue_task(
         return cur.lastrowid
 
 
-def claim_task(db_path: Path) -> dict[str, Any] | None:
+def claim_task(db_path: Path, kinds: tuple[str, ...] | None = None) -> dict[str, Any] | None:
+    """Next due task; with ``kinds`` only tasks of that worker lane."""
     init_db(db_path)
     stamp = now_iso()
+    lane = f" AND kind IN ({','.join('?' * len(kinds))})" if kinds else ""
     with connect(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT * FROM tasks WHERE status='QUEUED' AND run_after<=? "
+            "SELECT * FROM tasks WHERE status='QUEUED' AND run_after<=?" + lane + " "
             # Video work the owner is waiting for runs before background refreshes.
             "ORDER BY CASE WHEN kind IN ('fetch_trends','trend_analyse','sync_conversions',"
             "'sync_shopee') THEN 1 ELSE 0 END, run_after ASC, id ASC LIMIT 1",
-            (stamp,),
+            (stamp, *(kinds or ())),
         ).fetchone()
         if not row:
             return None
