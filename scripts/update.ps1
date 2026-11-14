@@ -21,6 +21,24 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 if (-not (Test-Path (Join-Path $Root '.git'))) { throw 'Thu muc nay khong phai ban git clone: hay git clone https://github.com/dinhtrongddr-dev/Affiliate-Agent.git' }
 
+function Clear-GitLock {
+    # A git command that was killed midway (closed window, app stopped, power cut) leaves
+    # .git\index.lock behind and every later git command fails with "index.lock: File exists".
+    # Wait briefly in case a real git is still working, then remove the stale lock.
+    $lock = Join-Path $Root '.git\index.lock'
+    for ($i = 0; $i -lt 10 -and (Test-Path $lock); $i++) {
+        $old = ((Get-Date) - (Get-Item $lock).LastWriteTime).TotalSeconds -gt 60
+        if ($old -or -not (Get-Process git -ErrorAction SilentlyContinue)) {
+            Remove-Item $lock -Force -ErrorAction SilentlyContinue
+            if (-not (Test-Path $lock)) { Write-Host 'Da go file khoa git con sot (.git\index.lock).' -ForegroundColor Yellow }
+            break
+        }
+        Start-Sleep 2
+    }
+    if (Test-Path $lock) { throw "Git dang ban (con $lock): dong cac cua so git/cap nhat khac roi chay lai." }
+}
+Clear-GitLock
+
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
 git fetch --quiet origin $branch
 $behind = [int](git rev-list --count "HEAD..origin/$branch")
@@ -62,8 +80,23 @@ if (Test-Path $db) {
 }
 
 $before = (git rev-parse HEAD).Trim()
-git merge --ff-only "origin/$branch"
-if ($LASTEXITCODE -ne 0) { throw 'Khong cap nhat thang (fast-forward) duoc: lich su da khac nhau, can xu ly tay.' }
+Clear-GitLock   # stopping the app above may have interrupted a git call
+function Invoke-Merge {
+    # PowerShell 5.1 turns git's stderr into a terminating error under 'Stop': capture it plainly
+    $ErrorActionPreference = 'Continue'
+    $o = (git merge --ff-only "origin/$branch" 2>&1 | ForEach-Object { "$_" } | Out-String)
+    return @{ Out = $o; Code = $LASTEXITCODE }
+}
+$m = Invoke-Merge
+if ($m.Code -ne 0 -and $m.Out -match 'index\.lock') { Clear-GitLock; $m = Invoke-Merge }
+Write-Host $m.Out.Trim()
+if ($m.Code -ne 0) {
+    $ahead = [int](git rev-list --count "origin/$branch..HEAD")
+    if ($ahead -gt 0) {
+        throw "May nay co $ahead commit rieng chua co tren GitHub: lich su da khac nhau, can xu ly tay."
+    }
+    throw 'Cap nhat loi (xem dong loi cua git ngay phia tren). Chay lai lenh cap nhat; neu van loi, gui anh cua so nay.'
+}
 
 # Libraries / tools the new version may need (models are already on this machine).
 $changed = git diff --name-only $before HEAD

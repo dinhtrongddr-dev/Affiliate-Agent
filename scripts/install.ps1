@@ -80,6 +80,12 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 function Get-Repo($url, $path) {
     if (Test-Path (Join-Path $path '.git')) {
         Write-Host "Da co $path : cap nhat..."
+        # a git command killed midway leaves .git\index.lock and every later git call fails
+        $lock = Join-Path $path '.git\index.lock'
+        if ((Test-Path $lock) -and -not (Get-Process git -ErrorAction SilentlyContinue)) {
+            Remove-Item $lock -Force -ErrorAction SilentlyContinue
+            Write-Host 'Da go file khoa git con sot (.git\index.lock).' -ForegroundColor Yellow
+        }
         git -C $path pull --ff-only --quiet
     } elseif (Test-Path $path) {
         throw "$path da ton tai nhung khong phai ban git: doi ten/xoa thu muc do hoac dung -Dir khac."
