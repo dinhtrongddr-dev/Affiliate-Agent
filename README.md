@@ -137,3 +137,23 @@ powershell -ExecutionPolicy Bypass -File scripts\clean.ps1 -Days 7
 
 Xoá file tạm của job cũ hơn N ngày (clip Muse, file dựng), cache pip/test và log cũ. Giữ nguyên CSDL, video thành phẩm, cấu hình và key.
 
+## Cập nhật lên bản mới
+
+Bấm đúp `scripts\update.cmd`, hoặc chạy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1          # cập nhật và mở lại app
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1 -Check   # chỉ xem có bản mới không
+```
+
+Các bước script tự làm:
+1. Kéo code mới từ GitHub và liệt kê các thay đổi.
+2. **Dừng lại nếu máy có file mã nguồn bị sửa tay**, để không ghi đè.
+3. Tắt app và sao lưu CSDL vào `backups\` (giữ 5 bản gần nhất).
+4. Cập nhật kiểu fast-forward, không merge, không viết lại lịch sử.
+5. Tự cài thư viện mới nếu bản mới cần, rồi mở lại app.
+
+Dữ liệu, `.env`, key và video nằm ngoài git nên không bị đụng tới. App cũng tự kiểm tra GitHub mỗi 6 giờ và báo "Có N bản cập nhật mới" trên trang Tổng quan.
+
+Máy cài bản cũ chưa có `update.ps1` thì chạy tay một lần `git pull`. Từ đó trở đi dùng `update.cmd`.
+
