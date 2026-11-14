@@ -9,6 +9,21 @@
   {% if info.lessons %}<h3>Bài học</h3><ul>{% for l in info.lessons %}<li>{{ l }}</li>{% endfor %}</ul>{% endif %}
   {% if prompt_block %}<p class="small"><b>Đang đưa vào kịch bản mới:</b></p><pre class="small" style="white-space:pre-wrap">{{ prompt_block }}</pre>{% endif %}
 </div>
+<div class="grid g2">
+<div class="card"><h3>KPI theo mục tiêu</h3>
+  {% for goal, k in kpis.items() %}<p><b>{{ {'fb_growth':'Facebook (giữ chân, chia sẻ, follower)','affiliate':'Affiliate (click, đơn, hoa hồng)'}[goal] }}</b> · {{ k.videos }} video
+    <br><span class="small">{% for f, v in k.items() if f != 'videos' %}{{ f }}: {{ ('%.2f' % v) if v is not none else 'chưa nhập' }}{% if not loop.last %} · {% endif %}{% endfor %}</span></p>{% endfor %}
+</div>
+<div class="card"><h3>Dự đoán so với thực tế</h3>
+  {% if prediction.correlation is not none %}<p>{{ prediction.pairs }} video có điểm cơ hội lúc làm: dự đoán TB {{ prediction.mean_predicted }}, thực tế TB {{ prediction.mean_actual }}, tương quan <b>{{ prediction.correlation }}</b>.</p>
+  <p class="small muted">Tương quan gần 1 nghĩa là điểm trend dự đoán đúng hướng; gần 0 hoặc âm thì cần đổi trọng số chấm điểm.</p>
+  {% else %}<p class="muted">Cần ít nhất 3 video làm từ trend Trung Quốc có số liệu ({{ prediction.pairs }} hiện có).</p>{% endif %}
+  <h3>Đề xuất điều chỉnh</h3>
+  {% if suggestions %}<ul>{% for g in suggestions %}<li>{{ g.feature }}: tăng <b>{{ g.increase }}</b>, giảm <b>{{ g.decrease }}</b> (tối đa {{ (g.shift*100)|round|int }}%) · {{ g.evidence }}</li>{% endfor %}</ul>
+  <p class="small muted">Chỉ là đề xuất; app không tự đổi chiến lược. Cần ≥ 5 video mỗi nhóm, đã bỏ video viral bất thường (> 3 lần trung vị).</p>
+  {% else %}<p class="muted">Chưa đủ dữ liệu (cần ≥ 5 video có số liệu cho mỗi nhóm so sánh).</p>{% endif %}
+</div>
+</div>
 {% if info.by_feature %}
 <div class="card"><h3>Theo đặc điểm video</h3>
   <div class="grid g2">

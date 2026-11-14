@@ -46,6 +46,7 @@ def settings_for(root: Path):
     s.render_width, s.render_height = 360, 640
     s.facebook_min_width, s.facebook_min_height = 360, 640
     s.music_dir = root / "no-music"
+    s.qa_autofix = False   # the quality gate has its own tests; these check the Muse flow
     return s
 
 

@@ -19,6 +19,8 @@ log = logging.getLogger("affiliate_agent.worker")
 
 PERIODIC = {
     "fetch_trends": 6 * 3600,
+    "cn_trends": 3 * 3600,
+    "autopilot": 3600,
     "sync_conversions": 12 * 3600,
 }
 
@@ -55,6 +57,18 @@ def handle_task(settings, task: dict):
         return workflow.prepare_audio(settings, job_id)
     if kind == "render_generated":
         return workflow.resume_after_generation(settings, job_id)
+    if kind == "cn_trends":
+        from .cn_trends import pipeline as cn_pipeline
+        return cn_pipeline.run(settings, collect=not payload.get("no_collect"))
+    if kind == "cn_ideas":
+        from .cn_trends import formula
+        return {"ideas": formula.generate_ideas(settings, payload["key"])}
+    if kind == "cn_idea_job":
+        from .cn_trends import formula
+        return {"job_id": formula.idea_to_job(settings, payload["idea_id"])}
+    if kind == "autopilot":
+        from .cn_trends import pipeline as cn_pipeline
+        return cn_pipeline.autopilot(settings)
     if kind == "fetch_trends":
         from .trend_intel import pipeline
         return pipeline.run(settings, collect=True)
@@ -90,9 +104,11 @@ def queue_new_jobs(settings) -> int:
 # Lanes run side by side: a long render never holds up another job's script or the
 # background refreshes, and Muse clips keep moving while anything else runs.
 LANES = {
-    "ai": ("process", "regenerate", "select_product", "manual_product", "affiliate_suggest"),
+    "ai": ("process", "regenerate", "select_product", "manual_product", "affiliate_suggest",
+           "cn_ideas", "cn_idea_job"),
     "media": ("render", "render_generated", "prepare_audio", "publish", "scan"),
-    "background": ("fetch_trends", "trend_analyse", "sync_conversions", "sync_shopee"),
+    "background": ("fetch_trends", "trend_analyse", "sync_conversions", "sync_shopee", "cn_trends",
+                   "autopilot"),
 }
 GEN_POLL_SECONDS = 10
 

@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block content %}
+{% set SC = {'early_signal':'ok','rising':'ok','peak':'warn','saturated':'err'} %}
+{% set GOALS = {'fb_growth':'Facebook (giữ chân, chia sẻ)','affiliate':'Affiliate (bán hàng)'} %}
+<div class="row space"><div><h1>Trend Trung Quốc</h1>
+  <p class="sub">Phát hiện xu hướng trên Douyin, Bilibili, Weibo, Toutiao trước khi nóng ở Việt Nam, rút ra <b>công thức viral</b> rồi sáng tác nội dung mới cho người Việt. Chỉ đọc danh sách hot công khai (không đăng nhập), không tải video gốc, không đăng lại nội dung của người khác.</p></div>
+  <div class="row">
+    <button class="btn primary" onclick="api('/api/china/fetch',undefined,{ok:'Đang thu thập, dịch và chấm điểm… (vài phút)',reload:true,delay:8000})">⟳ Thu thập ngay</button>
+    <button class="btn" onclick="api('/api/china/rescore',undefined,{ok:'Đang chấm lại…',reload:true,delay:5000})">Chấm lại</button>
+  </div>
+</div>
+
+<div class="card" id="tabs-root">
+  <div class="tabs">
+    <button data-tab="t-radar" class="{{ 'active' if tab=='radar' }}">📡 Trend Radar ({{ topics|length }})</button>
+    <button data-tab="t-niches" class="{{ 'active' if tab=='niches' }}">🧭 Ngách</button>
+    <button data-tab="t-ideas" class="{{ 'active' if tab=='ideas' }}">💡 Ý tưởng ({{ ideas|selectattr('status','equalto','NEW')|list|length }} mới)</button>
+    <button data-tab="t-sources" class="{{ 'active' if tab=='sources' }}">🔌 Nguồn & tự động</button>
+  </div>
+
+  <div class="tab {{ 'active' if tab=='radar' }}" id="t-radar">
+    <form class="row" method="get" action="/china" style="gap:8px;margin-bottom:10px">
+      <input type="hidden" name="tab" value="radar">
+      <select name="stage"><option value="">Mọi giai đoạn</option>{% for k,v in stage_labels.items() %}<option value="{{k}}" {{ 'selected' if filters.stage==k }}>{{v}}</option>{% endfor %}</select>
+      <select name="niche"><option value="">Mọi ngách</option>{% for k,v in niche_names.items() %}<option value="{{k}}" {{ 'selected' if filters.niche==k }}>{{v}}</option>{% endfor %}</select>
+      <select name="goal"><option value="">Mọi mục tiêu</option>{% for k,v in GOALS.items() %}<option value="{{k}}" {{ 'selected' if filters.goal==k }}>{{v}}</option>{% endfor %}</select>
+      <button class="btn sm">Lọc</button>
+    </form>
+    {% if topics %}
+    <table class="small">
+      <tr><th>Trend</th><th>Nguồn</th><th>Ngách</th><th>Giai đoạn</th><th>Điểm</th><th>Tin cậy</th><th>Phát hiện</th><th></th></tr>
+      {% for t in topics %}{% set L = t.labels or {} %}
+      <tr {% if t.status in ('BLOCKED','IGNORED') %}style="opacity:.5"{% endif %}>
+        <td><b>{{ t.title_vi or '(chưa dịch)' }}</b><div class="muted">{{ t.title_zh }}</div>
+          {% if t.summary_vi %}<div class="muted">{{ t.summary_vi }}</div>{% endif %}
+          {% if L.reason %}<div class="small">💬 {{ L.reason }}</div>{% endif %}
+          {% if t.status == 'BLOCKED' %}<span class="badge err">Nhạy cảm, không làm</span>{% endif %}
+          {% if L.copyright_risk == 'high' %}<span class="badge warn">Rủi ro bản quyền</span>{% endif %}
+          {% if L.facebook_risk == 'high' %}<span class="badge warn">Rủi ro chính sách FB</span>{% endif %}</td>
+        <td>{% for p in t.platforms %}{{ sources[p][1] if p in sources else p }}{% if not loop.last %}, {% endif %}{% endfor %}
+          {% if t.url %}<div><a href="{{ t.url }}" target="_blank" rel="noopener noreferrer">mở nguồn</a></div>{% endif %}</td>
+        <td>{{ niche_names.get(t.niche, t.niche or '') }}</td>
+        <td>{% if t.stage %}<span class="badge {{ SC.get(t.stage,'') }}">{{ stage_labels.get(t.stage, t.stage) }}</span>{% endif %}</td>
+        <td><b>{{ t.opportunity if t.opportunity is not none else '—' }}</b>
+          {% if t.scores %}<div class="muted" title="{{ t.scores.parts }}">{{ GOALS.get(t.goal,'') }}</div>{% endif %}</td>
+        <td>{{ '%.0f%%' % (t.confidence*100) if t.confidence is not none else '—' }}
+          {% if t.scores and t.scores.facts and t.scores.facts.why %}<div class="muted">{{ t.scores.facts.why }}</div>{% endif %}</td>
+        <td class="muted">{{ (t.first_seen or '')[:16].replace('T',' ') }}</td>
+        <td>{% if t.status != 'BLOCKED' %}
+          <button class="btn sm primary" onclick="api('/api/china/topics/{{ t.key }}/ideas',undefined,{ok:'AI đang phân tích công thức & viết ý tưởng…',reload:true,delay:6000})">💡 Ý tưởng</button>
+          <button class="btn sm" onclick="api('/api/china/topics/{{ t.key }}/status',{status:'{{ 'NEW' if t.status=='IGNORED' else 'IGNORED' }}'},{reload:true})">{{ 'Mở lại' if t.status=='IGNORED' else 'Bỏ qua' }}</button>{% endif %}</td>
+      </tr>{% endfor %}
+    </table>
+    {% else %}<p class="muted">Chưa có trend. Bấm <b>Thu thập ngay</b> (lần đầu mất vài phút vì AI dịch và gắn nhãn).</p>{% endif %}
+    <p class="small muted">Điểm cơ hội (0–100) = tăng trưởng 25, lan truyền giữa nền tảng 20, tương tác 20, Việt hoá được 15, app sản xuất được 10, thương mại 10; nhân với hệ số giai đoạn (ưu tiên Tín hiệu sớm/Đang lên), rủi ro FB/bản quyền và độ trùng với video kênh đã làm. Dữ liệu dưới 3 mốc được ghi độ tin cậy thấp.</p>
+  </div>
+
+  <div class="tab {{ 'active' if tab=='niches' }}" id="t-niches">
+    <table class="small"><tr><th>Ngách</th><th>Trend 7 ngày</th><th>Đang lên</th><th>Điểm trung vị</th><th>Trend tốt nhất</th><th></th></tr>
+    {% for n in niches %}<tr {% if n.status=='rejected' %}style="opacity:.5"{% endif %}>
+      <td><b>{{ n.name }}</b>{% if n.status=='proposed' %} <span class="badge info">AI đề xuất</span>{% endif %}<div class="muted">{{ n.description }}</div>
+        {% if n.evidence %}<div class="muted">Ví dụ: {{ n.evidence[:3]|join('; ') }}</div>{% endif %}</td>
+      <td>{{ n.topics }}</td><td>{{ n.rising }}</td><td>{{ n.median_opportunity if n.median_opportunity is not none else '—' }}</td>
+      <td>{{ (n.best.title_vi or n.best.title_zh) if n.best else '' }}</td>
+      <td>{% if n.status=='proposed' %}<button class="btn sm primary" onclick="api('/api/china/niches/{{ n.id }}',{status:'active'},{reload:true})">Duyệt</button>
+        <button class="btn sm" onclick="api('/api/china/niches/{{ n.id }}',{status:'rejected'},{reload:true})">Bỏ</button>{% endif %}</td>
+    </tr>{% endfor %}</table>
+    <p class="small muted">AI đề xuất ngách mới khi ≥ 5 trend trong 7 ngày cùng thuộc một nhóm chưa có. Ngách được duyệt sẽ dùng cho các lần gắn nhãn sau.</p>
+  </div>
+
+  <div class="tab {{ 'active' if tab=='ideas' }}" id="t-ideas">
+    {% if ideas %}
+    <table class="small"><tr><th>Ý tưởng</th><th>Từ trend</th><th>Định dạng</th><th>Mục tiêu</th><th>Điểm dự kiến</th><th>Trạng thái</th><th></th></tr>
+    {% for i in ideas %}<tr {% if i.status=='REJECTED' %}style="opacity:.5"{% endif %}>
+      <td><b>{{ i.title }}</b><div>🎣 {{ i.hook }}</div><div class="muted">{{ i.premise }}</div>
+        {% if i.data.why %}<div class="small">💬 {{ i.data.why }}</div>{% endif %}
+        {% if i.data.needs_facts %}<span class="badge warn">Cần kiểm chứng kiến thức</span>{% endif %}</td>
+      <td class="muted">{{ topic_names.get(i.topic_key, '') }}</td>
+      <td>{{ i.format }} · {{ i.duration }}s</td><td>{{ GOALS.get(i.goal, i.goal) }}</td>
+      <td><b>{{ i.est_score }}</b></td>
+      <td>{{ {'NEW':'Mới','QUEUED':'Đang sản xuất','REJECTED':'Đã bỏ','FAILED':'Lỗi'}.get(i.status, i.status) }}
+        {% if i.job_id %}<div><a href="/jobs/{{ i.job_id }}">mở video</a></div>{% endif %}</td>
+      <td>{% if i.status=='NEW' %}<button class="btn sm primary" onclick="api('/api/china/ideas/{{ i.id }}/produce',undefined,{ok:'Đã đưa vào sản xuất',reload:true,delay:2500})">🎬 Sản xuất</button>
+        <button class="btn sm" onclick="api('/api/china/ideas/{{ i.id }}/reject',undefined,{reload:true})">Bỏ</button>{% endif %}</td>
+    </tr>{% endfor %}</table>
+    {% else %}<p class="muted">Chưa có ý tưởng. Mở tab Trend Radar, bấm <b>💡 Ý tưởng</b> ở một trend (hoặc chờ lượt tự động: 3 trend điểm cao nhất mỗi lần thu thập).</p>{% endif %}
+  </div>
+
+  <div class="tab {{ 'active' if tab=='sources' }}" id="t-sources">
+    <table class="small"><tr><th>Nền tảng</th><th>Cách lấy</th><th>Lần OK gần nhất</th><th>Lỗi gần nhất</th><th>Ghi chú</th></tr>
+    {% for p, (support, label, note) in sources.items() %}{% set st = source_state.get(p, {}) %}
+      <tr><td>{{ label }}</td>
+        <td>{% if support=='auto' %}<span class="badge ok">Tự động, 3 giờ/lần</span>{% elif support=='manual' %}<span class="badge info">Nhập tay</span>{% else %}<span class="badge err">Không dùng</span>{% endif %}
+          {% if st.paused_until %}<span class="badge warn">Tạm dừng tới {{ st.paused_until[:16].replace('T',' ') }}</span>{% endif %}</td>
+        <td class="muted">{{ (st.last_ok or '')[:16].replace('T',' ') }}{% if st.items_last %} · {{ st.items_last }} mục{% endif %}</td>
+        <td class="muted">{{ st.last_error if support=='auto' and st.last_error else '' }}</td><td class="muted">{{ note }}</td></tr>
+    {% endfor %}</table>
+
+    <h3 style="margin-top:16px">Nhập trend bằng tay</h3>
+    <p class="small muted">Dùng cho Kuaishou, Xiaohongshu, WeChat Channels hoặc video bạn tự thấy. Ảnh chụp/clip bạn tự lưu chỉ để AI phân tích công thức, <b>không bao giờ</b> dùng trong video.</p>
+    <form id="manual-form" class="grid g2" onsubmit="event.preventDefault();addManual()">
+      <div><label>Nền tảng</label><select name="platform">{% for p,(s,l,n) in sources.items() %}<option value="{{p}}">{{l}}</option>{% endfor %}</select></div>
+      <div><label>Tên / chủ đề (tiếng Trung hoặc Việt)</label><input name="title" required></div>
+      <div><label>Link (tuỳ chọn)</label><input name="url"></div>
+      <div><label>Ghi chú: video làm gì, vì sao hot</label><input name="notes"></div>
+      <div><label>Ảnh/clip tham khảo (tuỳ chọn, ≤ 80 MB)</label><input type="file" name="reference" accept="image/*,video/*"></div>
+      <div><button class="btn primary" type="submit">+ Thêm trend</button></div>
+    </form>
+
+    <h3 style="margin-top:16px">Sản xuất tự động</h3>
+    <p class="small">Trạng thái: {% if autopilot.enabled %}<span class="badge ok">Đang bật</span>{% else %}<span class="badge warn">Đang tắt</span>{% endif %}
+      · tối đa {{ autopilot.cap }} video/ngày (hôm nay {{ autopilot.today }}) · điểm ý tưởng ≥ {{ autopilot.min }} · tỉ lệ {{ autopilot.mix }}</p>
+    <p class="small muted">Bật/tắt và chỉnh ở <a href="/settings">Cài đặt</a> (AA_AUTOPILOT_ENABLED, AA_AUTOPILOT_DAILY_VIDEOS, AA_AUTOPILOT_GOAL_MIX). Video làm xong vẫn chờ bạn duyệt trước khi đăng, trừ khi bạn tự bật đăng tự động.</p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+tabs(document.getElementById("tabs-root"));
+async function addManual(){
+  const form=new FormData(document.getElementById("manual-form"));
+  if(!form.get("reference") || !form.get("reference").size) form.delete("reference");
+  await api('/api/china/manual', form, {ok:'Đã thêm, đang dịch & chấm điểm…', reload:true, delay:4000});
+}
+</script>
+{% endblock %}

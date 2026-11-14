@@ -105,6 +105,13 @@ EDITABLE_SETTINGS = [
     ("AA_TIKTOK_MODE", "Chế độ (inbox = nháp | direct = đăng)", "text", "TikTok"),
     ("AA_TIKTOK_PRIVACY_LEVEL", "Quyền riêng tư khi direct", "text", "TikTok"),
     ("AA_TIKTOK_ACCESS_TOKEN", "TikTok access token", "secret", "TikTok"),
+    ("AA_CN_TRENDS_ENABLED", "Thu thập trend Trung Quốc (danh sách hot công khai)", "bool", "Trend Trung Quốc"),
+    ("AA_CN_AUTO_IDEAS", "Số trend tự sinh ý tưởng mỗi lần thu thập", "text", "Trend Trung Quốc"),
+    ("AA_AUTOPILOT_ENABLED", "Tự sản xuất video từ ý tưởng điểm cao", "bool", "Trend Trung Quốc"),
+    ("AA_AUTOPILOT_DAILY_VIDEOS", "Số video tự sản xuất tối đa / ngày", "text", "Trend Trung Quốc"),
+    ("AA_AUTOPILOT_MIN_SCORE", "Điểm ý tưởng tối thiểu để tự sản xuất (0-100)", "text", "Trend Trung Quốc"),
+    ("AA_AUTOPILOT_GOAL_MIX", "Tỉ lệ mục tiêu (vd fb_growth:70,affiliate:30)", "text", "Trend Trung Quốc"),
+    ("AA_QA_AUTOFIX", "Cổng chất lượng tự tạo lại cảnh lỗi (1 lần)", "bool", "Dựng video"),
     ("AA_YOUTUBE_API_KEY", "YouTube Data API key (miễn phí, Google Cloud)", "secret", "Trend"),
     ("AA_YOUTUBE_DAILY_UNITS", "Quota YouTube dùng tối đa / ngày (mỗi lần tìm = 101)", "text", "Trend"),
     ("AA_TRENDSMCP_API_KEY", "Trends MCP API key (trendsmcp.ai, gói Free 100 request/tháng)", "secret", "Trend"),
@@ -181,6 +188,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
     install_addlive_routes(app, S, render)
     from .creation import install_routes as install_creation_routes
     install_creation_routes(app, S, render)
+    from .china import install_routes as install_china_routes
+    install_china_routes(app, S, render)
 
     def health() -> list[dict]:
         s = S()
@@ -678,6 +687,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
         s = S()
         learning.backfill(s.database_path)
         return render(request, "performance.html", active="performance",
+                      kpis=learning.goal_kpis(s.database_path),
+                      prediction=learning.prediction_check(s.database_path),
+                      suggestions=learning.suggestions(s.database_path),
                       rows=learning.rows(s.database_path), info=learning.insights(s.database_path),
                       labels=learning.FEATURE_LABELS, prompt_block=learning.prompt_block(s.database_path))
 

@@ -19,10 +19,21 @@ METRIC_FIELDS = {
     "completion_rate": ("% xem hết", float), "shares": ("Chia sẻ", int),
     "comments": ("Bình luận", int), "saves": ("Lưu", int), "clicks": ("Click link", int),
     "conversions": ("Đơn hàng", int), "commission_earned": ("Hoa hồng (đ)", float),
+    "new_followers": ("Follower mới", int), "qualified_views": ("Lượt xem đủ ĐK kiếm tiền", int),
 }
+# KPI per goal: Facebook growth is judged on holding/sharing/followers, affiliate on buying.
+GOAL_KPIS = {
+    "fb_growth": ("retention_3s_rate", "completion_rate", "shares", "new_followers", "qualified_views"),
+    "affiliate": ("clicks", "conversions", "commission_earned"),
+}
+MIN_PER_GROUP = 5          # a strategy suggestion needs this many videos with numbers per group
+MAX_SHIFT = 0.20           # suggestions move a weight/share by at most 20 %
+OUTLIER_X = 3.0            # a video above 3x the median engagement does not steer anything
 FEATURE_LABELS = {
     "branch": "Nhánh", "style": "Phong cách quay", "length": "Độ dài", "hook_type": "Kiểu hook",
     "talking": "Cảnh nói trước camera", "music_mood": "Nhạc", "cast": "Số nhân vật",
+    "niche": "Ngách", "format": "Định dạng", "goal": "Mục tiêu", "source_platform": "Nguồn trend",
+    "trend_stage": "Giai đoạn trend lúc làm",
 }
 
 
@@ -51,9 +62,18 @@ def hook_type(hook: str) -> str:
     return "khẳng định"
 
 
-def features_from_timeline(timeline: dict, duration: float) -> dict:
+def features_from_timeline(timeline: dict, duration: float, brief: dict | None = None) -> dict:
     scenes = timeline.get("scenes") or []
+    brief = brief or {}
+    source = brief.get("trend_source") or {}
     return {
+        "niche": timeline.get("niche") or brief.get("niche") or "",
+        "format": timeline.get("format") or brief.get("format") or "",
+        "goal": timeline.get("goal") or brief.get("goal")
+        or ("affiliate" if timeline.get("creation_branch") == "product_review" else "fb_growth"),
+        "source_platform": source.get("platform") or "",
+        "trend_stage": source.get("stage") or "",
+        "predicted": source.get("opportunity"),
         "branch": timeline.get("creation_branch") or "base",
         "style": timeline.get("style_profile") or "",
         "length": length_bucket(float(duration or 0)),
@@ -215,6 +235,67 @@ def insights(db: Path, min_videos: int = MIN_VIDEOS) -> dict:
         result["lessons"].append("Hook của các video tốt nhất: " + "; ".join(f"\"{h}\"" for h in hooks))
     result["overall"] = round(overall, 1)
     return result
+
+
+def _robust(data: list[dict]) -> list[dict]:
+    """Drop freak hits (> OUTLIER_X x median) so one lucky video cannot steer strategy."""
+    scores = sorted(r["score"] for r in data)
+    if len(scores) < 4:
+        return data
+    med = scores[len(scores) // 2] or 1.0
+    return [r for r in data if r["score"] <= OUTLIER_X * med]
+
+
+def prediction_check(db: Path) -> dict:
+    """Trend opportunity predicted at production time vs the engagement measured afterwards."""
+    pairs = [(float(r["features"]["predicted"]), r["score"]) for r in rows(db)
+             if r["score"] is not None and r["features"].get("predicted") is not None]
+    if len(pairs) < 3:
+        return {"pairs": len(pairs), "correlation": None}
+    n = len(pairs)
+    mx, my = sum(p for p, _ in pairs) / n, sum(a for _, a in pairs) / n
+    cov = sum((p - mx) * (a - my) for p, a in pairs)
+    vx = sum((p - mx) ** 2 for p, _ in pairs) ** 0.5
+    vy = sum((a - my) ** 2 for _, a in pairs) ** 0.5
+    corr = round(cov / (vx * vy), 2) if vx and vy else None
+    return {"pairs": n, "correlation": corr, "mean_predicted": round(mx, 1), "mean_actual": round(my, 1)}
+
+
+def goal_kpis(db: Path) -> dict:
+    out = {}
+    for goal, fields in GOAL_KPIS.items():
+        mine = [r for r in rows(db) if (r["features"].get("goal") or "fb_growth") == goal]
+        out[goal] = {"videos": len(mine)}
+        for f in fields:
+            values = [float(r["metrics"][f]) for r in mine if r["metrics"].get(f) is not None]
+            out[goal][f] = round(sum(values) / len(values), 3) if values else None   # None = not entered
+    return out
+
+
+def suggestions(db: Path) -> list[dict]:
+    """Shift production toward niches/formats that do better, with guard rails:
+    >= MIN_PER_GROUP videos per group, outliers removed, at most MAX_SHIFT per suggestion.
+    These are proposals; nothing changes until the owner applies them."""
+    data = _robust([r for r in rows(db) if r["score"] is not None and r["features"]])
+    out = []
+    for key in ("niche", "format", "goal"):
+        groups: dict[str, list[float]] = {}
+        for r in data:
+            value = str(r["features"].get(key) or "")
+            if value:
+                groups.setdefault(value, []).append(r["score"])
+        ready = {v: sum(s) / len(s) for v, s in groups.items() if len(s) >= MIN_PER_GROUP}
+        if len(ready) < 2:
+            continue
+        best, worst = max(ready, key=ready.get), min(ready, key=ready.get)
+        gap = ready[best] - ready[worst]
+        if gap < 8:
+            continue
+        shift = round(min(MAX_SHIFT, gap / 100), 2)
+        out.append({"feature": FEATURE_LABELS.get(key, key), "increase": best, "decrease": worst,
+                    "shift": shift, "evidence": f"{ready[best]:.1f} vs {ready[worst]:.1f} điểm "
+                    f"({len(groups[best])} và {len(groups[worst])} video)"})
+    return out
 
 
 def prompt_block(db: Path) -> str:

@@ -26,6 +26,23 @@ PROFILES: dict[str, dict] = {
                  "no watermark",
         "transition": "cut",
     },
+    "documentary": {
+        "label": "Phóng sự / tài liệu",
+        "camera": "Observational documentary camera, steady handheld, close details of hands and objects, "
+                  "natural pauses",
+        "light": "available natural light of the real place",
+        "look": "real workshop, street or home in Vietnam, honest textures, no staging",
+        "avoid": "no on-screen text, no subtitles, no logos, no watermark, no glossy advert look",
+        "transition": "cut",
+    },
+    "animated_3d": {
+        "label": "Hoạt hình 3D",
+        "camera": "Stylised 3D animation, smooth virtual camera, clear silhouettes",
+        "light": "soft colourful animated lighting",
+        "look": "cute consistent 3D characters and props, rich but simple backgrounds",
+        "avoid": "no on-screen text, no subtitles, no logos, no watermark, no photoreal humans",
+        "transition": "cut",
+    },
     "cinematic": {
         "label": "Điện ảnh (chọn tay)",
         "camera": "Smooth stabilised camera movement, shallow depth of field",

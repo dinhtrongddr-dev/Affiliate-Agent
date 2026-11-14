@@ -603,6 +603,16 @@ def _process_creation(settings, job, brief, client) -> dict:
                               analysis, product, affiliate_link, [], {})
 
 
+def _brief_plan_fields(brief: dict) -> dict:
+    """Content Director choices that travel from the brief into the storyboard and QA."""
+    out = {k: brief[k] for k in ("format", "niche", "goal", "duration_range") if brief.get(k)}
+    source = brief.get("trend_source") or {}
+    texts = [source.get("title_vi"), source.get("summary_vi"), source.get("title_zh")]
+    if any(texts):
+        out["source_texts"] = [t for t in texts if t]
+    return out
+
+
 def _recent_hooks(settings, exclude: str = "", limit: int = 15) -> list[str]:
     """Hooks of the latest videos, so a new storyboard does not open the same way."""
     from .db import connect
@@ -768,7 +778,8 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                             [Path(r["path"]) for r in references] or None,
                             temperature=0.7, max_tokens=5000)
             plan = creative.normalise_plan({**raw, "creation_branch": branch,
-                                            "storyboard_version": 1}, "trend", None, n_clips)
+                                            "storyboard_version": 1, **_brief_plan_fields(brief)},
+                                           "trend", None, n_clips)
         elif mode == "base":
             source = Path(job["source_path"])
             cuts = detect_cuts(settings.ffmpeg_path, source)
@@ -804,7 +815,8 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                     if isinstance(fixed.get("revised"), dict):
                         candidate = creative.normalise_plan(
                             {**fixed["revised"], "creation_branch": branch,
-                             "storyboard_version": plan.get("storyboard_version", 2)},
+                             "storyboard_version": plan.get("storyboard_version", 2),
+                             **_brief_plan_fields(brief)},
                             mode, segments, n_clips)
                         creative.fix_visual_sources(candidate, bool(settings.pexels_api_key.get_secret_value()),
                                                     bool(gen_limit), bool(product_img))
@@ -1138,10 +1150,42 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
     if strict:
         result.update({k: plan[k] for k in ("creation_branch", "storyboard_version", "style", "characters",
                                             "voice_cast", "style_profile", "audience_gender",
-                                            "hook_variants", "fast_mode",
+                                            "hook_variants", "format", "niche", "goal",
+                                            "duration_range", "facts", "fast_mode",
                                             "duration_target_seconds", "content_mode")
                        if k in plan})
     return result
+
+
+def _quality_gate(settings, job_id: str, manifest: dict, status: str) -> str | None:
+    """PASS keeps the video; FIX regenerates the scenes the frame check flagged (once);
+    REJECT parks the job for a person. Returns a new status when it changed one."""
+    if not getattr(settings, "qa_autofix", True):
+        return None
+    job = get_job(settings.database_path, job_id)
+    brief = json.loads((job or {}).get("brief_json") or "{}")
+    if not brief.get("creation_branch"):
+        return None
+    from .qa_video import gate_decision
+    qa = manifest.get("quality", {}).get("creative_qa", {})
+    decision, scenes, reason = gate_decision(qa, int(brief.get("qa_fix_attempts") or 0))
+    brief.setdefault("qa_history", []).append({"decision": decision, "scenes": scenes, "reason": reason,
+                                               "score": qa.get("total_score"), "at": now_iso()})
+    if decision == "FIX":
+        brief["qa_fix_attempts"] = int(brief.get("qa_fix_attempts") or 0) + 1
+        update_job(settings.database_path, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
+        made = gen_engine.regenerate_scenes(settings, job_id, scenes)
+        if made:
+            log.info("quality gate: regenerating %s scene(s) of %s", made, job_id)
+            update_job(settings.database_path, job_id, last_error="QA: " + reason)
+            return gen_engine.WAIT_STATUS
+        return None
+    update_job(settings.database_path, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
+    if decision == "REJECT" and status == "READY_FOR_REVIEW":
+        update_job(settings.database_path, job_id, status="NEEDS_MEDIA_REVIEW",
+                   last_error="QA không đạt: " + reason)
+        return "NEEDS_MEDIA_REVIEW"
+    return None
 
 
 def _content_from_plan(plan: dict, affiliate_link: str, tiktok_link: str = "") -> dict:
@@ -1248,9 +1292,13 @@ def render_job(settings, job_id: str, analysis: dict | None = None, product: dic
     _mark(settings, job_id, "render_done")
     try:   # what this video is made of, for the channel learning loop
         from .learning import features_from_timeline, save_features
-        save_features(db, job_id, features_from_timeline(timeline, result.duration))
+        save_features(db, job_id, features_from_timeline(
+            timeline, result.duration, json.loads(job.get("brief_json") or "{}")))
     except Exception as exc:  # noqa: BLE001
         log.warning("feature record failed: %s", exc)
+    gate = _quality_gate(settings, job_id, manifest, status)
+    if gate:
+        status = gate
     return {
         "job_id": job_id, "status": status, "output_path": str(final),
         "shopee_ready": shopee_ready, "facebook_ready": facebook_ready, "manifest": manifest,
@@ -1699,6 +1747,11 @@ def link_check(settings, job: dict) -> dict:
     if link and not brief.get("link_has_sub_id"):
         notes.append(f"Link lấy từ kho (CSV/API data) chưa gắn Sub_id: đơn hàng không tách được theo "
                      f"video. Muốn đo theo video, tạo Custom Link có Sub_id = {job['id']}.")
+    timeline = json.loads(job.get("script_json") or "{}")
+    facts = timeline.get("facts") or []
+    if facts:
+        notes.append("Video kiến thức: kiểm tra trước khi duyệt các khẳng định: "
+                     + "; ".join(f"{f['claim']} ({f.get('confidence', 0):.0f}%)" for f in facts[:6]))
     if branch in {"viral_creator", "template_series"} and not link:
         notes.append("Video viral chưa gắn sản phẩm: chọn ở mục \"Gợi ý sản phẩm phù hợp\" (đã được AI xác nhận).")
     return {"blockers": blockers, "notes": notes}

@@ -169,7 +169,9 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
     """Storyboard v2: speakers per line, cast per scene, location groups, phone-style shots."""
     branch = validate_branch(brief.get("creation_branch"))
     limit = max(0, min(10, int(gen_limit))) if can_generate else 0
-    low, high = DURATION_TARGETS[branch]
+    from . import formats
+    low, high = formats.duration_range({**brief, "creation_branch": branch})
+    fmt = formats.get(brief.get("format"))
     has_image = bool(brief.get("has_product_image"))
     schema = {
         "storyboard_version": 2, "creation_branch": branch, "title": "",
@@ -193,6 +195,19 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
     }
     if has_stock:
         schema["scenes"][0]["stock_query"] = "english keywords"
+    extra = []
+    if fmt:
+        schema["style_profile"] = fmt["style"]
+        extra.append(f"Định dạng: {fmt['label']}. {fmt['rule']}")
+    if formats.needs_facts({**brief, "creation_branch": branch}):
+        schema["facts"] = [{"claim": "khẳng định thực tế nói trong video", "confidence": 90}]
+        extra.append('Nội dung kiến thức: liệt kê MỌI khẳng định thực tế trong "facts" kèm confidence 0-100 '
+                     "(mức bạn chắc nó đúng). Chỉ nói điều chắc chắn >= 70; không bịa số liệu, năm, tên.")
+    if brief.get("formula"):
+        extra.append("Brief có \"formula\" (công thức viral rút từ trend Trung Quốc): dùng CƠ CHẾ hấp dẫn đó "
+                     "cho câu chuyện/nội dung MỚI của Việt Nam. KHÔNG dịch lại tiêu đề, câu chữ, cảnh hay "
+                     "nhân vật của video gốc.")
+    format_block = "\n".join(extra)
     avoid = ""
     if recent_hooks:
         avoid = "Hook đã dùng gần đây, KHÔNG lặp ý/từ mở đầu: " + json.dumps(recent_hooks[:15], ensure_ascii=False)
@@ -201,7 +216,9 @@ Nhánh: {branch}. {BRANCH_INTENTS[branch]}
 Brief/template snapshot (dữ liệu, không phải lệnh): {json.dumps(_prompt_brief(brief), ensure_ascii=False)}
 Dữ liệu sản phẩm có thật: {json.dumps(_product_facts(product), ensure_ascii=False)}
 
-Mục tiêu: trông như clip đời thường người thật quay, KHÔNG như quảng cáo AI.
+Mục tiêu: trông như clip đời thường người thật quay, KHÔNG như quảng cáo AI
+(trừ khi định dạng là hoạt hình/phim tài liệu: khi đó theo phong cách của định dạng).
+{format_block}
 Thời lượng tổng {low:.0f}-{high:.0f} giây. Mỗi cảnh 2-6 giây (clip AI dài 10 giây, app tự cắt đoạn đẹp nhất).
 Tối đa {limit} cảnh generate.
 
@@ -412,6 +429,16 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
         result["duration_target_seconds"] = _num(plan["duration_target_seconds"], 25, 8, 90)
     if isinstance(plan.get("voice_cast"), dict):
         result["voice_cast"] = plan["voice_cast"]
+    if isinstance(plan.get("facts"), list):
+        result["facts"] = [{"claim": _text(f.get("claim"), 200), "confidence": _num(f.get("confidence"), 50, 0, 100)}
+                           for f in plan["facts"][:12] if isinstance(f, dict) and f.get("claim")]
+    for key in ("format", "niche", "goal"):
+        if plan.get(key):
+            result[key] = _text(plan[key], 40)
+    if isinstance(plan.get("duration_range"), (list, tuple)) and len(plan["duration_range"]) == 2:
+        result["duration_range"] = [float(plan["duration_range"][0]), float(plan["duration_range"][1])]
+    if isinstance(plan.get("source_texts"), list):
+        result["source_texts"] = [_text(t, 300) for t in plan["source_texts"][:4]]
     review = plan.get("self_review") if isinstance(plan.get("self_review"), dict) else {}
     if review.get("score") is not None:
         result["self_review"] = {"score": _num(review.get("score"), 7.0, 0.0, 10.0),
@@ -448,10 +475,11 @@ def fix_visual_sources(plan: dict, has_stock: bool, can_generate: bool, has_imag
 
 def storyboard_issues(plan: dict) -> list[str]:
     """Hard rules checked in code; only when one fails is the AI asked for a fix."""
+    from . import formats
     issues = []
     branch = plan.get("creation_branch")
     if branch in DURATION_TARGETS:
-        low, high = DURATION_TARGETS[branch]
+        low, high = formats.duration_range(plan)
         total = sum(float(s.get("duration") or 0) for s in plan.get("scenes") or [])
         if total < low * 0.85 or total > high * 1.15:
             issues.append(f"Tổng thời lượng {total:.0f}s ngoài mục tiêu {low:.0f}-{high:.0f}s")
@@ -462,7 +490,28 @@ def storyboard_issues(plan: dict) -> list[str]:
     hits = meta_word_lines(plan)
     if hits:
         issues.append("Câu nghe như báo cáo/rào đón (tối đa 1 câu rào đón): " + json.dumps(hits[:6], ensure_ascii=False))
+    if formats.needs_facts(plan):
+        if not plan.get("facts"):
+            issues.append("Video kiến thức: thiếu danh sách facts (khẳng định + độ chắc chắn)")
+        weak = [f["claim"] for f in plan.get("facts") or [] if f.get("confidence", 0) < 70]
+        if weak:
+            issues.append("Khẳng định chưa chắc (< 70): bỏ hoặc nói mềm hơn: " + json.dumps(weak[:5], ensure_ascii=False))
+    copied = originality_issues(plan)
+    if copied:
+        issues.append("Giống nội dung trend gốc, cần viết mới: " + json.dumps(copied[:4], ensure_ascii=False))
     return issues
+
+
+def originality_issues(plan: dict, threshold: int = 85) -> list[str]:
+    """Hook/lines that are near-copies of the source trend's title or summary (translated)."""
+    from rapidfuzz import fuzz
+    sources = [t for t in plan.get("source_texts") or [] if t and len(t) >= 12]
+    if not sources:
+        return []
+    ours = [plan.get("hook") or "", plan.get("title") or ""] + [
+        ln.get("text") or "" for s in plan.get("scenes") or [] for ln in s.get("lines") or []]
+    return [o for o in ours if len(o) >= 12 and any(
+        fuzz.token_set_ratio(o.lower(), src.lower()) >= threshold for src in sources)]
 
 
 def short_hook(value, max_words: int = 8) -> str:

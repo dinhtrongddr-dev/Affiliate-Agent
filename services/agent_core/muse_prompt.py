@@ -122,6 +122,11 @@ def strip_internal(prompt: str) -> str:
 
 def character_sheet_prompt(character: dict, plan: dict, override_style: str | None = None) -> str:
     style = style_profiles.get(plan.get("style_profile"), plan.get("creation_branch"), override_style)
+    if style["name"] == "animated_3d":
+        return _clip(
+            "Vertical 3D animated character sheet: one cute stylised character, full body, front view, "
+            f"plain light background, soft colourful light. {_person(character)}. "
+            f"{style['avoid']}.", MAX_CHARS) + f"\n{INTERNAL}cast:{character['id']}"
     if is_animal(character):
         return _clip(
             "Vertical photo of one real animal, whole body clearly visible, standing on a plain floor "

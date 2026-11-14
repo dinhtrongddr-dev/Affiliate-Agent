@@ -654,6 +654,26 @@ def retry_task(settings, tid: str) -> str | None:
     return new
 
 
+def regenerate_scenes(settings, job_id: str, scene_indexes: list[int]) -> int:
+    """Quality gate: make the clip of each listed scene again (new attempt, same prompt/refs).
+    Scenes that reuse another scene's clip regenerate that source clip instead."""
+    db = settings.database_path
+    tasks = [t for t in list_tasks(db, job_id, 10000) if t["kind"] == "video"]
+    made = 0
+    for index in sorted(set(scene_indexes)):
+        mine = sorted((t for t in tasks if t["scene_index"] == index), key=lambda t: t["attempt"])
+        if not mine or mine[-1]["status"] in ACTIVE:
+            continue
+        last = mine[-1]
+        _insert(db, job_id=job_id, scene_index=index, kind="video", provider=last["provider"],
+                prompt=last["prompt"], refs=last["refs"], duration=last["duration"], depends_on=None,
+                attempt=last["attempt"] + 1)
+        made += 1
+    if made:
+        update_job(db, job_id, status=WAIT_STATUS)
+    return made
+
+
 def cancel_task(settings, tid: str) -> bool:
     t = get_task(settings.database_path, tid)
     if not t or t["status"] not in ACTIVE:

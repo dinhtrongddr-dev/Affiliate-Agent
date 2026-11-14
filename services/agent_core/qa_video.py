@@ -55,8 +55,10 @@ Chấm 0-10 (10 = tốt nhất), null nếu không áp dụng:
 - subtitle_readable: phụ đề đọc được, không chồng dòng, không che mặt
 - phone_realism: trông như clip người thật quay bằng điện thoại (10) hay quảng cáo AI bóng bẩy (0)
 - hook_stop_power: khung hook có khiến người lướt dừng lại không
+- bad_frames: số thứ tự các ảnh (1, 2, ...) có lỗi hình nặng cần làm lại: mặt/tay méo, đổi người,
+  sai sản phẩm, vật thể biến dạng. Không liệt kê lỗi nhỏ.
 Trả DUY NHẤT JSON: {{"face_consistency":8,"wardrobe_consistency":8,"product_match":null,"artifacts":9,
-"subtitle_readable":9,"phone_realism":7,"hook_stop_power":6,"issues":["lỗi cụ thể bằng tiếng Việt"]}}"""
+"subtitle_readable":9,"phone_realism":7,"hook_stop_power":6,"bad_frames":[],"issues":["lỗi cụ thể bằng tiếng Việt"]}}"""
 
 
 def visual_check(settings, video: Path, timeline: dict, scene_report: list[dict],
@@ -87,7 +89,40 @@ def visual_check(settings, video: Path, timeline: dict, scene_report: list[dict]
         except (TypeError, ValueError):
             result[key] = None
     result["issues"] = [str(i)[:200] for i in (raw.get("issues") or [])[:8]]
+    # image 1 is the hook frame (scene 0 at 0.8 s); image k >= 2 is the middle of scene k-2
+    bad = set()
+    for value in raw.get("bad_frames") or []:
+        try:
+            k = int(value)
+        except (TypeError, ValueError):
+            continue
+        if k == 1:
+            bad.add(0)
+        elif 2 <= k <= len(frames):
+            bad.add(k - 2)
+    result["bad_scenes"] = sorted(i for i in bad if i < len(scene_report))
     return result
+
+
+FIX_LIMIT = 1   # automatic repair rounds per video; after that a person decides
+
+
+def gate_decision(qa: dict, fix_attempts: int) -> tuple[str, list[int], str]:
+    """PASS / FIX (regenerate listed scenes once) / REJECT (person must look), with a reason."""
+    visual = qa.get("visual") or {}
+    bad = list(visual.get("bad_scenes") or [])
+    if "wrong_product" in (qa.get("gates") or []) and not bad:
+        return "REJECT", [], "Sản phẩm trong video không khớp sản phẩm thật"
+    if qa.get("status") in ("PRIORITY_PUBLISH", "CONDITIONAL_PASS") and not bad:
+        return "PASS", [], "Đạt QA"
+    if bad and fix_attempts < FIX_LIMIT:
+        return "FIX", bad, f"Tạo lại {len(bad)} cảnh lỗi hình"
+    reasons = "; ".join((qa.get("improvements") or [])[:3]) or "Điểm QA thấp"
+    if bad:   # already repaired once and frames are still broken: a person decides
+        return "REJECT", [], f"Cảnh {', '.join(str(i + 1) for i in bad)} vẫn lỗi hình sau khi làm lại; " + reasons
+    if qa.get("status") == "NEEDS_REVISION" and not (qa.get("gates") or []):
+        return "PASS", [], "Đạt có điều kiện: " + reasons
+    return "REJECT", [], reasons
 
 
 def subtitle_overlaps(ass_path: Path | None) -> int:
@@ -118,7 +153,8 @@ def score_video(timeline: dict, scene_report: list[dict], duration: float, music
                 visual: dict | None, ai_review: float | None, ass_path: Path | None,
                 tech_passed: bool = True) -> dict:
     branch = timeline.get("creation_branch") or ""
-    low, high = DURATION_TARGETS.get(branch, (12.0, 45.0))
+    from .formats import duration_range
+    low, high = duration_range(timeline) if branch else DURATION_TARGETS.get(branch, (12.0, 45.0))
     issues, gates = [], []
 
     # measured facts (30)
