@@ -27,7 +27,8 @@ def test_suri_default_is_versioned_three_person_family_and_independent_snapshot(
     assert [c["id"] for c in template["characters"]] == ["father", "mother", "suri"]
     assert template["characters"][2]["age"] == "4"
     # phone/vlog look instead of "photorealistic" (phase 1: UGC realism)
-    assert "family vlog" in template["style"] and "Photorealistic" not in template["style"]
+    # series default: cute chibi 3D animation
+    assert "chibi 3D" in template["style"] and "Photorealistic" not in template["style"]
     assert [c["gender"] for c in template["characters"]] == ["male", "female", "female"]
     template["characters"][2]["name"] = "Changed"
     assert SURI_FAMILY["characters"][2]["name"] == "Suri"

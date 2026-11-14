@@ -44,6 +44,9 @@ def visual_prompt(timeline: dict, n_frames: int, has_product_ref: bool, spoken: 
             for c in timeline.get("characters") or []]
     product_note = (f"Ảnh cuối cùng (ảnh {n_frames + 1}) là ảnh sản phẩm thật; so sản phẩm trong video với ảnh đó."
                     if has_product_ref else "Không có ảnh sản phẩm tham chiếu: product_match = null.")
+    from .style_profiles import get as _style
+    _st = _style(timeline.get("style_profile"), timeline.get("creation_branch"))
+    style_note = f"{_st['label']}: {_st['look'][:120]}"
     return f"""Bạn là QA video ngắn khó tính. Ảnh 1 là khung hook (giây 0.8), các ảnh sau là giữa từng cảnh theo thứ tự.
 Nhân vật dự kiến: {json.dumps(cast, ensure_ascii=False)}
 {product_note}
@@ -53,7 +56,8 @@ Chấm 0-10 (10 = tốt nhất), null nếu không áp dụng:
 - product_match: sản phẩm trong video có đúng sản phẩm thật không
 - artifacts: 10 = không có tay/mặt méo, chữ rác, logo lạ, vật thể biến dạng
 - subtitle_readable: phụ đề đọc được, không chồng dòng, không che mặt
-- phone_realism: trông như clip người thật quay bằng điện thoại (10) hay quảng cáo AI bóng bẩy (0)
+- phone_realism: hình có đúng phong cách mong muốn ({style_note}) và trông chuyên nghiệp, không méo,
+  không "nhựa" kiểu AI rẻ tiền (10) hay lệch phong cách / rung lắc / kém (0)
 - hook_stop_power: khung hook có khiến người lướt dừng lại không
 - speech_match: hình mỗi cảnh có minh hoạ đúng câu đang được đọc lúc đó không (null nếu không có lời).
   Câu đọc ở mỗi ảnh (ảnh 1 = hook, ảnh 2.. = các cảnh): {json.dumps(spoken or [], ensure_ascii=False)[:1500]}

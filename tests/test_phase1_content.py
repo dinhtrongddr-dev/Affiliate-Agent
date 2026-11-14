@@ -237,3 +237,22 @@ def test_tts_cache_reuses_lines(tmp_path, monkeypatch):
     voice_track.cached_tts(s, "Xin chào", "Đức Trí", tmp_path / "c.wav")
     assert calls == ["Xin chào", "Xin chào"] and b.duration == a.duration == 1.5
     assert (tmp_path / "b.wav").read_bytes() == b"wav"
+
+
+def test_professional_defaults_subject_shots_and_chibi_series():
+    from agent_core import style_profiles
+    assert style_profiles.resolve(None, "viral_creator") == "pro_social"
+    assert style_profiles.resolve(None, "product_review") == "pro_social"
+    assert style_profiles.resolve(None, "template_series") == "chibi_3d"
+    plan = _plan()
+    plan["style_profile"] = "pro_social"
+    subject = {"visual": "generate", "cast": [], "shot": {"action": "Mangrove breathing roots rise from mud",
+                                                         "camera": "macro close-up, slow push-in"}}
+    text = muse_prompt.compile_shot(subject, plan, [])
+    assert "No people in frame" in text and "Mẹ" not in text and "Minh" not in text
+    assert text.index("macro close-up") < text.index("gimbal")          # shot's own camera first
+    assert "shaky" in text and "handheld" in text                       # only in the avoid list
+    one = {**plan, "characters": [plan["characters"][0]]}
+    assert "People:" not in muse_prompt.compile_shot(subject, one, [])  # no auto-added host
+    sheet = muse_prompt.character_sheet_prompt(plan["characters"][2], {**plan, "style_profile": "chibi_3d"})
+    assert "chibi 3D" in sheet and "real Vietnamese person" not in sheet

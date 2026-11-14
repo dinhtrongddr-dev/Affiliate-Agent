@@ -29,9 +29,8 @@ def scene_cast(scene: dict, plan: dict) -> list[dict]:
     if "cast" not in scene:          # storyboard v1: no per-scene cast, keep the whole cast
         ids = list(chars)
     else:
+        # an explicit empty cast means "nobody on screen" (the subject is the shot)
         ids = [cid for cid in scene.get("cast") or [] if cid in chars]
-        if not ids and len(chars) == 1 and not scene.get("hands_only"):
-            ids = list(chars)
     return [chars[cid] for cid in ids[:3]]
 
 
@@ -57,7 +56,9 @@ def compile_shot(scene: dict, plan: dict, references: list[dict] | None = None,
     shot = scene.get("shot") or {}
     style = style_profiles.get(plan.get("style_profile"), plan.get("creation_branch"), override_style)
     parts = [f"Vertical 9:16 video, one continuous {int(duration)}-second take."]
-    parts.append(_clip(f"Camera: {style['camera']}. {shot.get('camera') or ''}", 260))
+    # this shot's own size/angle/move first, the house style after it (trimmed if long)
+    own = str(shot.get("camera") or "").strip()
+    parts.append(_clip((f"Camera: {own}. Style: " if own else "Camera: ") + style["camera"], 320))
 
     cast = scene_cast(scene, plan)
     attach = {r["role"].split(":", 1)[1]: i for i, r in enumerate(references, 1)
@@ -70,6 +71,8 @@ def compile_shot(scene: dict, plan: dict, references: list[dict] | None = None,
         parts.append("People: " + " | ".join(who) + ". Keep each face, hairstyle and outfit identical.")
     elif scene.get("hands_only"):
         parts.append("Only realistic hands are visible, no face.")
+    elif "cast" in scene:
+        parts.append("No people in frame: the subject of the action itself fills the frame.")
 
     action = shot.get("action") or scene.get("gen_prompt") or ""
     parts.append("Action: " + _clip(action, 320))
@@ -122,10 +125,12 @@ def strip_internal(prompt: str) -> str:
 
 def character_sheet_prompt(character: dict, plan: dict, override_style: str | None = None) -> str:
     style = style_profiles.get(plan.get("style_profile"), plan.get("creation_branch"), override_style)
-    if style["name"] == "animated_3d":
+    if style_profiles.is_animated(style["name"]):
+        kind = "chibi 3D" if style["name"] == "chibi_3d" else "3D animated"
         return _clip(
-            "Vertical 3D animated character sheet: one cute stylised character, full body, front view, "
-            f"plain light background, soft colourful light. {_person(character)}. "
+            f"Vertical {kind} character sheet: one cute stylised character, full body, front view, "
+            "big head and small rounded body, expressive eyes, plain light background, soft colourful "
+            f"light. {_person(character)}. Personality: {character.get('personality') or ''}. "
             f"{style['avoid']}.", MAX_CHARS) + f"\n{INTERNAL}cast:{character['id']}"
     if is_animal(character):
         return _clip(
@@ -134,7 +139,7 @@ def character_sheet_prompt(character: dict, plan: dict, override_style: str | No
             f"{_person(character)}. Keep markings, colour and size exactly as described. "
             f"{style['avoid']}.", MAX_CHARS) + f"\n{INTERNAL}cast:{character['id']}"
     return _clip(
-        "Vertical photo, waist-up portrait of one real Vietnamese person facing the camera, "
-        "plain light wall behind, taken with a smartphone in natural window light, "
+        "Vertical professional portrait, waist-up, one real Vietnamese person facing the camera, "
+        "plain light backdrop, soft natural key light, sharp focus, "
         f"real skin texture. {_person(character)}. Personality: {character.get('personality') or ''}. "
         f"{style['avoid']}.", MAX_CHARS) + f"\n{INTERNAL}cast:{character['id']}"

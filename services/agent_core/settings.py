@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     videogen_continuity_chain: bool = True   # takes of one sequence continue from the last frame
     voice_led: bool = True                    # narration is the spine: cuts follow the voice track
     videogen_parallel: int = 6               # Muse clips in flight at once
-    style_profile: str = ""                   # ugc_phone | sitcom_bright | cinematic; empty = by branch
+    style_profile: str = ""                   # pro_social | documentary | chibi_3d | ugc_phone | cinematic; empty = by branch
     use_listing_images: bool = True           # product listing photos (data API) may be used as references
     voice_revoice: bool = True                # fit TTS lines to the mouth movement of talking AI shots
     lipsync_provider: str = "none"            # none | (future) sync.so / fal LatentSync for talking shots

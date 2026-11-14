@@ -178,7 +178,7 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
         "hook": "chữ hook 0-2 giây, <= 7 từ, viết thường có hoa đầu câu, không emoji",
         "hook_variants": ["hook kiểu khác 1 (<= 7 từ)", "hook kiểu khác 2 (<= 7 từ)"],
         "content_mode": "affiliate" if branch == "product_review" else "viral",
-        "style_profile": "ugc_phone|sitcom_bright", "music_mood": "funny|emotional|chill|upbeat",
+        "style_profile": "pro_social|documentary|chibi_3d|ugc_phone", "music_mood": "funny|emotional|chill|upbeat",
         "audience_gender": "female|male|unisex (đối tượng dùng sản phẩm; viral để unisex)",
         "duration_target_seconds": int((low + high) / 2),
         "characters": [{"id": "me", "name": "", "role": "creator|mother|father|daughter|friend",
@@ -190,7 +190,8 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
                     "cast": ["me"], "talking": False, "product_visible": False, "hands_only": False,
                     "lines": [{"speaker": "narrator", "text": "câu tiếng Việt đời thường"}],
                     "shot": {"action": "English, đúng 1 hành động", "setting": "English, bối cảnh Việt Nam cụ thể",
-                             "camera": "English, góc điện thoại", "lighting": "", "emotion": "", "sound": ""},
+                             "camera": "English: shot size + angle + move, e.g. 'macro close-up, slow push-in'",
+                             "lighting": "", "emotion": "", "sound": ""},
                     "reference_ids": [], "pause": False, "reuse_of": None}],
         "cta": "", "caption": "", "hashtags": ["#..."], "facebook_description": "", "cover_ratio": .1,
         "affiliate_keywords": [], "self_review": {"score": 8.0, "issues": []},
@@ -257,7 +258,14 @@ Nhân vật và giọng:
   audience_gender theo người dùng sản phẩm (đồ nữ=female, đồ nam=male, đồ chung=unisex).
 - Trẻ em có age thật (vd "4"); không cho trẻ làm việc nguy hiểm.
 
-Hình ảnh:
+Hình ảnh (quay chuyên nghiệp, KHÔNG kiểu điện thoại cầm tay):
+- Hình phải minh hoạ đúng điều đang nói. Chủ đề là vật, cây, con vật, món ăn, quy trình hay kiến thức
+  thì cảnh là CHÍNH THỨ ĐÓ: toàn cảnh -> cận -> macro chi tiết -> mặt cắt/sơ đồ động khi giải thích
+  cơ chế. Những cảnh đó để "cast": [] (không có người). Người dẫn chỉ ở hook/kết, tối đa 2 cảnh.
+- shot.camera mỗi cảnh ghi cỡ cảnh + góc + chuyển động (wide establishing, medium, close-up, macro,
+  top-down, low angle, slow push-in, slide, orbit...). Hai cảnh liền nhau KHÔNG cùng cỡ cảnh.
+- style_profile: pro_social (mặc định), documentary (kiến thức/thiên nhiên), chibi_3d (series),
+  ugc_phone chỉ khi brief yêu cầu quay kiểu điện thoại.
 - shot.* viết tiếng Anh ngắn gọn, mỗi shot ĐÚNG MỘT hành động; bối cảnh Việt Nam đời thường cụ thể.
 - Không viết "cinematic", "photorealistic", "studio", "slow motion"; app tự thêm phong cách quay điện thoại.
 - "product_visible": true chỉ khi {"có ảnh sản phẩm để Muse bám theo" if has_image else "KHÔNG có ảnh sản phẩm: luôn false, cảnh sản phẩm phải là product_image/card hoặc tay cầm không thấy nhãn"}.

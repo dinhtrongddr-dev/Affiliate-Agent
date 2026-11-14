@@ -46,8 +46,9 @@ def normalise_characters(value) -> list[dict]:
 
 SURI_FAMILY = {
     "id": "suri-family", "version": 1, "title": "Gia đình Suri",
-    "style": "Real faces, skin, hair, fabric and an everyday Vietnamese home filmed like a family vlog; "
-             "playful family comedy through expressions, timing and harmless exaggeration.",
+    "style": "Cute chibi 3D animation: big heads, small rounded bodies, huge expressive eyes, cosy "
+             "Vietnamese family home; playful family comedy through expressions, timing and harmless "
+             "exaggeration.",
     "characters": [
         {"id": "father", "name": "Bố", "role": "father", "gender": "male", "age": "35",
          "personality": "Warm, overconfident, affectionate; comic plans backfire harmlessly."},

@@ -15,15 +15,15 @@ _ID = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 _RIGHTS = {'owned', 'licensed', 'permission', 'official'}
 _BUILTIN = {
     'id': 'suri-family', 'label': 'Gia đình Suri', 'version': 1,
-    'style': 'Hoạt hình 3D chân thực, vật liệu và ánh sáng tự nhiên, biểu cảm sinh động; '
-             'hài gia đình ấm áp, nhịp kể rõ ràng, giữ tạo hình nhất quán qua các tập.',
+    'style': 'Hoạt hình chibi 3D dễ thương: đầu to, thân nhỏ tròn, mắt to biểu cảm, chất liệu mềm, '
+             'ánh sáng ấm; hài gia đình ấm áp, nhịp kể rõ ràng, giữ tạo hình nhất quán qua các tập.',
     'setting': 'Gia đình Việt hiện đại trong ngôi nhà ấm cúng; không gian sinh hoạt đời thường.',
     'characters': [
-        {'id': 'suri', 'name': 'Suri', 'age': 4,
+        {'id': 'suri', 'name': 'Suri', 'age': 4, 'gender': 'female', 'role': 'daughter',
          'description': 'Bé gái 4 tuổi tò mò, lanh lợi, tinh nghịch đáng yêu; phản ứng hồn nhiên.'},
-        {'id': 'mother', 'name': 'Mẹ Suri', 'age': 30,
+        {'id': 'mother', 'name': 'Mẹ Suri', 'age': 30, 'gender': 'female', 'role': 'mother',
          'description': 'Người mẹ gần gũi, nhanh trí, biểu cảm hài hước và ấm áp.'},
-        {'id': 'father', 'name': 'Bố Suri', 'age': 32,
+        {'id': 'father', 'name': 'Bố Suri', 'age': 32, 'gender': 'male', 'role': 'father',
          'description': 'Người bố vui tính, hơi vụng về, quan tâm gia đình.'},
     ],
     'continuity_rules': ['Giữ nguyên danh tính, tuổi, khuôn mặt và tỷ lệ cơ thể từng nhân vật.',

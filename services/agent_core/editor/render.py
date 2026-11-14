@@ -245,7 +245,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
 
     cast = timeline.get("voice_cast") or {}
     style = str(timeline.get("style_profile") or "")
-    hard_cuts = style in {"ugc_phone", "sitcom_bright"}
+    hard_cuts = style in {"ugc_phone", "sitcom_bright", "pro_social", "documentary", "chibi_3d"}
     trans = 0.08 if hard_cuts else settings.transition_seconds
 
     voice_led = bool(getattr(settings, "voice_led", True) and timeline.get("creation_branch"))

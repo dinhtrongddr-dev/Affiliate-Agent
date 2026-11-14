@@ -1,10 +1,35 @@
 """Visual style profiles for AI clips (Muse) and editing.
 
-The default is ``ugc_phone``: footage that looks filmed on a phone by a real person, because
-short-video viewers scroll past clips that look like a polished AI advert.
+Default is ``pro_social``: deliberate, stable, well-composed shots that change size and angle
+from shot to shot (the owner found the shaky phone look tiring). ``ugc_phone`` stays available
+as an explicit choice. Series default to cute chibi 3D animation.
 """
 
 PROFILES: dict[str, dict] = {
+    "pro_social": {
+        "label": "Quay chuyên nghiệp (mặc định)",
+        "camera": "Professional short-video cinematography on a gimbal, slider or tripod: deliberate "
+                  "shot size for this beat, slow purposeful move (push-in, slide, orbit or tilt), "
+                  "rule-of-thirds composition, shallow depth of field on details, rock-steady frame",
+        "light": "soft natural key light with gentle contrast and clean highlights",
+        "look": "crisp true-to-life colours, realistic textures, tidy modern Vietnamese setting, "
+                "polished but believable, not a plastic AI look",
+        "avoid": "no shaky handheld, no selfie angle, no phone-camera look, no on-screen text, "
+                 "no subtitles, no logos, no watermark, no warped hands or faces",
+        "transition": "cut",
+    },
+    "chibi_3d": {
+        "label": "Hoạt hình chibi 3D",
+        "camera": "Animated 3D film camera: smooth dolly and crane moves, varied shot sizes "
+                  "(wide establishing, medium, expressive close-up), clean staging",
+        "light": "soft global illumination, warm rim light, vibrant pastel colours",
+        "look": "cute chibi 3D animation like a modern animated feature: big heads, small rounded "
+                "bodies, huge expressive eyes, smooth stylised materials, cosy detailed Vietnamese "
+                "home and street sets, characters identical in every shot",
+        "avoid": "no photorealistic humans, no live action, no on-screen text, no subtitles, no logos, "
+                 "no watermark",
+        "transition": "cut",
+    },
     "ugc_phone": {
         "label": "Quay điện thoại đời thường",
         "camera": "Filmed on a smartphone held in hand, slight natural handheld shake, eye level "
@@ -27,12 +52,15 @@ PROFILES: dict[str, dict] = {
         "transition": "cut",
     },
     "documentary": {
-        "label": "Phóng sự / tài liệu",
-        "camera": "Observational documentary camera, steady handheld, close details of hands and objects, "
-                  "natural pauses",
-        "light": "available natural light of the real place",
-        "look": "real workshop, street or home in Vietnam, honest textures, no staging",
-        "avoid": "no on-screen text, no subtitles, no logos, no watermark, no glossy advert look",
+        "label": "Phim tài liệu / kiến thức",
+        "camera": "Nature and science documentary cinematography: stabilised slow dolly, top-down and "
+                  "low angles, macro lens on the subject's details, cutaway or cross-section views "
+                  "when explaining how something works; the subject fills the frame",
+        "light": "beautiful natural light of the real place, golden hour when outdoors",
+        "look": "rich realistic detail like a BBC-style documentary, true colours, the topic itself is "
+                "the hero of every shot",
+        "avoid": "no shaky handheld, no on-screen text, no subtitles, no logos, no watermark, "
+                 "no people unless the shot is about them",
         "transition": "cut",
     },
     "animated_3d": {
@@ -53,16 +81,21 @@ PROFILES: dict[str, dict] = {
     },
 }
 
-BRANCH_DEFAULT = {"viral_creator": "ugc_phone", "product_review": "ugc_phone",
-                  "template_series": "sitcom_bright"}
+BRANCH_DEFAULT = {"viral_creator": "pro_social", "product_review": "pro_social",
+                  "template_series": "chibi_3d"}
+ANIMATED = {"chibi_3d", "animated_3d"}
+
+
+def is_animated(name: str | None) -> bool:
+    return str(name or "") in ANIMATED
 
 
 def resolve(name: str | None, branch: str | None = None, override: str | None = None) -> str:
     """Owner override (settings) > storyboard choice > branch default."""
-    for candidate in (override, name, BRANCH_DEFAULT.get(branch or ""), "ugc_phone"):
+    for candidate in (override, name, BRANCH_DEFAULT.get(branch or ""), "pro_social"):
         if candidate and candidate in PROFILES:
             return candidate
-    return "ugc_phone"
+    return "pro_social"
 
 
 def get(name: str | None, branch: str | None = None, override: str | None = None) -> dict:
