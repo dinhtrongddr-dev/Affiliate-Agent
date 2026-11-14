@@ -89,6 +89,63 @@ class AIClient:
             )
         return {"role": "assistant", "content": text, "raw": payload}
 
+    # Long replies (storyboards with extended thinking) can take longer than any sane
+    # request timeout. Streaming keeps the connection alive; the timeout then only
+    # applies to silence between chunks, with a hard cap on the whole call.
+    STREAM_MIN_TOKENS = 4000
+    STREAM_IDLE_SECONDS = 240
+    STREAM_TOTAL_SECONDS = 1500
+
+    def _openai_stream(self, url, headers, body):
+        import json
+        import time
+        parts: list[str] = []
+        started = time.monotonic()
+        timeout = httpx.Timeout(self.STREAM_IDLE_SECONDS, connect=30)
+        try:
+            with httpx.stream("POST", url, headers=headers, json={**body, "stream": True},
+                              timeout=timeout) as response:
+                if response.status_code in (400, 404, 415, 422, 501):
+                    return None  # gateway does not stream: fall back to a normal request
+                if response.status_code == 401:
+                    raise AIClientError(
+                        "AI endpoint returned 401. Verify the local API key in the local .env file.")
+                if response.is_error:
+                    response.read()
+                    raise AIClientError(
+                        f"AI endpoint returned HTTP {response.status_code}: {response.text[:500]}")
+                if "text/event-stream" not in response.headers.get("content-type", ""):
+                    response.read()
+                    payload = response.json()
+                    message = ((payload.get("choices") or [{}])[0].get("message") or {})
+                    if not message.get("content"):
+                        raise AIClientError("OpenAI-compatible endpoint returned an empty message")
+                    return message
+                for line in response.iter_lines():
+                    if time.monotonic() - started > self.STREAM_TOTAL_SECONDS:
+                        raise AIClientError("AI endpoint unavailable: stream exceeded total time limit")
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except ValueError:
+                        continue
+                    if chunk.get("error"):
+                        raise AIClientError(f"AI endpoint stream error: {str(chunk['error'])[:300]}")
+                    for choice in chunk.get("choices") or []:
+                        piece = (choice.get("delta") or {}).get("content")
+                        if piece:
+                            parts.append(piece)
+        except httpx.HTTPError as exc:
+            raise AIClientError(f"AI endpoint unavailable: {exc}") from exc
+        content = "".join(parts)
+        if not content:
+            raise AIClientError("OpenAI-compatible endpoint returned an empty message")
+        return {"role": "assistant", "content": content}
+
     def _openai_chat(self, messages, temperature, max_tokens):
         url = f"{self.base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}"}
@@ -100,6 +157,10 @@ class AIClient:
         }
         if self.thinking_effort:
             body["thinking_effort"] = self.thinking_effort
+        if max_tokens >= self.STREAM_MIN_TOKENS:
+            streamed = self._openai_stream(url, headers, body)
+            if streamed is not None:
+                return streamed
         try:
             response = httpx.post(url, headers=headers, json=body, timeout=self.timeout)
         except httpx.HTTPError as exc:

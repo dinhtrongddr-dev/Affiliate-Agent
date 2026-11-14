@@ -122,3 +122,31 @@ def test_prompt_asks_for_script_first_and_sequences():
     prompt = creative.branch_plan_prompt(normalise_brief("viral_creator"), {}, True, False)
     assert '"script"' in prompt and '"takeaway"' in prompt and "CHUỖI CẢNH" in prompt
     assert "MỘT TAKE CHO 2 NHỊP" in prompt and "2,6 từ/giây" in prompt
+
+
+def test_long_ai_call_retries_once_with_light_thinking():
+    from types import SimpleNamespace
+
+    from agent_core import workflow
+    from agent_core.ai_client import AIClientError
+
+    class Fake:
+        timeout, thinking_effort, calls = 180, "extended", []
+
+        def chat(self, messages, temperature=0.2, max_tokens=1600):
+            self.calls.append(self.thinking_effort)
+            if self.thinking_effort:
+                raise AIClientError("AI endpoint returned HTTP 500: Internal Server Error")
+            return {"role": "assistant", "content": '{"ok": 1}'}
+
+    client = Fake()
+    out = workflow._ask_json(client, SimpleNamespace(ai_protocol="openai"), "p", max_tokens=5000)
+    assert out == {"ok": 1} and client.calls == ["extended", ""]
+    assert client.thinking_effort == "extended" and client.timeout == 180
+    short = Fake()
+    short.calls = []
+    try:
+        workflow._ask_json(short, SimpleNamespace(ai_protocol="openai"), "p", max_tokens=1200)
+        raise AssertionError("short calls must not be retried here")
+    except AIClientError:
+        assert short.calls == ["extended"]

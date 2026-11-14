@@ -193,6 +193,12 @@ def _repair_json_locally(raw: str) -> dict | None:
     return None
 
 
+def _transient_ai_error(exc: Exception) -> bool:
+    text = str(exc)
+    return any(k in text for k in ("timed out", "unavailable", "HTTP 500", "HTTP 502", "HTTP 503",
+                                   "HTTP 504", "stream error", "UPSTREAM", "total time limit"))
+
+
 def _ask_json(client: AIClient, settings, prompt: str, images: list[Path] | None = None,
               temperature: float = 0.4, max_tokens: int = 2400) -> dict:
     messages = (_image_messages(prompt, images, settings.ai_protocol) if images
@@ -200,9 +206,22 @@ def _ask_json(client: AIClient, settings, prompt: str, images: list[Path] | None
     # Long storyboard replies with extended thinking need more than the default timeout.
     base_timeout = getattr(client, "timeout", None)
     if isinstance(base_timeout, (int, float)) and max_tokens >= 4000:
-        client.timeout = max(base_timeout, 420)
+        client.timeout = max(base_timeout, 600)   # fallback when the gateway does not stream
     try:
-        reply = client.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        try:
+            reply = client.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        except AIClientError as exc:
+            # Long replies with extended thinking are the ones the upstream web session
+            # drops (timeouts, 5xx, broken SSE). Retry once right away with light thinking.
+            effort = getattr(client, "thinking_effort", "")
+            if max_tokens < 4000 or not effort or not _transient_ai_error(exc):
+                raise
+            log.warning("Long AI call failed (%s); retrying once without extended thinking", exc)
+            client.thinking_effort = ""
+            try:
+                reply = client.chat(messages, temperature=temperature, max_tokens=max_tokens)
+            finally:
+                client.thinking_effort = effort
     finally:
         if isinstance(base_timeout, (int, float)):
             client.timeout = base_timeout

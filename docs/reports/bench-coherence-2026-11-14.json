@@ -1,0 +1,133 @@
+[
+  {
+    "job": "tb6a65",
+    "topic": "Chó con lần đầu thấy mưa",
+    "format": null,
+    "duration": 18.2,
+    "qa": 89.1,
+    "coverage": 0.867,
+    "max_silence": 0.45,
+    "seam_ssim": [
+      0.357,
+      0.397,
+      0.352,
+      0.346
+    ],
+    "viewer_flow": 9.0,
+    "hook_answered": true,
+    "gates": [],
+    "takeaway": "Đôi khi những điều xa lạ nhất lại trở thành niềm vui nhỏ bé khi ta dám tò mò khá",
+    "video": "E:\\AffiliateAgentMedia\\outbox\\shopee\\tb6a65dc80b3f473fa18f0d0\\tb6a65dc80b3f473fa18f0d0.mp4",
+    "breakdown": {
+      "facts": 30.0,
+      "flow": 33.0,
+      "visual": 43.3,
+      "editorial": 18.4
+    }
+  },
+  {
+    "job": "t25cd0",
+    "topic": "[MUA 2 GIẢM 42%] Combo 2 Nước tẩy trang ",
+    "format": null,
+    "duration": 31.633008,
+    "qa": 86.9,
+    "coverage": 0.91,
+    "max_silence": 0.45,
+    "seam_ssim": [
+      0.341,
+      0.388,
+      0.373
+    ],
+    "viewer_flow": 8.0,
+    "hook_answered": false,
+    "gates": [],
+    "takeaway": "Combo hai chai nước tẩy trang bí đao Cocoon 500ml đang có ưu đãi 42%, nhưng giá ",
+    "video": "E:\\AffiliateAgentMedia\\outbox\\shopee\\t25cd019fea6242a1832d234\\t25cd019fea6242a1832d234.mp4",
+    "breakdown": {
+      "facts": 30.0,
+      "flow": 30.0,
+      "visual": 42.9,
+      "editorial": 18.8
+    }
+  },
+  {
+    "job": "t5ef8e",
+    "topic": "Suri giúp bố nấu cơm",
+    "format": null,
+    "duration": 24.3,
+    "qa": 87.5,
+    "coverage": 0.873,
+    "max_silence": 0.45,
+    "seam_ssim": [
+      0.361,
+      0.35,
+      0.352,
+      0.305
+    ],
+    "viewer_flow": 9.0,
+    "hook_answered": true,
+    "gates": [],
+    "takeaway": "Cho con phụ những việc nhỏ dưới sự giám sát của bố mẹ, đôi khi bố lại trở thành ",
+    "video": "E:\\AffiliateAgentMedia\\outbox\\shopee\\t5ef8e30672474e54bb08b41\\t5ef8e30672474e54bb08b41.mp4",
+    "breakdown": {
+      "facts": 30.0,
+      "flow": 32.0,
+      "visual": 42.5,
+      "editorial": 18.0
+    }
+  },
+  {
+    "job": "t1a286",
+    "topic": "Bố lần đầu tết tóc cho con gái",
+    "format": null,
+    "duration": 19.133008,
+    "qa": 88.1,
+    "coverage": 0.88,
+    "max_silence": 0.25,
+    "seam_ssim": [
+      0.289,
+      0.339,
+      0.276
+    ],
+    "viewer_flow": 9.0,
+    "hook_answered": true,
+    "gates": [],
+    "takeaway": "Với con, mái tóc không cần hoàn hảo, điều quý nhất là được bố tự tay chăm chút b",
+    "video": "E:\\AffiliateAgentMedia\\outbox\\shopee\\t1a28627bf8c148ba914be85\\t1a28627bf8c148ba914be85.mp4",
+    "breakdown": {
+      "facts": 30.0,
+      "flow": 32.0,
+      "visual": 43.3,
+      "editorial": 18.0
+    }
+  },
+  {
+    "job": "t05744",
+    "topic": "Khu rừng có hàng nghìn chiếc ống thở mọc",
+    "format": "explainer",
+    "duration": 31.566667,
+    "qa": 84.7,
+    "coverage": 0.885,
+    "max_silence": 0.45,
+    "seam_ssim": [
+      0.38,
+      0.427,
+      0.369,
+      0.742,
+      0.405,
+      0.38,
+      0.297
+    ],
+    "viewer_flow": 9.0,
+    "hook_answered": true,
+    "gates": [],
+    "takeaway": "Những chiếc rễ mọc ngược của cây mắm chính là rễ thở, giúp cây lấy oxy trong lớp",
+    "video": "E:\\AffiliateAgentMedia\\outbox\\shopee\\t05744015262a455e9b391ff\\t05744015262a455e9b391ff.mp4",
+    "breakdown": {
+      "facts": 26.0,
+      "flow": 32.7,
+      "visual": 41.7,
+      "editorial": 18.2
+    }
+  }
+]
