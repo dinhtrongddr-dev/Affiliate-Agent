@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Hiệu quả & bài học của kênh</h1>
+<div class="card">
+  <p>Đã có số liệu cho <b>{{ info.videos }}</b> video{% if info.overall is defined %} · điểm tương tác trung bình <b>{{ info.overall }}</b>/100{% endif %}.
+  {% if not info.ready %}<br><span class="muted">Cần ít nhất {{ info.needed }} video có số liệu thì app mới đưa bài học vào kịch bản mới (tránh học sai từ vài video may mắn).</span>{% endif %}</p>
+  <p class="small muted">Nhập số liệu ở trang từng video (tab Đăng → "Số liệu sau khi đăng"), lấy từ Meta Business Suite / Shopee Affiliate.
+  Điểm tương tác = giữ chân 3 giây 35% + xem hết 35% + chia sẻ/lưu 15% + click/đơn 15%.</p>
+  {% if info.lessons %}<h3>Bài học</h3><ul>{% for l in info.lessons %}<li>{{ l }}</li>{% endfor %}</ul>{% endif %}
+  {% if prompt_block %}<p class="small"><b>Đang đưa vào kịch bản mới:</b></p><pre class="small" style="white-space:pre-wrap">{{ prompt_block }}</pre>{% endif %}
+</div>
+{% if info.by_feature %}
+<div class="card"><h3>Theo đặc điểm video</h3>
+  <div class="grid g2">
+  {% for key, stats in info.by_feature.items() %}{% if stats %}
+    <div><b>{{ labels[key] }}</b><table class="small">
+      {% for value, score, n in stats %}<tr><td>{{ value }}</td><td>{{ score }}</td><td class="muted">{{ n }} video</td></tr>{% endfor %}
+    </table></div>
+  {% endif %}{% endfor %}
+  </div>
+</div>
+{% endif %}
+<div class="card"><h3>Số liệu đã nhập</h3>
+  {% if rows %}
+  <table class="small"><tr><th>Video</th><th>Nền tảng</th><th>Điểm</th><th>Xem</th><th>Giữ 3s</th><th>Xem hết</th><th>Chia sẻ</th><th>Đơn</th><th>Hook</th></tr>
+  {% for r in rows %}<tr>
+    <td><a href="/jobs/{{ r.job_id }}">{{ (r.title or r.job_id)[:40] }}</a></td><td>{{ r.platform }}</td>
+    <td>{{ r.score if r.score is not none else '—' }}</td><td>{{ r.metrics.views or '' }}</td>
+    <td>{{ '%.0f%%' % (r.metrics.retention_3s_rate*100) if r.metrics.retention_3s_rate else '' }}</td>
+    <td>{{ '%.0f%%' % (r.metrics.completion_rate*100) if r.metrics.completion_rate else '' }}</td>
+    <td>{{ r.metrics.shares or '' }}</td><td>{{ r.metrics.conversions or '' }}</td><td>{{ r.features.hook or '' }}</td>
+  </tr>{% endfor %}</table>
+  {% else %}<p class="muted">Chưa có video nào được nhập số liệu.</p>{% endif %}
+</div>
+{% endblock %}

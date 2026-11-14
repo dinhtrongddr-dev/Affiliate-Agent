@@ -148,14 +148,19 @@ def scene_voice(settings, scene: dict, cast: dict, work_dir: Path, index: int,
         return result
     ffmpeg = getattr(settings, "ffmpeg_path", "ffmpeg")
     raw: list[tuple[dict, Speech, float]] = []
+    from .lexicon import load, spoken
+    lexicon = load(getattr(settings, "project_root", None))
     for k, line in enumerate(lines):
         info = cast.get(line.get("speaker") or "narrator") or {}
         voice = info.get("voice") or settings.tts_voice
         out = Path(work_dir) / f"voice_{index:02d}_{k}.wav"
         if settings.tts_enabled:
-            speech = synthesize(line["text"], out, voice, settings.tts_rate, settings.ffprobe_path,
-                                mode=getattr(settings, "tts_mode", "fast"),
+            # the voice reads brands/units the Vietnamese way; subtitles keep the original words
+            speech = synthesize(spoken(line["text"], lexicon), out, voice, settings.tts_rate,
+                                settings.ffprobe_path, mode=getattr(settings, "tts_mode", "fast"),
                                 precision=getattr(settings, "tts_precision", "auto"))
+            speech = Speech(speech.audio_path, speech.duration,
+                            evenly_timed_words(line["text"], 0.0, speech.duration))
         else:
             est = estimate_duration(line["text"])
             speech = Speech(None, est, evenly_timed_words(line["text"], 0.0, est))

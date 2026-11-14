@@ -625,6 +625,15 @@ def _recent_hooks(settings, exclude: str = "", limit: int = 15) -> list[str]:
     return hooks
 
 
+def _channel_learning(settings) -> str:
+    try:
+        from .learning import prompt_block
+        return prompt_block(settings.database_path)
+    except Exception as exc:  # noqa: BLE001 - learning is advice, never a blocker
+        log.warning("channel learning unavailable: %s", exc)
+        return ""
+
+
 def _cast_plan_voices(settings, plan: dict, brief: dict) -> None:
     from .style_profiles import resolve
     from .voice_cast import cast_voices
@@ -751,7 +760,8 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                             "has_product_image": bool(product_img)}
             prompt = creative.branch_plan_prompt(
                 prompt_brief, product, bool(gen_limit), bool(settings.pexels_api_key.get_secret_value()),
-                clips_text, 1, gen_limit, recent_hooks=_recent_hooks(settings, job_id)
+                clips_text, 1, gen_limit, recent_hooks=_recent_hooks(settings, job_id),
+                learning=_channel_learning(settings)
             ) + "\n" + reference_legend(references)
             # Clip indexes refer to the library, while reference IDs refer to ordered attachments.
             raw = _ask_json(client, settings, prompt,
@@ -1135,6 +1145,11 @@ def render_job(settings, job_id: str, analysis: dict | None = None, product: dic
         qa_score=manifest["quality"].get("creative_qa", {}).get("total_score"),
         last_error=None if shopee_ready else "; ".join(manifest["quality"]["shopee"]["reasons"]),
     )
+    try:   # what this video is made of, for the channel learning loop
+        from .learning import features_from_timeline, save_features
+        save_features(db, job_id, features_from_timeline(timeline, result.duration))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("feature record failed: %s", exc)
     return {
         "job_id": job_id, "status": status, "output_path": str(final),
         "shopee_ready": shopee_ready, "facebook_ready": facebook_ready, "manifest": manifest,
@@ -1548,6 +1563,9 @@ def use_hook_variant(settings, job_id: str, index: int) -> dict:
     content["hook"] = timeline["hook"]
     update_job(settings.database_path, job_id, script_json=json.dumps(timeline, ensure_ascii=False),
                content_json=json.dumps(content, ensure_ascii=False))
+    from .learning import features_from_timeline, save_features
+    save_features(settings.database_path, job_id, {
+        **features_from_timeline(timeline, float(job.get("duration_sec") or 0)), "hook_variant": index})
     return {"hook": timeline["hook"]}
 
 

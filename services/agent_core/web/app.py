@@ -24,6 +24,7 @@ from ..videogen.providers import ProviderError, get_provider
 from ..affiliate_client import SORT_COMMISSION, SORT_ITEM_SOLD, SORT_RELEVANCE, ShopeeAffiliateClient
 from ..clips import ClipError, add_clip, clip_dir, delete_clip, list_clips, update_clip
 from ..editor.music import list_tracks
+from .. import learning, performance_learning
 from ..editor.tts import VOICES
 from ..env_file import update_env
 from ..logging_setup import setup_logging, tail_log
@@ -248,6 +249,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       clips=list_clips(s, job_id), voices=VOICES,
                       link_info=workflow.link_check(s, job),
                       hook_variants=_hook_variants(s, job),
+                      perf_fields=learning.METRIC_FIELDS,
+                      perf_rows=performance_learning.get_video_performance(s.database_path, job_id),
                       storyboard=storyboard(s, job_id),
                       gen_tasks=gen_engine.list_tasks(s.database_path, job_id, 50))
 
@@ -668,6 +671,27 @@ def create_app(start_worker: bool = True) -> FastAPI:
         return render(request, "settings.html", fields=fields, voices=VOICES,
                       shopee_configured=aff["configured"], music_dir=str(s.music),
                       tracks=[t.name for t in list_tracks(s.music)], meta_app_id=s.meta_app_id)
+
+    @app.get("/performance", response_class=HTMLResponse)
+    def performance_page(request: Request):
+        s = S()
+        learning.backfill(s.database_path)
+        return render(request, "performance.html", active="performance",
+                      rows=learning.rows(s.database_path), info=learning.insights(s.database_path),
+                      labels=learning.FEATURE_LABELS, prompt_block=learning.prompt_block(s.database_path))
+
+    @app.post("/api/jobs/{job_id}/performance")
+    async def api_performance(job_id: str, request: Request):
+        job_or_404(job_id)
+        body = await request.json()
+        platform = str(body.get("platform") or "facebook")
+        if platform not in {"facebook", "shopee", "tiktok"}:
+            raise HTTPException(400, "Nền tảng không hợp lệ")
+        try:
+            learning.record(S().database_path, job_id, platform, body.get("metrics") or {})
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return {"saved": True}
 
     @app.get("/logs", response_class=HTMLResponse)
     def logs_page(request: Request):

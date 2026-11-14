@@ -167,6 +167,20 @@
           <button class="btn sm" onclick="reconcile('{{ p.platform }}',false)">Không có</button>{% endif %}</td></tr>
       {% endfor %}</table>
       {% endif %}
+
+    {% if job.output_path %}
+      <div style="margin-top:18px">
+      <h3>Số liệu sau khi đăng</h3>
+      <p class="small muted">Copy từ Meta Business Suite (Reels) hoặc Shopee Affiliate sau 24–72 giờ. Tỉ lệ nhập dạng 45 hoặc 0,45. Ô trống bỏ qua.</p>
+      {% for r in perf_rows %}<div class="small muted">Đã có: {{ r.platform }} · {{ r.views or 0 }} lượt xem · nhập lúc {{ r.recorded_at }}</div>{% endfor %}
+      <div class="grid g2" id="perf-form">
+        <div><label>Nền tảng</label><select id="perf-platform"><option value="facebook">Facebook Reels</option><option value="shopee">Shopee Video</option><option value="tiktok">TikTok</option></select></div>
+        {% for key, (label, kind) in perf_fields.items() %}
+        <div><label>{{ label }}</label><input data-k="{{ key }}" inputmode="decimal"></div>{% endfor %}
+      </div>
+      <button class="btn" type="button" onclick="savePerf()">💾 Lưu số liệu</button>
+      </div>
+    {% endif %}
     </div>
 
     <!-- Script editor -->
@@ -409,6 +423,10 @@ async function saveRender(){
   const script={...SCRIPT,hook:document.getElementById("hook").value,cta:document.getElementById("cta").value,
     music_mood:document.getElementById("mood").value}; delete script.render;
   await api(`/api/jobs/${JOB}/render`,{script,content:caption()},{ok:"Đang dựng lại video…",reload:true});
+}
+async function savePerf(){
+  const metrics={}; document.querySelectorAll("#perf-form input[data-k]").forEach(i=>{ if(i.value.trim()) metrics[i.dataset.k]=i.value.trim(); });
+  await api(`/api/jobs/${JOB}/performance`,{platform:document.getElementById("perf-platform").value,metrics},{ok:"Đã lưu số liệu",reload:true});
 }
 async function saveCaption(){await api(`/api/jobs/${JOB}/content`,{content:caption()},{ok:"Đã lưu caption",reload:true});}
 async function approve(){

@@ -527,3 +527,13 @@ services/agent_core/
 Video thật:
 - **Chó con "Bông":** QA 91,8; ngoại hình giữ đúng 9/10.
 - **Review cây lau nhà:** QA 88,5; sản phẩm khớp ảnh thật 10/10.
+
+**Giai đoạn 3: xong (14/11/2026)**, điều chỉnh theo quyết định không dùng token Insights và file CSV hoa hồng.
+
+| Việc | Kết quả |
+|---|---|
+| Đặc điểm video | Mỗi lần dựng ghi lại: nhánh, phong cách, độ dài, kiểu hook và bản hook đã chọn, nhạc, số cảnh nói trước camera, số nhân vật, giọng. Video cũ được bổ sung tự động |
+| Số liệu sau khi đăng | Nhập trên trang video (tab Đăng): lượt xem, % giữ 3 s, % xem hết, chia sẻ, bình luận, lưu, click, đơn, hoa hồng. Không cần token hay file báo cáo |
+| Học | Điểm tương tác = giữ 3 s 35% + xem hết 35% + chia sẻ/lưu 15% + click/đơn 15%. So sánh theo từng đặc điểm. Khi đủ ≥ 10 video có số liệu, bài học được đưa vào prompt storyboard |
+| Trang "Hiệu quả & bài học" | `/performance`: bảng số liệu, điểm theo đặc điểm, bài học, và đoạn đang đưa vào prompt |
+| Phát âm | Từ điển cho thương hiệu, từ tiếng Anh, đơn vị và "99k" (`config/pronunciations.json` sửa được). Chỉ giọng đọc thay đổi, phụ đề giữ chữ gốc |

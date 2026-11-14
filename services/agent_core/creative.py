@@ -165,7 +165,7 @@ Trả DUY NHẤT JSON: {{"topic":"", "angle":"", "premise":"", "story_beats":["h
 
 def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock: bool,
                        clips_text: str = "", first_clip_image: int = 1, gen_limit: int = 3,
-                       recent_hooks: list[str] | None = None) -> str:
+                       recent_hooks: list[str] | None = None, learning: str = "") -> str:
     """Storyboard v2: speakers per line, cast per scene, location groups, phone-style shots."""
     branch = validate_branch(brief.get("creation_branch"))
     limit = max(0, min(10, int(gen_limit))) if can_generate else 0
@@ -239,6 +239,7 @@ Chữ trên màn hình: chỉ "hook" (0-2 giây) và phụ đề do app tạo t�
 để app dựng 3 bản A/B chỉ khác chữ 2 giây đầu.
 Hook: {HOOK_FORMULAS}
 {avoid}
+{learning}
 Kết: viral/series kết bằng payoff trọn vẹn, cta ĐỂ RỖNG; review có thể cta nhẹ ("link mình để dưới").
 affiliate_keywords: tối đa 8 cụm từ sản phẩm thật sự xuất hiện trong câu chuyện, không có thì [].
 Hashtag 3-5 cái tiếng Việt đúng chủ đề. Caption không chèn URL.
