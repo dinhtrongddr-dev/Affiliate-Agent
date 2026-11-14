@@ -12,6 +12,7 @@ param(
     [string]$MediaRoot = '',
     [string]$Import = '',
     [switch]$SkipModels,
+    [switch]$SkipChatGPT2Api,
     [switch]$Dev
 )
 $ErrorActionPreference = 'Stop'
@@ -116,24 +117,59 @@ Set-EnvValue 'AA_MEDIA_ROOT' $media
 New-Item -ItemType Directory -Force -Path $media | Out-Null
 $ok.Add("Thu muc video: $media")
 
-# ChatGPT2API: reuse its auth key (never printed).
+# ------------------------------------------------------------------ ChatGPT2API (AI gateway)
+Step 'ChatGPT2API (AI viet kich ban)'
+$C2AUrl = 'https://github.com/dinhtrongddr-dev/chatgpt2api-web.git'
 if (-not $ChatGPT2ApiDir) {
     foreach ($c in @((Join-Path (Split-Path -Parent $Root) 'chatgpt2api-web'), 'D:\chatgpt2api-web', 'C:\chatgpt2api-web')) {
-        if (Test-Path (Join-Path $c '.env')) { $ChatGPT2ApiDir = $c; break }
+        if (Test-Path (Join-Path $c 'main.py')) { $ChatGPT2ApiDir = $c; break }
     }
 }
-if ($ChatGPT2ApiDir -and (Test-Path (Join-Path $ChatGPT2ApiDir '.env'))) {
-    $line = Get-Content (Join-Path $ChatGPT2ApiDir '.env') -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_AUTH_KEY\s*=' } | Select-Object -First 1
-    $port = (Get-Content (Join-Path $ChatGPT2ApiDir '.env') -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_PORT\s*=' } | Select-Object -First 1)
+if (-not $ChatGPT2ApiDir -and -not $SkipChatGPT2Api) {
+    # not on this machine yet: clone it next to the app
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        if (-not (Has-Winget)) { throw 'Can Git hoac winget de tai ChatGPT2API.' }
+        winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements
+        Refresh-Path
+    }
+    $ChatGPT2ApiDir = Join-Path (Split-Path -Parent $Root) 'chatgpt2api-web'
+    Write-Host "Dang tai ChatGPT2API vao $ChatGPT2ApiDir ..."
+    git clone --quiet $C2AUrl $ChatGPT2ApiDir
+}
+if ($ChatGPT2ApiDir -and (Test-Path (Join-Path $ChatGPT2ApiDir 'main.py'))) {
+    # its own setup: Python 3.13 + packages + .env with a random key (repairs if needed)
+    $c2aPy = @((Join-Path $ChatGPT2ApiDir 'runtime\python\python.exe'), (Join-Path $ChatGPT2ApiDir '.venv\Scripts\python.exe')) |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    $c2aOk = $false
+    if ($c2aPy -and (Test-Path (Join-Path $ChatGPT2ApiDir '.env'))) {
+        & $c2aPy -c "import fastapi, uvicorn, curl_cffi, sqlalchemy" 2>$null
+        $c2aOk = ($LASTEXITCODE -eq 0)
+    }
+    if (-not $c2aOk) {
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $ChatGPT2ApiDir 'setup.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Cai ChatGPT2API loi: xem thong bao o tren.' }
+    }
+    $envC = Join-Path $ChatGPT2ApiDir '.env'
+    $line = Get-Content $envC -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_AUTH_KEY\s*=' } | Select-Object -First 1
+    $port = Get-Content $envC -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_PORT\s*=' } | Select-Object -First 1
     $port = if ($port) { ($port -split '=', 2)[1].Trim() } else { '13000' }
     if ($line) {
-        Set-EnvValue 'AA_AI_API_KEY' (($line -split '=', 2)[1].Trim().Trim('"').Trim("'"))
+        Set-EnvValue 'AA_AI_API_KEY' (($line -split '=', 2)[1].Trim().Trim('"').Trim("'"))   # never printed
         Set-EnvValue 'AA_AI_BASE_URL' "http://127.0.0.1:$port/v1"
         Set-EnvValue 'AA_AI_PROTOCOL' 'openai'
-        $ok.Add("ChatGPT2API: $ChatGPT2ApiDir (port $port, key da noi)")
     }
+    # start it if it is not running, then wait until it answers
+    function Test-C2A { try { $null = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/v1/models" -TimeoutSec 5; return $true } catch { return [bool]($_.Exception.Response) } }
+    if (-not (Test-C2A)) {
+        Start-Process -FilePath (Join-Path $ChatGPT2ApiDir 'start.cmd') -WorkingDirectory $ChatGPT2ApiDir -WindowStyle Hidden
+        for ($i = 0; $i -lt 45 -and -not (Test-C2A); $i++) { Start-Sleep 2 }
+    }
+    if (Test-C2A) { $ok.Add("ChatGPT2API: $ChatGPT2ApiDir dang chay tai 127.0.0.1:$port (key da noi)") }
+    else { $todo.Add("ChatGPT2API chua chay: mo $ChatGPT2ApiDir\start.cmd roi chay lai setup.") }
+    # shortcut to start it later
+    $script:ChatGPT2ApiStart = Join-Path $ChatGPT2ApiDir 'start.cmd'
 } else {
-    $todo.Add('Cai ChatGPT2API: git clone https://github.com/dinhtrongddr-dev/chatgpt2api-web, chay setup.ps1 trong do, roi chay lai script nay (hoac them -ChatGPT2ApiDir).')
+    $todo.Add("Cai ChatGPT2API: git clone $C2AUrl, chay setup.ps1 trong do, roi chay lai script nay.")
 }
 
 # ------------------------------------------------------------------ import an export package
@@ -171,8 +207,31 @@ if (-not $SkipModels) {
 & $venvPy -c "from agent_core.editor.encoder import nvenc_available; import sys; sys.exit(0 if nvenc_available('ffmpeg') else 1)"
 if ($LASTEXITCODE -eq 0) { $ok.Add('Ma hoa GPU (NVENC): co') } else { $ok.Add('Ma hoa GPU (NVENC): khong co, dung x264 (cham hon, van chay)') }
 
+# ------------------------------------------------------------------ shortcuts
+Step 'Loi tat tren Desktop'
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $desk = [Environment]::GetFolderPath('Desktop')
+    $items = @(
+        @{ Name = 'Affiliate Agent'; Target = (Join-Path $Root 'scripts\start-app.cmd') },
+        @{ Name = 'Cap nhat Affiliate Agent'; Target = (Join-Path $Root 'scripts\update.cmd') }
+    )
+    if ($script:ChatGPT2ApiStart) { $items += @{ Name = 'ChatGPT2API'; Target = $script:ChatGPT2ApiStart } }
+    foreach ($it in $items) {
+        $lnk = $shell.CreateShortcut((Join-Path $desk ($it.Name + '.lnk')))
+        $lnk.TargetPath = $it.Target
+        $lnk.WorkingDirectory = Split-Path -Parent $it.Target
+        $lnk.Save()
+    }
+    $ok.Add('Loi tat Desktop: ' + (($items | ForEach-Object { $_.Name }) -join ', '))
+} catch { $todo.Add('Khong tao duoc loi tat Desktop (khong anh huong app).') }
+
 # ------------------------------------------------------------------ smoke check + report
 & $venvPy -m agent_core.cli --help | Out-Null
+# a real AI round trip: proves the key, the gateway and a logged-in ChatGPT account
+& $venvPy (Join-Path $Root 'scripts\check_ai.py')
+if ($LASTEXITCODE -eq 0) { $ok.Add('Goi thu AI (ChatGPT2API): OK') }
+else { $todo.Add('Dang nhap tai khoan ChatGPT trong ChatGPT2API (mo http://127.0.0.1:13000), roi chay lai setup de kiem tra.') }
 $todo.Add('Mo app (scripts\start-app.cmd) > Cai dat: nhap lai cac key luu bang Windows (DPAPI) - Muse cookie JSON, AddLive API key, Facebook token, YouTube/Trends-MCP key neu dung.')
 $todo.Add('Dang nhap lai Shopee Creator: scripts\open-shopee-login.cmd')
 
