@@ -18,6 +18,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+New-Item -ItemType Directory -Force -Path (Join-Path $Root 'logs') | Out-Null
+$SetupLog = Join-Path $Root ('logs\setup-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+try { Start-Transcript -Path $SetupLog -Force | Out-Null } catch {}
+trap {
+    Write-Host "`nLOI: $_" -ForegroundColor Red
+    Write-Host "Nhat ky day du: $SetupLog (gui file nay neu can ho tro). Sua loi roi chay lai setup (an toan)." -ForegroundColor Yellow
+    try { Stop-Transcript | Out-Null } catch {}
+    exit 1
+}
 $ok = [System.Collections.Generic.List[string]]::new()
 $todo = [System.Collections.Generic.List[string]]::new()
 
@@ -31,11 +40,12 @@ function Has-Winget { return [bool](Get-Command winget -ErrorAction SilentlyCont
 # ------------------------------------------------------------------ Python 3.12+
 Step 'Python'
 function Find-Python {
-    foreach ($cmd in @(@('py', '-3.12'), @('py', '-3'), @('python'))) {
+    # 3.12 or 3.13 only: newer Python may lack wheels for the voice engine (VieNeu/onnxruntime)
+    foreach ($cmd in @(@('py', '-3.12'), @('py', '-3.13'), @('python'))) {
         try {
             $exe = $cmd[0]; $pre = @($cmd | Select-Object -Skip 1)
             $ver = & $exe @pre -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null
-            if ($ver -and [version]$ver -ge [version]'3.12') {
+            if ($ver -and @('3.12', '3.13') -contains "$ver".Trim()) {
                 return (& $exe @pre -c "import sys;print(sys.executable)")
             }
         } catch {}
@@ -69,9 +79,19 @@ $ok.Add('ffmpeg: ' + (& ffmpeg -hide_banner -version | Select-Object -First 1))
 # ------------------------------------------------------------------ .venv + packages
 Step 'Thu vien Python (.venv)'
 $venvPy = Join-Path $Root '.venv\Scripts\python.exe'
+if (Test-Path $venvPy) {   # an old .venv made by an unsupported Python is rebuilt
+    $vv = (& $venvPy -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null)
+    if (@('3.12', '3.13') -notcontains "$vv".Trim()) {
+        Write-Host ".venv dung Python $vv khong ho tro: tao lai..." -ForegroundColor Yellow
+        Remove-Item (Join-Path $Root '.venv') -Recurse -Force
+    }
+}
 if (-not (Test-Path $venvPy)) { & $py -m venv (Join-Path $Root '.venv') }
+if (-not (Test-Path $venvPy)) { throw "Khong tao duoc .venv bang $py" }
 & $venvPy -m pip install --upgrade pip --quiet
+Write-Host 'Dang cai thu vien (lan dau co the mat 5-15 phut, dung tat cua so)...'
 & $venvPy -m pip install -r (Join-Path $Root 'services\requirements-agent.txt') requests websocket-client --quiet
+if ($LASTEXITCODE -ne 0) { throw 'pip install loi (xem dong loi ngay phia tren). Kiem tra mang roi chay lai setup.' }
 if ($Dev) { & $venvPy -m pip install pytest ruff --quiet }
 & $venvPy -m pip check
 if ($LASTEXITCODE -ne 0) {
@@ -239,3 +259,5 @@ Write-Host "`n================ KET QUA ================" -ForegroundColor Green
 $ok | ForEach-Object { Write-Host "  [OK] $_" -ForegroundColor Green }
 Write-Host "`nCon can lam:" -ForegroundColor Yellow
 $todo | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+Write-Host "`nNhat ky: $SetupLog"
+try { Stop-Transcript | Out-Null } catch {}
