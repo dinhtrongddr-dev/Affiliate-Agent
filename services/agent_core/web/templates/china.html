@@ -21,9 +21,9 @@
   <div class="tab {{ 'active' if tab=='radar' }}" id="t-radar">
     <form class="row" method="get" action="/china" style="gap:8px;margin-bottom:10px">
       <input type="hidden" name="tab" value="radar">
-      <select name="stage"><option value="">Mọi giai đoạn</option>{% for k,v in stage_labels.items() %}<option value="{{k}}" {{ 'selected' if filters.stage==k }}>{{v}}</option>{% endfor %}</select>
-      <select name="niche"><option value="">Mọi ngách</option>{% for k,v in niche_names.items() %}<option value="{{k}}" {{ 'selected' if filters.niche==k }}>{{v}}</option>{% endfor %}</select>
-      <select name="goal"><option value="">Mọi mục tiêu</option>{% for k,v in GOALS.items() %}<option value="{{k}}" {{ 'selected' if filters.goal==k }}>{{v}}</option>{% endfor %}</select>
+      <select name="stage" style="max-width:200px"><option value="">Mọi giai đoạn</option>{% for k,v in stage_labels.items() %}<option value="{{k}}" {{ 'selected' if filters.stage==k }}>{{v}}</option>{% endfor %}</select>
+      <select name="niche" style="max-width:240px"><option value="">Mọi ngách</option>{% for k,v in niche_names.items() %}<option value="{{k}}" {{ 'selected' if filters.niche==k }}>{{v}}</option>{% endfor %}</select>
+      <select name="goal" style="max-width:240px"><option value="">Mọi mục tiêu</option>{% for k,v in GOALS.items() %}<option value="{{k}}" {{ 'selected' if filters.goal==k }}>{{v}}</option>{% endfor %}</select>
       <button class="btn sm">Lọc</button>
     </form>
     {% if topics %}

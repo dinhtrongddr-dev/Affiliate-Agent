@@ -188,3 +188,18 @@ mà không có lỗi hồi quy (toàn bộ test hiện có vẫn qua). GĐ5 ch�
 - Bilibili popular API theo tài liệu cộng đồng: [dev.to](https://dev.to/sami_8858131362756585e4f4/the-easiest-chinese-platform-to-scrape-in-python-in-2026-bilibili-in-under-30-lines-5216), [apify](https://apify.com/crawlerbros/bilibili-scraper.md)
 
 Tất cả đều là nguồn cộng đồng, phải thử thật ở GĐ1.1.
+
+---
+
+## 12. Trạng thái thực hiện (14/11/2026)
+
+| Giai đoạn | Trạng thái | Ghi chú |
+|---|---|---|
+| GĐ0 | Xong | Commit `9e535fd`: Muse song song, storyboard một lần gọi AI, worker chia làn, ghi thời gian từng khâu, sửa lỗi stock. T1 ở commit `f11ccc7` |
+| GĐ1 | Xong | Bilibili, Douyin, Weibo, Toutiao tự động (đã thử thật); Kuaishou, Xiaohongshu, WeChat nhập tay; Zhihu không dùng |
+| GĐ2 | Xong | 4 giai đoạn, chuẩn hoá theo bách phân vị, điểm cơ hội, ngách và đề xuất ngách mới, mục tiêu Facebook/affiliate |
+| GĐ3 | Xong | Công thức viral và ≥ 3 ý tưởng; 6 định dạng; kiểm chứng kiến thức; kiểm tra nguyên bản |
+| GĐ4 | Xong | Cổng chất lượng Đạt/Sửa/Không đạt; chế độ tự động (mặc định tắt) |
+| GĐ5 | Code xong, chờ dữ liệu | KPI theo mục tiêu, so dự đoán với thực tế, đề xuất có giới hạn. Chưa có số liệu đăng thật |
+
+Hướng dẫn dùng: `docs/china-trends.md`.
