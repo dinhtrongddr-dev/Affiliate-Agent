@@ -89,6 +89,7 @@ def test_coherence_flags_fragments_thin_scripts_and_missing_takeaway():
                    "Thế là cây mắm mọc thêm hàng nghìn chiếc rễ nhô lên như những ống thở.",
                    "Nhờ những lỗ li ti trên rễ, không khí đi xuống nuôi cả bộ rễ bên dưới.",
                    "Hoá ra cả cánh rừng vẫn thở được, kể cả khi thuỷ triều lên ngập gốc.",
+                   "Nhưng rễ thở chỉ làm được việc đó khi bùn không bị lấp kín bởi rác hay đất san lấp.",
                    "Lần sau đi Cà Mau, nhìn xuống bùn là bạn biết rừng đang thở đấy."])
     assert creative.coherence_issues(story) == []
 
@@ -121,7 +122,7 @@ def test_prompt_asks_for_script_first_and_sequences():
     from agent_core.creation_branches import normalise_brief
     prompt = creative.branch_plan_prompt(normalise_brief("viral_creator"), {}, True, False)
     assert '"script"' in prompt and '"takeaway"' in prompt and "CHUỖI CẢNH" in prompt
-    assert "MỘT TAKE CHO 2 NHỊP" in prompt and "2,6 từ/giây" in prompt
+    assert "MỘT TAKE CHO 2 NHỊP" in prompt and "từ/giây" in prompt and "NHẮM KHOẢNG" in prompt
 
 
 def test_long_ai_call_retries_once_with_light_thinking():

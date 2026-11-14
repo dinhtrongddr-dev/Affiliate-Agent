@@ -60,6 +60,7 @@ def outline_prompt(brief: dict) -> str:
 Chủ đề: {brief['topic']}. Ghi chú: {brief.get('notes') or ''}
 Tổng thời lượng khoảng {int(brief['long']['seconds'])} giây, chia đúng {n} phần, mỗi phần {SEGMENT_SECONDS} giây.
 {cast_hint}
+Mỗi phần cần đủ ý cho khoảng {int(SEGMENT_SECONDS * 3.5)} từ lời đọc (2-3 ý cụ thể, có ví dụ/chi tiết), không để phần nào mỏng.
 Yêu cầu: phần 1 có hook mạnh ở 3 giây đầu; mỗi phần có một mục tiêu rõ và kết bằng một câu nối sang phần sau;
 phần cuối có payoff/kết luận. Nội dung kiến thức: chỉ nói điều chắc chắn đúng.
 Trả DUY NHẤT JSON:

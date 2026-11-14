@@ -149,5 +149,21 @@ def test_regenerate_scene_queues_a_new_take(s):
         workflow.regenerate_scene(s, job_id, 7)
 
 
+def test_word_budget_matches_measured_voice_speed():
+    # measured renders: 79 words -> 22 s, 66 -> 18.2 s; a 24-36 s part needs ~84-126 words
+    least, aim, most = creative.target_words(24, 36)
+    assert 80 <= least <= 90 and 100 <= aim <= 110 and most >= 120
+    prompt = creative.branch_plan_prompt({**normalise_brief("template_series")}, {}, True, False)
+    assert f"NHẮM KHOẢNG {creative.target_words(20, 35)[1]} TỪ" in prompt
+
+    def plan(words):
+        text = " ".join(["vì nên rễ cây"] * (words // 4))
+        return {"creation_branch": "viral_creator", "takeaway": "x", "duration_range": [24, 36],
+                "scenes": [{"lines": [{"speaker": "narrator", "text": text}]}]}
+    assert any("Lời quá ít" in i for i in creative.coherence_issues(plan(68)))   # the 22 s part
+    assert not any("Lời quá ít" in i for i in creative.coherence_issues(plan(104)))
+    assert any("Thời lượng" in i for i in creative.storyboard_issues(plan(68)))
+
+
 def test_suri_series_is_chibi():
     assert "chibi" in SURI_FAMILY["style"].lower()

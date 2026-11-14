@@ -241,8 +241,8 @@ không "nhựa" kiểu AI rẻ tiền; hoạt hình/phim tài liệu thì theo p
 Thời lượng tổng {low:.0f}-{high:.0f} giây. Tối đa {limit} cảnh generate.
 
 CÁCH VIẾT (bắt buộc theo thứ tự):
-1) Viết "script" TRƯỚC: lời liền mạch như một người kể cho bạn nghe, khoảng {int(low * 2.6)}-{int(high * 2.6)} từ
-   (giọng đọc ~2,6 từ/giây). Cấu trúc: hook đặt câu hỏi/lời hứa -> bối cảnh -> diễn biến có câu nối
+1) Viết "script" TRƯỚC: lời liền mạch như một người kể cho bạn nghe, {target_words(low, high)[0]}-{target_words(low, high)[2]} từ,
+   NHẮM KHOẢNG {target_words(low, high)[1]} TỪ (giọng đọc ~{WORDS_PER_SECOND:g} từ/giây; ít lời hơn thì video hụt thời lượng). Cấu trúc: hook đặt câu hỏi/lời hứa -> bối cảnh -> diễn biến có câu nối
    ("vì", "nên", "nhưng", "hoá ra", "thế là", "rồi") -> payoff TRẢ LỜI đúng hook -> câu chốt.
    Chỉ giữ 3-4 ý phục vụ "takeaway"; bỏ chi tiết lan man; không liệt kê sự kiện rời rạc.
 2) Chia script thành NHỊP (mỗi phần tử "scenes" là một nhịp): mỗi nhịp 1-2 câu của script (6-16 từ/câu),
@@ -526,7 +526,7 @@ def storyboard_issues(plan: dict) -> list[str]:
         # the voice decides the length now: estimate it from the words (silent beats add theirs)
         silent = sum(float(sc.get("duration") or 2) for sc in plan.get("scenes") or [] if not sc.get("lines"))
         total = len(spoken_script(plan).split()) / WORDS_PER_SECOND + silent
-        if total < low * 0.7 or total > high * 1.25:
+        if total < low * 0.9 or total > high * 1.25:
             issues.append(f"Thời lượng ước theo lời {total:.0f}s ngoài mục tiêu {low:.0f}-{high:.0f}s")
     hits = meta_word_lines(plan)
     if hits:
@@ -546,7 +546,15 @@ def storyboard_issues(plan: dict) -> list[str]:
 
 CONNECTORS = ("vì", "nên", "nhưng", "hoá ra", "hóa ra", "thế là", "rồi", "bởi", "để", "khi", "nhờ",
               "thì", "vậy", "sau đó", "cuối cùng", "mà")
-WORDS_PER_SECOND = 2.6   # measured VieNeu speed (81 words -> 29.7 s)
+# Rendered speed incl. the gaps between lines (VieNeu nano, Nov 2026): 79 words -> 22.0 s,
+# 66 -> 18.2 s, 97 -> 26.5 s = ~3.6 words/s. 3.5 keeps a little margin so videos reach the target.
+WORDS_PER_SECOND = 3.5
+
+
+def target_words(low: float, high: float) -> tuple[int, int, int]:
+    """(min, aim, max) spoken words for a video of low-high seconds."""
+    mid = (low + high) / 2
+    return int(low * WORDS_PER_SECOND), int(mid * WORDS_PER_SECOND), int(high * WORDS_PER_SECOND)
 
 
 def spoken_script(plan: dict) -> str:
@@ -565,9 +573,10 @@ def coherence_issues(plan: dict) -> list[str]:
     text = spoken_script(plan)
     words = len(text.split())
     low, high = formats.duration_range(plan)
-    if words and words < low * WORDS_PER_SECOND * 0.75:
-        issues.append(f"Lời quá ít ({words} từ) cho {low:.0f}-{high:.0f}s: video sẽ có khoảng lặng; "
-                      f"cần khoảng {int(low * WORDS_PER_SECOND)}-{int(high * WORDS_PER_SECOND)} từ liền mạch")
+    if words and words < low * WORDS_PER_SECOND * 0.9:
+        least, aim, most = target_words(low, high)
+        issues.append(f"Lời quá ít ({words} từ) cho {low:.0f}-{high:.0f}s: video sẽ hụt thời lượng; "
+                      f"cần {least}-{most} từ liền mạch (nhắm {aim}), thêm ý/chi tiết thật, không độn chữ")
     if words > high * WORDS_PER_SECOND * 1.2:
         issues.append(f"Lời quá dài ({words} từ) cho {high:.0f}s: rút gọn, giữ 3-4 ý")
     lines = [ln.get("text") or "" for sc in plan.get("scenes") or [] for ln in sc.get("lines") or []]
