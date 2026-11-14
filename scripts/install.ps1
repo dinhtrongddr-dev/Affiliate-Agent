@@ -6,6 +6,7 @@
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Dir E:\AffiliateSuite -Import D:\affiliate-export.zip
 #
 # Without -Dir it asks where to install (lists the drives and their free space; Enter = suggested).
+# If an earlier install exists it asks: Enter = update it, 2 = pick another drive/folder.
 #
 # Installs Git if needed, clones (or updates) Affiliate-Agent and chatgpt2api-web side by side,
 # then runs scripts\setup.ps1, which installs Python, ffmpeg, libraries, the voice model,
@@ -52,8 +53,9 @@ if (-not $Dir) {
     $existing += Join-Path $env:USERPROFILE 'AffiliateSuite'
     $found = $existing | Where-Object { Test-Path (Join-Path $_ 'Affiliate-Agent\.git') } | Select-Object -First 1
     if ($found) {
-        Write-Host "Da co ban cai tai $found : cap nhat tai cho (muon cai cho khac: dung -Dir)." -ForegroundColor Cyan
-        $Dir = $found
+        Write-Host "`nDa co ban cai tai $found" -ForegroundColor Cyan
+        $ans = "$(Read-Host 'Enter = cap nhat ban nay; go 2 = chon o dia / thu muc khac')".Trim()
+        $Dir = if ($ans -eq '2') { Choose-Dir } else { $found }
     } else {
         $Dir = Choose-Dir
     }

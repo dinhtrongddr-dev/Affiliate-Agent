@@ -82,8 +82,7 @@ document.getElementById('creation-form').addEventListener('submit', async event 
     catalog_id:document.getElementById('catalog-id').value, template_id:document.getElementById('template-id').value,
     fast_mode:document.getElementById('fast-mode').checked,
     duration_seconds:parseInt(document.getElementById('duration-seconds').value)||0,
-    ideas:branch==='template_series'?document.getElementById('series-ideas').value.split('
-').map(x=>x.trim()).filter(Boolean).slice(0,10):[],
+    ideas:branch==='template_series'?document.getElementById('series-ideas').value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,10):[],
     experience:{basis:document.getElementById('experience-basis').value,notes:document.getElementById('experience-notes').value}}, {go:r=>'/jobs/'+r.job_id}); }
   catch(e) {} finally {button.disabled = false;}
 });
