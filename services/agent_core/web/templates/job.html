@@ -118,6 +118,13 @@
     <div class="tab active" id="t-publish">
       {% if job.status in ('READY_FOR_REVIEW', 'APPROVED') %}
       <p class="muted small">Xem video bên trái. Khi hài lòng, chọn nơi đăng rồi bấm duyệt. Shopee mặc định lưu <b>bản nháp</b>.</p>
+      {% if brief.long and brief.long.children %}
+      <h3>Các phần của video dài ({{ brief.long.children|length }})</h3>
+      <p class="small muted">Mỗi phần là một video riêng; khi tất cả xong, app tự ghép và thêm một bài nhạc cho cả video. Phần lỗi: mở phần đó để sửa hoặc tạo lại cảnh.</p>
+      <ol class="small">{% for p in parts %}{% if p %}<li><a href="/jobs/{{ p.id }}">Phần {{ loop.index }}</a> · {{ badge(p.status) }}{% if p.last_error %} <span class="err-text">{{ p.last_error[:100] }}</span>{% endif %}</li>{% endif %}{% endfor %}</ol>
+      {% endif %}
+      {% if brief.segment %}<p class="small muted">Phần {{ brief.segment.index }}/{{ brief.segment.count }} của <a href="/jobs/{{ brief.segment.parent }}">video dài</a>.</p>{% endif %}
+      {% if brief.episode %}<p class="small muted">Tập {{ brief.episode.number }} của series.</p>{% endif %}
       {% if stage_times %}<p class="small muted">⏱ {% for label, sec in stage_times %}{{ label }}: {{ (sec // 60)|int }}p{{ '%02d' % (sec % 60) }}s{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
       {% if hook_variants|length > 1 %}
       <h3>Hook A/B ({{ hook_variants|length }} bản, cùng thân video)</h3>
@@ -338,7 +345,8 @@ function drawScenes(){
      <div class="head"><span>Cảnh ${i+1} · ${esc(s.kind)}${s.segment!=null?' · đoạn '+s.segment:''}${s.visual?' · '+esc(s.visual):''}</span>
        <span><button class="btn sm" onclick="moveScene(${i},-1)">↑</button>
        <button class="btn sm" onclick="moveScene(${i},1)">↓</button>
-       <button class="btn sm danger" onclick="delScene(${i})">✕</button></span></div>
+       <button class="btn sm danger" onclick="delScene(${i})">✕</button>
+       ${s.generated?`<button class="btn sm" title="Tạo lại clip AI của cảnh này (sửa được mô tả)" onclick="regenScene(${i})">🎬 Tạo lại</button>`:''}</span></div>
      ${(s.lines&&s.lines.length)?s.lines.map((ln,k)=>`<label>Lời ${esc((SCRIPT.voice_cast&&SCRIPT.voice_cast[ln.speaker]&&SCRIPT.voice_cast[ln.speaker].label)||ln.speaker)}${s.talking?' (nói trước camera)':''}</label>
        <textarea class="ln" data-k="${k}" rows="2">${esc(ln.text)}</textarea>`).join(""):
        `<label>Lời thoại</label><textarea class="vo" rows="2">${esc(s.voiceover)}</textarea>`}
@@ -424,6 +432,14 @@ async function saveRender(){
   const script={...SCRIPT,hook:document.getElementById("hook").value,cta:document.getElementById("cta").value,
     music_mood:document.getElementById("mood").value}; delete script.render;
   await api(`/api/jobs/${JOB}/render`,{script,content:caption()},{ok:"Đang dựng lại video…",reload:true});
+}
+async function regenScene(i){
+  const sc=SCRIPT.scenes[i]||{}; const shot=sc.shot||{};
+  const action=prompt("Mô tả hành động của cảnh (tiếng Anh, sửa nếu muốn):", shot.action||"");
+  if(action===null) return;
+  const camera=prompt("Góc máy (vd: macro close-up, slow push-in):", shot.camera||"");
+  if(camera===null) return;
+  await api(`/api/jobs/${JOB}/scenes/${i}/regenerate`,{action,camera},{ok:"Đang tạo lại cảnh, video sẽ tự dựng lại",reload:true});
 }
 async function savePerf(){
   const metrics={}; document.querySelectorAll("#perf-form input[data-k]").forEach(i=>{ if(i.value.trim()) metrics[i.dataset.k]=i.value.trim(); });

@@ -15,6 +15,8 @@ class Creation(BaseModel):
     experience: dict = Field(default_factory=dict)
     template_id: str = Field(default='', max_length=64)
     fast_mode: bool = False
+    duration_seconds: int = Field(default=0, ge=0, le=180)
+    ideas: list[str] = Field(default_factory=list, max_length=10)   # series: one episode per idea
 
 
 def product_offer(settings, product):
@@ -22,6 +24,39 @@ def product_offer(settings, product):
     offer = catalog.as_offer(product)
     offer['imageUrl'] = next((r['url'] for r in context['image_references'] if r['approvedForRender']), '')
     return offer, context
+
+
+def previous_episodes(s, template_id: str, limit: int = 6) -> list[str]:
+    """Titles of the latest episodes of a series (newest last), so a new one does not repeat them."""
+    titles = []
+    for job in reversed(db.list_jobs(s.database_path, 300)):
+        brief = json.loads(job.get('brief_json') or '{}')
+        if (brief.get('template') or {}).get('id') == template_id:
+            content = json.loads(job.get('content_json') or '{}')
+            titles.append(content.get('title') or brief.get('topic') or '')
+    return [t for t in titles if t][-limit:]
+
+
+def series_batch(s, template: dict, ideas: list[str], duration: int = 0) -> dict:
+    """Several episodes at once. Without saved cast photos, episode 1 makes them and the others
+    reuse them (and the series keeps them for later episodes)."""
+    have = {r.get('character_id') for r in template.get('reference_assets') or []}
+    need_photos = any(c.get('id') not in have for c in template.get('characters') or [])
+    earlier = previous_episodes(s, template['id'])
+    jobs = []
+    for n, idea in enumerate(ideas, start=1):
+        job_id = workflow.create_trend_job(s, idea, creation_branch='template_series', template=template)
+        job = db.get_job(s.database_path, job_id)
+        brief = json.loads(job.get('brief_json') or '{}')
+        brief['episode'] = {'number': len(earlier) + n, 'previous': earlier + ideas[:n - 1]}
+        if duration:
+            brief['duration_range'] = [max(8, duration - 5), duration + 5]
+        if jobs and need_photos:
+            brief['shared_cast_from'] = jobs[0]
+        db.update_job(s.database_path, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
+        db.enqueue_task(s.database_path, 'process', job_id)
+        jobs.append(job_id)
+    return {'job_id': jobs[0], 'jobs': jobs, 'episodes': len(jobs)}
 
 
 def install_routes(app, settings, render):
@@ -57,16 +92,31 @@ def install_routes(app, settings, render):
                 raise HTTPException(400, str(exc)) from None
         elif body.creation_branch != 'viral_creator':
             raise HTTPException(400, 'Nhánh sáng tạo không hợp lệ.')
+        ideas = [i.strip() for i in body.ideas if i and i.strip()]
+        if body.creation_branch == 'template_series' and ideas:
+            return series_batch(s, options['template'], ideas, body.duration_seconds)
         if not topic:
             raise HTTPException(400, 'Nhập chủ đề hoặc ý tưởng tập phim.')
+        if body.duration_seconds >= 60 and body.creation_branch != 'product_review':
+            from .. import long_video
+            try:
+                job_id = long_video.create(s, topic, body.duration_seconds, body.creation_branch,
+                                           template=options.get('template'))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+            return {'job_id': job_id, 'long': True}
         try:
             job_id = workflow.create_trend_job(s, topic, **options)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
-        if body.fast_mode:
+        if body.fast_mode or body.duration_seconds:
             job = db.get_job(s.database_path, job_id)
             brief = json.loads(job.get('brief_json') or '{}')
-            brief['fast_mode'] = True
+            if body.fast_mode:
+                brief['fast_mode'] = True
+            if body.duration_seconds:
+                d = body.duration_seconds
+                brief['duration_range'] = [max(8, d - 5), d + 5]
             db.update_job(s.database_path, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
         db.enqueue_task(s.database_path, 'process', job_id)
         return {'job_id': job_id}

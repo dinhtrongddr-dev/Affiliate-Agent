@@ -51,6 +51,12 @@ def handle_task(settings, task: dict):
     if kind == "publish":
         return workflow.publish_platform(settings, job_id, payload["platform"],
                                          payload.get("action", "draft"))
+    if kind == "long_outline":
+        from . import long_video
+        return long_video.outline(settings, job_id)
+    if kind == "long_assemble":
+        from . import long_video
+        return long_video.assemble(settings, job_id)
     if kind == "affiliate_suggest":
         return workflow.suggest_affiliates(settings, job_id)
     if kind == "prepare_audio":
@@ -105,8 +111,8 @@ def queue_new_jobs(settings) -> int:
 # background refreshes, and Muse clips keep moving while anything else runs.
 LANES = {
     "ai": ("process", "regenerate", "select_product", "manual_product", "affiliate_suggest",
-           "cn_ideas", "cn_idea_job"),
-    "media": ("render", "render_generated", "prepare_audio", "publish", "scan"),
+           "cn_ideas", "cn_idea_job", "long_outline"),
+    "media": ("render", "render_generated", "prepare_audio", "publish", "scan", "long_assemble"),
     "background": ("fetch_trends", "trend_analyse", "sync_conversions", "sync_shopee", "cn_trends",
                    "autopilot"),
 }
@@ -180,6 +186,9 @@ class Worker:
             from .shopee_intelligence import auto_sync
             auto_sync.enqueue_due(self.settings)
         self._requeue_ai_waits()
+        if now - self.last_run.get("_long", -1e9) >= 30:
+            self.last_run["_long"] = now
+            self._advance_long_and_cast()
         for kind, interval in PERIODIC.items():
             # First run 10 minutes after start-up, so opening the app never queues a
             # several-minute AI refresh in front of the owner's videos.
@@ -187,6 +196,20 @@ class Worker:
             if now - self.last_run[kind] >= interval:
                 self.last_run[kind] = now
                 enqueue_task(self.settings.database_path, kind)
+
+    def _advance_long_and_cast(self) -> None:
+        """Long videos: join parts when all are done. Shared cast: wake jobs whose photos exist."""
+        import json as _json
+
+        from . import long_video, shared_cast
+        try:
+            long_video.check_parents(self.settings)
+            for job in list_jobs_by_status(self.settings.database_path, [shared_cast.WAIT_STATUS], 50):
+                source = _json.loads(job.get("brief_json") or "{}").get("shared_cast_from")
+                if not source or shared_cast.ready(self.settings, source):
+                    enqueue_task(self.settings.database_path, "process", job["id"])
+        except Exception:  # noqa: BLE001
+            log.exception("long video / shared cast check failed")
 
     AI_RETRY_EVERY = 15 * 60
     AI_RETRY_MAX = 6

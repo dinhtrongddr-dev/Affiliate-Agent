@@ -25,11 +25,23 @@
       <h2>Giữ nhân vật xuyên suốt các tập</h2>
       <label for="template-id">Mẫu series</label>
       <select id="template-id">{% for t in series %}<option value="{{ t.id }}">{{ t.label }} · v{{ t.version }} · {{ t.reference_assets|length }} ảnh tham khảo</option>{% endfor %}</select>
-      <p class="small muted">Gia đình Suri có 3 nhân vật; bé Suri 4 tuổi. Nhân vật chưa có ảnh sẽ được Muse tạo ảnh trước rồi dùng cho mọi cảnh. Mẫu lưu tối đa 6 nhân vật.</p>
+      <p class="small muted">Gia đình Suri có 3 nhân vật; bé Suri 4 tuổi. Phong cách hoạt hình chibi 3D. Nhân vật chưa có ảnh sẽ được Muse tạo ảnh ở tập đầu, rồi lưu vào mẫu để mọi tập sau giữ đúng khuôn mặt.</p>
+      <label for="series-ideas" style="margin-top:12px">Làm nhiều tập một lúc (mỗi dòng một ý tưởng, tối đa 10)</label>
+      <textarea id="series-ideas" rows="4" placeholder="Suri dạy bố gấp quần áo&#10;Suri đi siêu thị cùng mẹ&#10;..."></textarea>
+      <p class="small muted">Để trống nếu chỉ làm 1 tập theo ô chủ đề bên dưới. Mỗi tập biết các tập trước để không lặp tình huống.</p>
     </section>
     <label for="creation-topic" style="margin-top:20px">Chủ đề / ý tưởng tập phim</label>
     <textarea id="creation-topic" rows="3" maxlength="1000" placeholder="Một tình huống, vấn đề hoặc câu chuyện muốn kể…"></textarea>
     <p class="small muted">Tác vụ sẽ lập storyboard rồi tạo video theo cấu hình hiện tại; có thể dùng hạn mức AI. Số cảnh AI được giới hạn trong Cài đặt.</p>
+    <label for="duration-seconds" style="margin-top:12px">Thời lượng</label>
+    <select id="duration-seconds" style="max-width:320px">
+      <option value="0">Tự động theo nhánh/định dạng</option>
+      <option value="15">15 giây</option><option value="30">30 giây</option><option value="45">45 giây</option>
+      <option value="60">1 phút (video dài: 2 phần ghép)</option>
+      <option value="120">2 phút (4 phần ghép)</option>
+      <option value="180">3 phút (6 phần ghép)</option>
+    </select>
+    <p class="small muted">Từ 1 phút trở lên: AI viết dàn ý, chia phần khoảng 30 giây, các phần dùng chung nhân vật, giọng và nhạc, rồi ghép thành một video.</p>
     <label class="check" style="margin-top:10px"><input type="checkbox" id="fast-mode"> ⚡ Chế độ nhanh: tối đa 3 clip AI, 1 hook (khoảng 6–8 phút thay vì 12–18 phút)</label>
     <button class="btn primary" type="submit" style="margin-top:18px">Tạo storyboard & video</button>
   </form>
@@ -69,6 +81,9 @@ document.getElementById('creation-form').addEventListener('submit', async event 
   try { await api('/api/create', {creation_branch:branch, topic:document.getElementById('creation-topic').value,
     catalog_id:document.getElementById('catalog-id').value, template_id:document.getElementById('template-id').value,
     fast_mode:document.getElementById('fast-mode').checked,
+    duration_seconds:parseInt(document.getElementById('duration-seconds').value)||0,
+    ideas:branch==='template_series'?document.getElementById('series-ideas').value.split('
+').map(x=>x.trim()).filter(Boolean).slice(0,10):[],
     experience:{basis:document.getElementById('experience-basis').value,notes:document.getElementById('experience-notes').value}}, {go:r=>'/jobs/'+r.job_id}); }
   catch(e) {} finally {button.disabled = false;}
 });

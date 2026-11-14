@@ -21,6 +21,9 @@ def prepare_references(settings, job_id, brief, product, main_image, clips) -> l
     result = []
     if main_image and Path(main_image).is_file():
         result.append(_entry("product-main", "product", main_image))
+    from .shared_cast import references as shared_references
+    for rid, role, path in shared_references(settings, brief):   # same faces as part/episode 1
+        result.append(_entry(rid, role, path))
     if brief.get("creation_branch") == "template_series":
         snapshots = brief.get("template_references", [])
         if not isinstance(snapshots, list):

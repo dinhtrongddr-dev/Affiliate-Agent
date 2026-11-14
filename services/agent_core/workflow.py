@@ -434,6 +434,9 @@ def process_job(settings, job_id: str, force: bool = False) -> dict:
     job = get_job(settings.database_path, job_id)
     if not job:
         raise WorkflowError(f"Job not found: {job_id}")
+    if (job.get("mode") or "") == "long":   # a long video is driven by its outline and parts
+        enqueue_task(settings.database_path, "long_outline", job_id)
+        return {"job_id": job_id, "status": job["status"], "message": "Video dài: chạy lại dàn ý/các phần"}
     if job["status"] in FINISHED_STATUSES and not force:
         return {
             "job_id": job_id,
@@ -594,6 +597,11 @@ def _process(settings, job: dict) -> dict:
 def _process_creation(settings, job, brief, client) -> dict:
     """Explicit branches keep content-first creation independent of product search."""
     branch = brief["creation_branch"]
+    if brief.get("shared_cast_from"):
+        from . import shared_cast
+        if not shared_cast.ready(settings, brief["shared_cast_from"]):
+            _stop(settings, job["id"], shared_cast.WAIT_STATUS,
+                  "Chờ phần/tập đầu tạo xong ảnh nhân vật để dùng chung khuôn mặt.")
     _mark(settings, job["id"], "script_start")
     analysis = json.loads(job.get("analysis_json") or "null")
     product, affiliate_link = {}, str(job.get("affiliate_link") or "")
@@ -647,6 +655,12 @@ def _viewer_test(client, settings, plan: dict) -> dict:
 def _brief_plan_fields(brief: dict) -> dict:
     """Content Director choices that travel from the brief into the storyboard and QA."""
     out = {k: brief[k] for k in ("format", "niche", "goal", "duration_range") if brief.get(k)}
+    if brief.get("fixed_characters"):
+        out["characters"] = brief["fixed_characters"]
+    if brief.get("fixed_style"):
+        out["style_profile"] = brief["fixed_style"]
+    if brief.get("fixed_music_mood"):
+        out["music_mood"] = brief["fixed_music_mood"]
     source = brief.get("trend_source") or {}
     texts = [source.get("title_vi"), source.get("summary_vi"), source.get("title_zh")]
     if any(texts):
@@ -831,6 +845,8 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
             plan = creative.normalise_plan({**raw, "creation_branch": branch,
                                             "storyboard_version": 1, **_brief_plan_fields(brief)},
                                            "trend", None, n_clips)
+            if brief.get("no_hook"):          # part 2+ of a long video: no new opening hook
+                plan["hook"], plan["hook_variants"] = "", []
         elif mode == "base":
             source = Path(job["source_path"])
             cuts = detect_cuts(settings.ffmpeg_path, source)
@@ -1034,6 +1050,39 @@ def prepare_audio(settings, job_id: str) -> dict:
     return {"prepared": made}
 
 
+def regenerate_scene(settings, job_id: str, index: int, action: str | None = None,
+                     camera: str | None = None) -> dict:
+    """Make one AI shot again (optionally with an edited action/camera) and re-render after it."""
+    state_path = _plan_state_path(settings, job_id)
+    if not state_path.is_file():
+        raise WorkflowError("Video này chưa có storyboard để tạo lại cảnh")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    plan = state.get("plan") or {}
+    scenes = plan.get("scenes") or []
+    if not 0 <= index < len(scenes) or scenes[index].get("visual") != "generate":
+        raise WorkflowError("Chỉ tạo lại được cảnh do AI tạo (visual=generate)")
+    shot = scenes[index].setdefault("shot", {})
+    if action is not None and str(action).strip():
+        shot["action"] = str(action).strip()[:600]
+    if camera is not None and str(camera).strip():
+        shot["camera"] = str(camera).strip()[:200]
+    provider = get_provider(settings)
+    if provider is None:
+        raise WorkflowError("Chưa cấu hình Muse")
+    compiled = {i: (prompt, refs, dur) for i, prompt, refs, dur in gen_engine._compile_storyboard(settings, plan, provider)}
+    prompt, refs, duration = compiled[index]
+    db = settings.database_path
+    gen_engine.ensure_schema(db)
+    same = [t for t in gen_engine.list_tasks(db, job_id, 10000)
+            if t["kind"] == "video" and t["scene_index"] == index and t["prompt"] == prompt]
+    attempt = max((t["attempt"] for t in same), default=0) + 1
+    gen_engine._insert(db, job_id=job_id, scene_index=index, kind="video", provider=provider.name,
+                       prompt=prompt, refs=refs, duration=duration, attempt=attempt)
+    _save_plan_state(settings, job_id, state)
+    update_job(db, job_id, status=gen_engine.WAIT_STATUS, last_error=None)
+    return {"job_id": job_id, "scene": index, "attempt": attempt}
+
+
 def _plan_state_path(settings, job_id: str) -> Path:
     return settings.work_dir / job_id / "plan_state.json"
 
@@ -1206,8 +1255,12 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
     if not scenes:
         raise WorkflowError("Chưa có hình ảnh để dựng: thêm clip/ảnh ở tab Kịch bản, "
                             "link ảnh sản phẩm, hoặc key Pexels/video AI.")
-    if json.loads(job.get("brief_json") or "{}").get("fast_mode"):
+    jbrief = json.loads(job.get("brief_json") or "{}")
+    if jbrief.get("fast_mode"):
         plan = {**plan, "fast_mode": True}
+    for flag in ("no_music", "no_variants", "no_hook"):   # parts of a long video
+        if jbrief.get(flag):
+            plan = {**plan, flag: True}
     result = {"hook": plan.get("hook", ""),
               "cta": plan.get("cta", "") if strict else plan.get("cta") or settings.cta_text,
               "music_mood": plan.get("music_mood", "upbeat"), "scenes": scenes}
@@ -1216,7 +1269,8 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
                                             "voice_cast", "style_profile", "audience_gender",
                                             "hook_variants", "format", "niche", "goal",
                                             "duration_range", "facts", "takeaway", "script",
-                                            "viewer_test", "fast_mode",
+                                            "viewer_test", "fast_mode", "no_music", "no_variants",
+                                            "no_hook",
                                             "duration_target_seconds", "content_mode")
                        if k in plan})
     return result

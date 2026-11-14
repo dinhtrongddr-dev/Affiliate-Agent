@@ -312,6 +312,8 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     single_layer = bool(timeline.get("creation_branch"))
     hook_end = min(2.0 if single_layer else 2.8,
                    durations[0] if len(durations) == 1 else starts[1] + 0.3)
+    if timeline.get("no_hook"):
+        timeline = {**timeline, "hook": ""}
     subs = build_ass(work_dir / "subs.ass", settings.render_width, settings.render_height,
                      settings.font_name, captions, timeline.get("hook") or "", hook_end,
                      labels, cta, cta_start, total, single_layer=single_layer)
@@ -333,7 +335,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
                            f"adelay={ms}|{ms}[vo{i}_{k}]")
             voice_labels.append(f"[vo{i}_{k}]")
             idx += 1
-    music = pick_track(
+    music = None if timeline.get("no_music") else pick_track(   # long-video parts: music added once
         settings.music,
         timeline.get("music_mood", ""),
         seed=seed_text,
@@ -375,7 +377,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     norm = "loudnorm=I=-14:TP=-1.5:LRA=11," if has_sound else ""
     filters.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0:dropout_transition=0,"
                    f"{norm}aresample=44100[aout]")
-    alt_hooks = [] if timeline.get("fast_mode") else [h for h in (timeline.get("hook_variants") or [])
+    alt_hooks = [] if (timeline.get("fast_mode") or timeline.get("no_variants")) else [h for h in (timeline.get("hook_variants") or [])
                  if h and h != timeline.get("hook")][: max(0, int(getattr(settings, "variants", 1)) - 1)]
     if alt_hooks:   # one decode, two encodes: the hook-free picture is reused for A/B hooks
         filters.append(f"[{vchain}]split=2[vsub][vclean]")

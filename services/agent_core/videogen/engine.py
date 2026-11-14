@@ -581,6 +581,9 @@ def _check(settings, provider, t: dict) -> None:
         _add_to_clip_library(settings, t, out)
     else:
         _update(db, t["id"], status="DOWNLOADED", result_path=str(out), error=None)
+        if t["kind"] == "image":
+            from ..shared_cast import save_to_series
+            save_to_series(settings, t["job_id"], t, out)
 
 
 def _add_to_clip_library(settings, t: dict, path: Path) -> None:
@@ -622,7 +625,9 @@ def poll(settings, provider=None) -> dict:
     with connect(db) as conn:
         rows = [_row(r) for r in conn.execute(
             f"SELECT * FROM gen_tasks WHERE status IN ({','.join('?' * len(ACTIVE))})"
-            " ORDER BY scene_index, created_at", ACTIVE).fetchall()]
+            # cast photos first (clips wait for them), then oldest jobs first
+            " ORDER BY CASE kind WHEN 'image' THEN 0 ELSE 1 END, created_at, scene_index",
+            ACTIVE).fetchall()]
     if provider is None:
         for t in rows:
             _update(db, t["id"], status="FAILED", error="Chưa cấu hình nhà cung cấp video AI")

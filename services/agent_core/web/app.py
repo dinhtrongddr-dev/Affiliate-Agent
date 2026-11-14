@@ -43,6 +43,8 @@ STATUS_LABELS = {
     "NEEDS_PRODUCT_REVIEW": ("Cần chọn sản phẩm", "warn"),
     "NEEDS_MEDIA_REVIEW": ("Cần kiểm tra video", "warn"),
     "WAITING_FOR_GENERATION": ("Đang tạo clip AI", "run"),
+    "WAITING_FOR_CAST": ("Chờ ảnh nhân vật từ phần/tập đầu", "run"),
+    "WAITING_FOR_SEGMENTS": ("Đang làm các phần của video dài", "run"),
     "GENERATION_DONE": ("Clip AI xong, chờ dựng", "run"),
     "WAITING_FOR_SHOPEE_CREDENTIALS": ("Thiếu key Shopee", "warn"),
     "WAITING_FOR_AI_CREDENTIALS": ("Thiếu key AI", "warn"),
@@ -66,7 +68,8 @@ STATUS_LABELS = {
 }
 PLATFORM_LABELS = {"shopee": "Shopee Video", "facebook_reels": "Facebook Reels",
                    "tiktok": "TikTok"}
-BUSY = {"ANALYZING", "SCRIPTING", "RENDERING", "WAITING_FOR_GENERATION", "GENERATION_DONE"}
+BUSY = {"ANALYZING", "SCRIPTING", "RENDERING", "WAITING_FOR_GENERATION", "GENERATION_DONE",
+        "WAITING_FOR_CAST", "WAITING_FOR_SEGMENTS"}
 
 EDITABLE_SETTINGS = [
     # key, label, kind, group
@@ -265,6 +268,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       clips=list_clips(s, job_id), voices=VOICES,
                       link_info=workflow.link_check(s, job),
                       hook_variants=_hook_variants(s, job),
+                      parts=[db.get_job(s.database_path, c) for c in
+                             (json.loads(job.get("brief_json") or "{}").get("long") or {}).get("children", [])],
                       stage_times=workflow.stage_times(s, job_id),
                       perf_fields=learning.METRIC_FIELDS,
                       perf_rows=performance_learning.get_video_performance(s.database_path, job_id),
@@ -699,6 +704,15 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       suggestions=learning.suggestions(s.database_path),
                       rows=learning.rows(s.database_path), info=learning.insights(s.database_path),
                       labels=learning.FEATURE_LABELS, prompt_block=learning.prompt_block(s.database_path))
+
+    @app.post("/api/jobs/{job_id}/scenes/{index}/regenerate")
+    async def api_regenerate_scene(job_id: str, index: int, request: Request):
+        job_or_404(job_id)
+        body = await request.json()
+        try:
+            return workflow.regenerate_scene(S(), job_id, index, body.get("action"), body.get("camera"))
+        except (workflow.WorkflowError, ProviderError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from None
 
     @app.post("/api/jobs/{job_id}/performance")
     async def api_performance(job_id: str, request: Request):
