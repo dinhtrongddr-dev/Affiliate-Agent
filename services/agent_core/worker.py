@@ -49,6 +49,8 @@ def handle_task(settings, task: dict):
     if kind == "publish":
         return workflow.publish_platform(settings, job_id, payload["platform"],
                                          payload.get("action", "draft"))
+    if kind == "prepare_audio":
+        return workflow.prepare_audio(settings, job_id)
     if kind == "render_generated":
         return workflow.resume_after_generation(settings, job_id)
     if kind == "fetch_trends":

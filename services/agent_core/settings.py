@@ -93,7 +93,8 @@ class Settings(BaseSettings):
     use_listing_images: bool = True           # product listing photos (data API) may be used as references
     voice_revoice: bool = True                # fit TTS lines to the mouth movement of talking AI shots
     lipsync_provider: str = "none"            # none | (future) sync.so / fal LatentSync for talking shots
-    visual_qa: bool = True                    # one AI vision pass over the rendered frames
+    visual_qa: bool = True
+    video_encoder: str = "auto"               # auto (NVENC if it works) | nvenc | x264                    # one AI vision pass over the rendered frames
     muse_embedded: bool = True           # app runs the bundled muse2api gateway itself
     muse_gateway_port: int = 18620
     muse_cdp_port: int = 19210

@@ -105,6 +105,55 @@ def speech_windows(ffmpeg: str, clip: Path, start: float, length: float,
     return [(round(w0, 3), round(w1, 3)) for w0, w1 in windows if w1 - w0 >= min_len]
 
 
+def _tts_key(settings, text: str, voice: str) -> str:
+    import hashlib
+    material = "|".join([text, voice, str(settings.tts_rate), str(getattr(settings, "tts_mode", "fast")),
+                         str(getattr(settings, "tts_precision", "auto"))])
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+
+def cached_tts(settings, text: str, voice: str, out: Path) -> Speech:
+    """VieNeu on this CPU takes ~6 s per line: identical (text, voice, rate) lines are made once
+    and reused, e.g. prepared while Muse is still generating, or on a re-render."""
+    import json
+    import shutil
+    cache = Path(settings.work_dir) / "_tts_cache"
+    key = _tts_key(settings, text, voice)
+    wav, meta = cache / f"{key}.wav", cache / f"{key}.json"
+    if wav.is_file() and meta.is_file():
+        out = Path(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(wav, out)
+        duration = float(json.loads(meta.read_text(encoding="utf-8"))["duration"])
+        return Speech(out, duration, evenly_timed_words(text, 0.0, duration))
+    speech = synthesize(text, out, voice, settings.tts_rate, settings.ffprobe_path,
+                        mode=getattr(settings, "tts_mode", "fast"),
+                        precision=getattr(settings, "tts_precision", "auto"))
+    if speech.audio_path and Path(speech.audio_path).is_file():
+        cache.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(speech.audio_path, wav)
+        meta.write_text(json.dumps({"duration": speech.duration}), encoding="utf-8")
+    return speech
+
+
+def prepare_voices(settings, timeline: dict, work_dir: Path) -> int:
+    """Synthesize every line now (while Muse works) so the render only reads the cache."""
+    from .lexicon import load, spoken
+    lexicon = load(getattr(settings, "project_root", None))
+    cast = timeline.get("voice_cast") or {}
+    made = 0
+    for i, scene in enumerate(timeline.get("scenes") or []):
+        lines = [ln for ln in scene.get("lines") or [] if str(ln.get("text") or "").strip()]
+        if not lines and scene.get("voiceover"):
+            lines = [{"speaker": "narrator", "text": scene["voiceover"]}]
+        for k, line in enumerate(lines):
+            voice = (cast.get(line.get("speaker") or "narrator") or {}).get("voice") or settings.tts_voice
+            cached_tts(settings, spoken(line["text"], lexicon), voice,
+                       Path(work_dir) / f"prep_{i:02d}_{k}.wav")
+            made += 1
+    return made
+
+
 def fit_lines(durations: list[float], windows: list[tuple[float, float]]) -> dict[int, tuple[float, float]]:
     """Each line takes the next speech stretch(es): the run of windows whose total span best
     matches the voice. Speed is changed only within FIT_MIN..FIT_MAX; a voice up to 40 %
@@ -156,9 +205,7 @@ def scene_voice(settings, scene: dict, cast: dict, work_dir: Path, index: int,
         out = Path(work_dir) / f"voice_{index:02d}_{k}.wav"
         if settings.tts_enabled:
             # the voice reads brands/units the Vietnamese way; subtitles keep the original words
-            speech = synthesize(spoken(line["text"], lexicon), out, voice, settings.tts_rate,
-                                settings.ffprobe_path, mode=getattr(settings, "tts_mode", "fast"),
-                                precision=getattr(settings, "tts_precision", "auto"))
+            speech = cached_tts(settings, spoken(line["text"], lexicon), voice, out)
             speech = Speech(speech.audio_path, speech.duration,
                             evenly_timed_words(line["text"], 0.0, speech.duration))
         else:

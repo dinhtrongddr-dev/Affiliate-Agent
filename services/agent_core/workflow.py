@@ -872,12 +872,25 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
         except ProviderError as exc:
             _stop(settings, job_id, "NEEDS_MEDIA_REVIEW", exc, viral_score=score)
         if waiting:
+            if settings.tts_enabled:   # voices are made while Muse renders the clips
+                enqueue_task(db, "prepare_audio", job_id)
             _stop(settings, job_id, gen_engine.WAIT_STATUS, None, viral_score=score,
                   generation_tasks=waiting)
     else:
         gen_engine.cancel_job_tasks(db, job_id)
     return _finish_timeline(settings, job, plan, score, product, affiliate_link, analysis,
                             product_img, asset_dir, user_clips, {}, frame_paths)
+
+
+def prepare_audio(settings, job_id: str) -> dict:
+    """Pre-make the voice lines of a storyboard that is waiting for Muse (T1.4)."""
+    state_path = _plan_state_path(settings, job_id)
+    if not state_path.is_file():
+        return {"prepared": 0}
+    plan = json.loads(state_path.read_text(encoding="utf-8")).get("plan") or {}
+    from .editor.voice_track import prepare_voices
+    made = prepare_voices(settings, plan, settings.work_dir / job_id / "prep")
+    return {"prepared": made}
 
 
 def _plan_state_path(settings, job_id: str) -> Path:
@@ -1275,6 +1288,14 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
     shopee_qa.passed = shopee_qa.passed and render_qa.passed
     facebook_qa = validate_facebook_reel(metadata, settings)
 
+    # The AI look at the frames (~90 s) runs while the technical checks and copies happen.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .qa_video import score_video, visual_check
+    product_ref = next(iter(sorted((settings.work_dir / job["id"] / "assets").glob("product_*.jpg"))), None)         if (settings.work_dir / job["id"] / "assets").is_dir() else None
+    pool = ThreadPoolExecutor(max_workers=1)
+    visual_future = pool.submit(visual_check, settings, video_out, timeline, result.scenes, product_ref)
+
     # 2.0: Technical QA on the rendered video
     tech_qa = inspect_rendered_video(video_out, settings, timeline=timeline)
     if tech_qa.critical_errors:
@@ -1294,9 +1315,12 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
         music_used=bool(getattr(result, "music", None)),
     )
 
-    from .qa_video import score_video, visual_check
-    product_ref = next(iter(sorted((settings.work_dir / job["id"] / "assets").glob("product_*.jpg"))), None)         if (settings.work_dir / job["id"] / "assets").is_dir() else None
-    visual = visual_check(settings, video_out, timeline, result.scenes, product_ref)
+    try:
+        visual = visual_future.result()
+    except Exception as exc:  # noqa: BLE001 - never a pass: scored as "not checked"
+        log.warning("visual QA failed: %s", exc)
+        visual = None
+    pool.shutdown(wait=False)
     real_qa = score_video(timeline, result.scenes, float(metadata.get("duration_sec") or 0),
                           bool(getattr(result, "music", None)), visual, job.get("viral_score"),
                           getattr(result, "subtitles", None), tech_qa.passed)

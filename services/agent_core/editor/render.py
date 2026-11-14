@@ -21,10 +21,12 @@ varied xfade transitions, then voice, licensed music (ducked under the
 voice) and karaoke subtitles are mixed and loudness-normalised.
 """
 import logging
+import math
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from .encoder import video_args
 from .ffmpeg import FFmpegError, probe, run_ffmpeg
 from .music import pick_track
 from .subtitles import build_ass
@@ -142,7 +144,7 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
         run_ffmpeg(settings.ffmpeg_path, [
             *inputs, "-filter_complex", graph, "-map", "[v]", "-map", "2:a",
             "-t", f"{duration:.3f}", "-r", str(fps),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p",
+            *video_args(settings, "intermediate"),
             "-c:a", "aac", "-b:a", "160k", "-ar", "44100", str(out),
         ])
         return out
@@ -159,9 +161,14 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
                f"[src];")
         prescale = 1.0
         keep_audio = settings.keep_source_audio and meta["has_audio"]
+        if meta.get("width") and meta.get("height") and \
+                abs(meta["width"] / meta["height"] - w / h) < 0.02:
+            prescale = 0.0   # already 9:16: plain scale, no blurred background pass
 
+    fill = (f"[src]scale={w}:{h}:flags=bicubic,setsar=1,format=yuv420p" if prescale == 0.0
+            else _fill_916("src", w, h, prescale))
     graph = (
-        pre + _fill_916("src", w, h, prescale) + ","
+        pre + fill + ","
         + _motion_filter(motion, frames, w, h, fps)
         + f",trim=end_frame={frames},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v]"
     )
@@ -177,7 +184,7 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
     run_ffmpeg(settings.ffmpeg_path, [
         *inputs, "-filter_complex", graph, "-map", "[v]", *audio_map,
         "-t", f"{duration:.3f}", "-r", str(fps),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p",
+        *video_args(settings, "intermediate"),
         "-c:a", "aac", "-b:a", "160k", "-ar", "44100", str(out),
     ])
     return out
@@ -383,11 +390,13 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     if alt_hooks:   # one decode, two encodes: the hook-free picture is reused for A/B hooks
         filters.append(f"[{vchain}]split=2[vsub][vclean]")
         filters.append("[vsub]ass=subs.ass[vout]")
-        filters[-3] = filters[-3].replace("[aout]", "[amix_out]")   # the audio mix line
-        filters.append("[amix_out]asplit=2[aout][aclean]")
     else:
         filters.append(f"[{vchain}]ass=subs.ass[vout]")
 
+    fps = settings.render_fps
+    cut = math.ceil((hook_end + 0.4) * fps) / fps   # hook variants differ only before this
+    if alt_hooks and cut > total - 1.0:
+        cut = None
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     tmp_out = work_dir / "final.mp4"
@@ -395,11 +404,11 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         run_ffmpeg(settings.ffmpeg_path, [
             *inputs, "-filter_complex", ";".join(filters),
             "-map", "[vout]", "-map", "[aout]", "-t", f"{total:.3f}",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-profile:v", "high", "-movflags", "+faststart",
+            *video_args(settings, "final", keyframe_at=cut if alt_hooks else None),
+            "-movflags", "+faststart",
             "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "final.mp4",
-            *(["-map", "[vclean]", "-map", "[aclean]", "-t", f"{total:.3f}", "-c:v", "libx264",
-               "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+            *(["-map", "[vclean]",
+               "-t", f"{(cut or total):.3f}", *video_args(settings, "intermediate"), "-an",
                "clean.mp4"] if alt_hooks else []),
         ], cwd=work_dir)
     except FFmpegError as exc:
@@ -416,10 +425,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
                       settings.font_name, captions, hook, hook_end, labels, cta, cta_start, total,
                       single_layer=single_layer)
             target = output.with_name(f"{output.stem}_hook{k}{output.suffix}")
-            run_ffmpeg(settings.ffmpeg_path, [
-                "-i", "clean.mp4", "-vf", f"ass=subs_{k}.ass", "-c:v", "libx264", "-preset", "fast",
-                "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-c:a", "copy",
-                str(target)], cwd=work_dir)
+            hook_variant(settings, work_dir, output, f"subs_{k}.ass", cut, total, target)
             variants.append({"index": k, "hook": hook, "path": str(target)})
         except FFmpegError as exc:
             log.warning("hook variant %s failed: %s", k, exc)
@@ -433,6 +439,29 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     return RenderResult(output, round(total, 3), scene_report,
                         str(music) if music else None, has_voice, output.with_suffix(".ass"),
                         music_metadata=music_meta, variants=variants)
+
+
+def hook_variant(settings, work_dir: Path, main: Path, ass: str, cut: float | None,
+                 total: float, target: Path) -> Path:
+    """Same video with another hook: only the first `cut` seconds are encoded again (from the
+    subtitle-free picture); the rest is copied from the main video, which has a keyframe at
+    `cut`. The audio track is the main video's, untouched."""
+    ff = settings.ffmpeg_path
+    if cut is None:   # very short video: encode the whole head
+        cut = total
+    run_ffmpeg(ff, ["-i", "clean.mp4", "-t", f"{cut:.3f}", "-vf", f"ass={ass}",
+                    *video_args(settings, "final"), "-an", f"head_{target.stem}.mp4"], cwd=work_dir)
+    parts = [f"head_{target.stem}.mp4"]
+    if cut < total - 0.05:
+        run_ffmpeg(ff, ["-ss", f"{cut:.3f}", "-i", str(main), "-an", "-c:v", "copy",
+                        f"tail_{target.stem}.mp4"], cwd=work_dir)
+        parts.append(f"tail_{target.stem}.mp4")
+    listing = work_dir / f"parts_{target.stem}.txt"
+    listing.write_text("".join(f"file '{p}'\n" for p in parts), encoding="utf-8")
+    run_ffmpeg(ff, ["-f", "concat", "-safe", "0", "-i", listing.name, "-i", str(main),
+                    "-map", "0:v", "-map", "1:a", "-c", "copy", "-movflags", "+faststart",
+                    "-t", f"{total:.3f}", str(target)], cwd=work_dir)
+    return target
 
 
 def extract_cover(settings, video: Path, at: float, out: Path) -> Path:

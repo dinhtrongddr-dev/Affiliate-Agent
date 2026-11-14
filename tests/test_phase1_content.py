@@ -1,4 +1,5 @@
 """Phase 1: one prompt system, compiled Muse prompts, voice cast, single text layer, real QA."""
+from pathlib import Path
 import json
 
 from agent_core import creative, muse_prompt, voice_cast
@@ -201,3 +202,38 @@ def test_animal_lead_gets_an_animal_reference_photo():
     dog = {"id": "cun", "name": "Cún", "role": "dog", "appearance": "golden puppy, white chest"}
     text = muse_prompt.character_sheet_prompt(dog, {})
     assert "real animal" in text and "Vietnamese person" not in text and "cast:cun" in text
+
+
+def test_encoder_args_fall_back_to_x264(monkeypatch):
+    from types import SimpleNamespace
+    from agent_core.editor import encoder
+    monkeypatch.setattr(encoder, "nvenc_available", lambda ff: False)
+    s = SimpleNamespace(ffmpeg_path="ffmpeg", video_encoder="auto")
+    final = encoder.video_args(s, "final", keyframe_at=2.5)
+    assert final[:4] == ["-c:v", "libx264", "-preset", "veryfast"] and "2.500" in final
+    assert encoder.video_args(s, "intermediate")[3] == "ultrafast"
+    monkeypatch.setattr(encoder, "nvenc_available", lambda ff: True)
+    assert encoder.video_args(s, "final", keyframe_at=2.5)[1] == "h264_nvenc"
+    assert "-forced-idr" in encoder.video_args(s, "final", keyframe_at=2.5)
+    s.video_encoder = "x264"
+    assert encoder.video_args(s)[1] == "libx264"
+
+
+def test_tts_cache_reuses_lines(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from agent_core.editor import voice_track
+    from agent_core.editor.tts import Speech
+    calls = []
+
+    def fake(text, out, *a, **k):
+        calls.append(text)
+        Path(out).write_bytes(b"wav")
+        return Speech(Path(out), 1.5, [])
+    monkeypatch.setattr(voice_track, "synthesize", fake)
+    s = SimpleNamespace(work_dir=tmp_path, tts_rate="+0%", tts_mode="fast", tts_precision="auto",
+                        ffprobe_path="ffprobe")
+    a = voice_track.cached_tts(s, "Xin chào", "Mai Anh", tmp_path / "a.wav")
+    b = voice_track.cached_tts(s, "Xin chào", "Mai Anh", tmp_path / "b.wav")
+    voice_track.cached_tts(s, "Xin chào", "Đức Trí", tmp_path / "c.wav")
+    assert calls == ["Xin chào", "Xin chào"] and b.duration == a.duration == 1.5
+    assert (tmp_path / "b.wav").read_bytes() == b"wav"
