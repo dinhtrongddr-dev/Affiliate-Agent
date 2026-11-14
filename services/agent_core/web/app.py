@@ -139,6 +139,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
             worker = Worker(settings)
             worker.start()
             state["worker"] = worker
+            from .. import version_check
+            version_check.start_background(settings.project_root)
         if settings.tts_enabled:
             import threading
             from ..editor.tts import warmup_engine
@@ -195,7 +197,12 @@ def create_app(start_worker: bool = True) -> FastAPI:
         s = S()
         aff = ShopeeAffiliateClient(s).credentials_status()["sections"]["shopee_affiliate"]
         music = list_tracks(s.music)
-        return [
+        from .. import version_check
+        ver = version_check.status()
+        update = ([{"name": f"Có {ver['behind']} bản cập nhật mới trên GitHub", "ok": False,
+                    "hint": "Đóng app rồi chạy scripts\\update.cmd (tự sao lưu CSDL và mở lại app)"}]
+                  if ver.get("behind") else [])
+        return update + [
             {"name": "FFmpeg", "ok": bool(shutil.which(s.ffmpeg_path)), "hint": "Cài FFmpeg vào PATH"},
             {"name": "AI gateway", "ok": bool(s.ai_api_key.get_secret_value()),
              "hint": "Nhập AI API key trong Cài đặt"},

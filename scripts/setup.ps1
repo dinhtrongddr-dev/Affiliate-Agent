@@ -83,6 +83,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Thu vien chua dung: xem loi o tren.' }
 $ok.Add('Thu vien Python: OK')
 
 # Playwright browser (Shopee Creator login)
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $Root 'cache\playwright'   # same place start-app.cmd uses
 & $venvPy -m playwright install chromium | Out-Null
 $ok.Add('Playwright Chromium: OK')
 
