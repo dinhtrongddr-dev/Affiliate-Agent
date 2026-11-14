@@ -76,6 +76,41 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Comman
 }
 $ok.Add('ffmpeg: ' + (& ffmpeg -hide_banner -version | Select-Object -First 1))
 
+# ------------------------------------------------------------------ Visual C++ runtime
+# The voice engine (onnxruntime) needs VC++ 2015-2022 runtime 14.40+; an older one makes the app
+# crash with 0xC0000005 (exit -1073741819) while loading the voice model.
+Step 'Microsoft Visual C++ Runtime'
+function Get-VCVersion {
+    foreach ($k in @('HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
+                     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64')) {
+        try {
+            $r = Get-ItemProperty $k -ErrorAction Stop
+            if ($r.Installed -eq 1) { return [version]("{0}.{1}.{2}" -f $r.Major, $r.Minor, $r.Bld) }
+        } catch {}
+    }
+    return $null
+}
+$vc = Get-VCVersion
+if (-not $vc -or $vc -lt [version]'14.40.0') {
+    Write-Host "VC++ Runtime $(if ($vc) { $vc } else { 'chua co' }): dang cai ban moi (co the hien hop thoai xin quyen Admin, bam Yes)..." -ForegroundColor Yellow
+    $done = $false
+    if (Has-Winget) {
+        winget install -e --id Microsoft.VCRedist.2015+.x64 --accept-package-agreements --accept-source-agreements --silent
+        $done = (Get-VCVersion) -ge [version]'14.40.0'
+    }
+    if (-not $done) {
+        $vcExe = Join-Path $env:TEMP 'vc_redist.x64.exe'
+        Invoke-WebRequest 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile $vcExe -UseBasicParsing
+        Start-Process $vcExe -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait
+        $done = (Get-VCVersion) -ge [version]'14.40.0'
+    }
+    $vc = Get-VCVersion
+    if ($done) { $ok.Add("VC++ Runtime: $vc") }
+    else { $todo.Add('Cai Microsoft Visual C++ Runtime: https://aka.ms/vs/17/release/vc_redist.x64.exe (thieu thi giong doc se loi).') }
+} else {
+    $ok.Add("VC++ Runtime: $vc")
+}
+
 # ------------------------------------------------------------------ .venv + packages
 Step 'Thu vien Python (.venv)'
 $venvPy = Join-Path $Root '.venv\Scripts\python.exe'
@@ -222,7 +257,7 @@ if ($Import) {
 if (-not $SkipModels) {
     Step 'Model giong VieNeu (tai lan dau ~0,8 GB)'
     & $venvPy -c "from agent_core.editor.tts import get_engine; get_engine('fast'); print('VieNeu OK')"
-    if ($LASTEXITCODE -eq 0) { $ok.Add('Model giong VieNeu: OK') } else { $todo.Add('Model giong VieNeu chua tai duoc: kiem tra mang roi chay lai.') }
+    if ($LASTEXITCODE -eq 0) { $ok.Add('Model giong VieNeu: OK') } else { $todo.Add('Giong VieNeu chua chay duoc (xem dong loi o tren): kiem tra mang / cai VC++ Runtime https://aka.ms/vs/17/release/vc_redist.x64.exe roi chay lai setup. App van mo duoc, chi tam khong co giong doc.') }
 }
 & $venvPy -c "from agent_core.editor.encoder import nvenc_available; import sys; sys.exit(0 if nvenc_available('ffmpeg') else 1)"
 if ($LASTEXITCODE -eq 0) { $ok.Add('Ma hoa GPU (NVENC): co') } else { $ok.Add('Ma hoa GPU (NVENC): khong co, dung x264 (cham hon, van chay)') }
@@ -233,8 +268,8 @@ try {
     $shell = New-Object -ComObject WScript.Shell
     $desk = [Environment]::GetFolderPath('Desktop')
     $items = @(
-        @{ Name = 'Affiliate Agent'; Target = (Join-Path $Root 'scripts\start-app.cmd') },
-        @{ Name = 'Cap nhat Affiliate Agent'; Target = (Join-Path $Root 'scripts\update.cmd') }
+        @{ Name = 'Affiliate Agent'; Target = (Join-Path $Root 'scripts\start-app.cmd'); Icon = (Join-Path $Root 'assets\app.ico') },
+        @{ Name = 'Cap nhat Affiliate Agent'; Target = (Join-Path $Root 'scripts\update.cmd'); Icon = "$env:SystemRoot\System32\shell32.dll,238" }
     )
     if ($script:ChatGPT2ApiStart) { $items += @{ Name = 'ChatGPT2API'; Target = $script:ChatGPT2ApiStart } }
     foreach ($it in $items) {
@@ -243,6 +278,8 @@ try {
         $lnk.TargetPath = "$env:SystemRoot\System32\cmd.exe"
         $lnk.Arguments = '/k "' + $it.Target + '"'
         $lnk.WorkingDirectory = Split-Path -Parent $it.Target
+        if ($it.Icon -and (Test-Path ($it.Icon -replace ',\d+$', ''))) { $lnk.IconLocation = $it.Icon }
+        $lnk.Description = $it.Name
         $lnk.Save()
     }
     $ok.Add('Loi tat Desktop: ' + (($items | ForEach-Object { $_.Name }) -join ', '))

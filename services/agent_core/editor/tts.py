@@ -82,6 +82,40 @@ def cpu_supports_vnni() -> bool:
 
 _engines: dict[str, Any] = {}
 _engine_lock = threading.Lock()
+_probe: dict[str, str] = {}   # cache_key -> "" (safe) or the error message
+
+CRASH_HINT = ("Engine giọng VieNeu bị crash khi nạp (thường do Microsoft Visual C++ Runtime cũ/thiếu). "
+              "Chạy lại scripts\\setup.ps1 để cài bản mới, hoặc cài https://aka.ms/vs/17/release/vc_redist.x64.exe")
+
+
+def _probe_engine(engine_mode: str, prec: str | None) -> str:
+    """Load the engine once in a child process first.
+
+    The voice engine is native code (onnxruntime); on some machines it crashes the whole
+    process (access violation), which would take the app down with it. A crash in the child
+    only disables the voice. Returns "" when safe, else the reason.
+    """
+    import os
+    import subprocess
+    import sys
+    if os.environ.get("AA_TTS_SKIP_PROBE") == "1":
+        return ""
+    args = f"mode={engine_mode!r}" + (f", precision={prec!r}" if prec else "")
+    try:
+        r = subprocess.run([sys.executable, "-c", f"from vieneu import Vieneu; Vieneu({args}); print('ok')"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return ""          # slow first download: not a crash, let the in-process load try
+    except Exception as exc:  # cannot spawn: do not block the voice for that
+        log.debug("TTS probe could not run: %s", exc)
+        return ""
+    if r.returncode == 0:
+        return ""
+    if r.returncode < 0 or r.returncode > 0x7FFFFFFF or r.returncode in (3221225477, 3221225501):
+        return f"{CRASH_HINT} (mã thoát {r.returncode})"
+    tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or [""]
+    return f"Không nạp được engine giọng VieNeu: {tail[0][:300]}"
 
 
 def get_engine(mode: str = "fast", precision: str = "auto") -> tuple[Any, str]:
@@ -107,6 +141,12 @@ def get_engine(mode: str = "fast", precision: str = "auto") -> tuple[Any, str]:
 
     with _engine_lock:
         if cache_key not in _engines:
+            if cache_key not in _probe:
+                _probe[cache_key] = _probe_engine(engine_mode, prec)
+                if _probe[cache_key]:
+                    log.error("%s", _probe[cache_key])
+            if _probe[cache_key]:
+                raise RuntimeError(_probe[cache_key])
             from vieneu import Vieneu
             log.info("Loading VieNeu-TTS engine: mode=%s, precision=%s", engine_mode, prec)
             if engine_mode == "v3nano":
@@ -122,7 +162,7 @@ def warmup_engine(mode: str = "fast", precision: str = "auto") -> None:
         log.info("Warming up VieNeu-TTS engine in background: mode=%s", mode)
         get_engine(mode=mode, precision=precision)
     except Exception as exc:
-        log.debug("Warmup VieNeu-TTS engine failed: %s", exc)
+        log.warning("Warmup VieNeu-TTS engine failed: %s", exc)
 
 
 def parse_rate(rate: str | float | int | None) -> float:
