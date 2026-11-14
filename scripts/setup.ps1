@@ -239,7 +239,9 @@ try {
     if ($script:ChatGPT2ApiStart) { $items += @{ Name = 'ChatGPT2API'; Target = $script:ChatGPT2ApiStart } }
     foreach ($it in $items) {
         $lnk = $shell.CreateShortcut((Join-Path $desk ($it.Name + '.lnk')))
-        $lnk.TargetPath = $it.Target
+        # cmd /k keeps the window open, so any error stays readable
+        $lnk.TargetPath = "$env:SystemRoot\System32\cmd.exe"
+        $lnk.Arguments = '/k "' + $it.Target + '"'
         $lnk.WorkingDirectory = Split-Path -Parent $it.Target
         $lnk.Save()
     }
