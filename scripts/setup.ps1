@@ -257,9 +257,9 @@ if ($ChatGPT2ApiDir -and (Test-Path (Join-Path $ChatGPT2ApiDir 'main.py'))) {
         for ($i = 0; $i -lt 45 -and -not (Test-C2A); $i++) { Start-Sleep 2 }
     }
     if (Test-C2A) { $ok.Add("ChatGPT2API: $ChatGPT2ApiDir dang chay tai 127.0.0.1:$port (key da noi)") }
-    else { $todo.Add("ChatGPT2API chua chay: mo $ChatGPT2ApiDir\start.cmd roi chay lai setup.") }
+    else { $todo.Add("ChatGPT2API chua chay: mo loi tat 'ChatGPT2API' tren Desktop (no in ra ly do loi), sua roi chay lai setup.") }
     # shortcut to start it later
-    $script:ChatGPT2ApiStart = Join-Path $ChatGPT2ApiDir 'start.cmd'
+    $script:ChatGPT2ApiStart = Join-Path $Root 'scripts\start-chatgpt2api.cmd'   # starts it AND reports OK / the error
 } else {
     $todo.Add("Cai ChatGPT2API: git clone $C2AUrl, chay setup.ps1 trong do, roi chay lai script nay.")
 }
