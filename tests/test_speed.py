@@ -28,13 +28,15 @@ def test_reuse_of_points_to_an_earlier_generated_clip():
 
 
 def test_storyboard_issues_are_checked_in_code():
-    good = {"creation_branch": "viral_creator", "scenes": [
-        {"duration": 5, "lines": [{"text": "Mẹ ơi con về rồi nè"}]} for _ in range(5)]}
+    line = "Vì mẹ đi làm về muộn nên cả nhà quyết định nấu cơm thật ngon tặng mẹ"   # 16 words
+    good = {"creation_branch": "viral_creator", "takeaway": "Cả nhà nấu cơm tặng mẹ",
+            "scenes": [{"lines": [{"text": line}]} for _ in range(3)]}
     assert creative.storyboard_issues(good) == []
-    long = {"creation_branch": "viral_creator", "scenes": [
-        {"duration": 2, "lines": [{"text": " ".join(["chữ"] * 12)}]} for _ in range(25)]}
+    long = {"creation_branch": "viral_creator", "takeaway": "x",
+            "scenes": [{"lines": [{"text": " ".join(["chữ"] * 12)}]} for _ in range(25)]}
     issues = creative.storyboard_issues(long)
-    assert any("Tổng thời lượng" in i for i in issues) and any("rút gọn" in i for i in issues)
+    # the voice decides the length now: 300 words is far over 30 s
+    assert any("Thời lượng ước theo lời" in i for i in issues) and any("quá dài" in i for i in issues)
 
 
 def test_parallel_cap_limits_submissions(tmp_path, monkeypatch):

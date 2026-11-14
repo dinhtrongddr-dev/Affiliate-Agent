@@ -88,7 +88,8 @@ class Settings(BaseSettings):
     videogen_clip_seconds: int = 6
     videogen_character: bool = True      # make one character reference image first
     videogen_task_timeout_minutes: int = 15
-    videogen_continuity_chain: bool = False  # chain every same-place shot (slow); "continuous" shots always chain
+    videogen_continuity_chain: bool = True   # takes of one sequence continue from the last frame
+    voice_led: bool = True                    # narration is the spine: cuts follow the voice track
     videogen_parallel: int = 6               # Muse clips in flight at once
     style_profile: str = ""                   # ugc_phone | sitcom_bright | cinematic; empty = by branch
     use_listing_images: bool = True           # product listing photos (data API) may be used as references

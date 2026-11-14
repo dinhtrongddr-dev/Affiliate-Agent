@@ -39,7 +39,7 @@ def sample_frames(settings, video: Path, scene_report: list[dict], out_dir: Path
     return frames
 
 
-def visual_prompt(timeline: dict, n_frames: int, has_product_ref: bool) -> str:
+def visual_prompt(timeline: dict, n_frames: int, has_product_ref: bool, spoken: list[str] | None = None) -> str:
     cast = [{k: c.get(k) for k in ("id", "name", "gender", "age", "wardrobe")}
             for c in timeline.get("characters") or []]
     product_note = (f"Ảnh cuối cùng (ảnh {n_frames + 1}) là ảnh sản phẩm thật; so sản phẩm trong video với ảnh đó."
@@ -55,10 +55,12 @@ Chấm 0-10 (10 = tốt nhất), null nếu không áp dụng:
 - subtitle_readable: phụ đề đọc được, không chồng dòng, không che mặt
 - phone_realism: trông như clip người thật quay bằng điện thoại (10) hay quảng cáo AI bóng bẩy (0)
 - hook_stop_power: khung hook có khiến người lướt dừng lại không
+- speech_match: hình mỗi cảnh có minh hoạ đúng câu đang được đọc lúc đó không (null nếu không có lời).
+  Câu đọc ở mỗi ảnh (ảnh 1 = hook, ảnh 2.. = các cảnh): {json.dumps(spoken or [], ensure_ascii=False)[:1500]}
 - bad_frames: số thứ tự các ảnh (1, 2, ...) có lỗi hình nặng cần làm lại: mặt/tay méo, đổi người,
   sai sản phẩm, vật thể biến dạng. Không liệt kê lỗi nhỏ.
 Trả DUY NHẤT JSON: {{"face_consistency":8,"wardrobe_consistency":8,"product_match":null,"artifacts":9,
-"subtitle_readable":9,"phone_realism":7,"hook_stop_power":6,"bad_frames":[],"issues":["lỗi cụ thể bằng tiếng Việt"]}}"""
+"subtitle_readable":9,"phone_realism":7,"hook_stop_power":6,"speech_match":8,"bad_frames":[],"issues":["lỗi cụ thể bằng tiếng Việt"]}}"""
 
 
 def visual_check(settings, video: Path, timeline: dict, scene_report: list[dict],
@@ -70,7 +72,9 @@ def visual_check(settings, video: Path, timeline: dict, scene_report: list[dict]
     if len(frames) < 2:
         return None
     images = frames + ([product_ref] if product_ref and Path(product_ref).is_file() else [])
-    prompt = visual_prompt(timeline, len(frames), len(images) > len(frames))
+    spoken = [" ".join(ln.get("text") or "" for ln in (s.get("lines") or [])) or s.get("voiceover") or ""
+              for s in [scene_report[0] if scene_report else {}] + list(scene_report)][:len(frames)]
+    prompt = visual_prompt(timeline, len(frames), len(images) > len(frames), spoken)
     try:
         if ask is None:
             from .workflow import _ask_json, _client
@@ -89,6 +93,10 @@ def visual_check(settings, video: Path, timeline: dict, scene_report: list[dict]
         except (TypeError, ValueError):
             result[key] = None
     result["issues"] = [str(i)[:200] for i in (raw.get("issues") or [])[:8]]
+    try:
+        result["speech_match"] = None if raw.get("speech_match") is None else max(0.0, min(10.0, float(raw["speech_match"])))
+    except (TypeError, ValueError):
+        result["speech_match"] = None
     # image 1 is the hook frame (scene 0 at 0.8 s); image k >= 2 is the middle of scene k-2
     bad = set()
     for value in raw.get("bad_frames") or []:
@@ -149,9 +157,47 @@ def text_layers(ass_path: Path | None) -> int:
     return len(styles)
 
 
+COVERAGE_MIN, MAX_GAP, SEAM_MIN = 0.85, 0.8, 0.5
+
+
+def voice_flow(segments: list | None, total: float, pauses: int = 0) -> dict:
+    """How much of the video is narrated and the longest silence between words (S5)."""
+    if not segments or total <= 0:
+        return {"coverage": None, "max_gap": None}
+    segs = sorted(segments)
+    spoken = sum(e - s for s, e in segs)
+    gaps = [b[0] - a[1] for a, b in zip(segs, segs[1:], strict=False)]
+    # deliberate "pause" beats are allowed one long breath each
+    allowed = sorted(gaps, reverse=True)[pauses:] if pauses else gaps
+    return {"coverage": round(spoken / total, 3), "max_gap": round(max(allowed, default=0.0), 2)}
+
+
+def seam_similarity(settings, video: Path, seams: list | None) -> list[float]:
+    """SSIM across each cut inside a sequence (frame just before vs just after)."""
+    import re
+    import subprocess
+    out = []
+    for seam in seams or []:
+        if not seam.get("same_sequence"):
+            continue
+        at = float(seam["at"])
+        try:
+            a = subprocess.run([settings.ffmpeg_path, "-v", "info", "-ss", f"{max(0.0, at - 0.12):.2f}", "-i",
+                                str(video), "-ss", f"{at + 0.12:.2f}", "-i", str(video), "-lavfi",
+                                "[0:v]scale=180:320,trim=end_frame=1[a];[1:v]scale=180:320,trim=end_frame=1[b];[a][b]ssim",
+                                "-frames:v", "1", "-f", "null", "-"], capture_output=True, text=True, timeout=60).stderr
+            m = re.search(r"All:([\d.]+)", a)
+            if m:
+                out.append(round(float(m.group(1)), 3))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 def score_video(timeline: dict, scene_report: list[dict], duration: float, music: bool,
                 visual: dict | None, ai_review: float | None, ass_path: Path | None,
-                tech_passed: bool = True) -> dict:
+                tech_passed: bool = True, voice_segments: list | None = None,
+                seam_ssim: list | None = None) -> dict:
     branch = timeline.get("creation_branch") or ""
     from .formats import duration_range
     low, high = duration_range(timeline) if branch else DURATION_TARGETS.get(branch, (12.0, 45.0))
@@ -190,6 +236,40 @@ def score_video(timeline: dict, scene_report: list[dict], duration: float, music
     facts += 3 if tech_passed else 0
     parts = {"facts": (facts, 30.0)}
 
+    # flow (S5): narration coverage, silences, seams inside sequences, comprehension
+    flow_points, flow_cap = 0.0, 0.0
+    vf = voice_flow(voice_segments, duration, sum(1 for s in scene_report if s.get("pause")))
+    if vf["coverage"] is not None:
+        flow_cap += 10
+        flow_points += 10 * min(1.0, vf["coverage"] / COVERAGE_MIN)
+        if vf["coverage"] < COVERAGE_MIN:
+            issues.append(f"Giọng chỉ phủ {vf['coverage'] * 100:.0f}% thời lượng (cần ≥ {COVERAGE_MIN * 100:.0f}%)")
+        flow_cap += 5
+        flow_points += 5 if vf["max_gap"] <= MAX_GAP else max(0.0, 5 - 4 * (vf["max_gap"] - MAX_GAP))
+        if vf["max_gap"] > MAX_GAP:
+            issues.append(f"Khoảng lặng dài {vf['max_gap']:.1f}s giữa các câu")
+        if vf["coverage"] < 0.6:
+            gates.append("voice_gaps")
+    if seam_ssim:
+        smooth = sum(1 for v in seam_ssim if v >= SEAM_MIN) / len(seam_ssim)
+        flow_cap += 5
+        flow_points += 5 * smooth
+        if smooth < 1:
+            issues.append(f"{sum(1 for v in seam_ssim if v < SEAM_MIN)} chỗ nối trong chuỗi cảnh bị nhảy hình")
+    test = timeline.get("viewer_test") or {}
+    if test.get("flow") is not None:
+        flow_cap += 10
+        flow_points += float(test["flow"])
+        if test.get("hook_answered") is False:
+            issues.append("Người xem lạ không thấy hook được trả lời")
+    if visual and visual.get("speech_match") is not None:
+        flow_cap += 10
+        flow_points += float(visual["speech_match"])
+        if visual["speech_match"] < 6:
+            issues.append("Hình chưa minh hoạ đúng điều đang nói")
+    if flow_cap:
+        parts["flow"] = (flow_points, flow_cap)
+
     # visual (50)
     if visual:
         values = [visual[k] for k in VISUAL_FIELDS if visual.get(k) is not None]
@@ -223,5 +303,6 @@ def score_video(timeline: dict, scene_report: list[dict], duration: float, music
         status = "CONDITIONAL_PASS"   # without a look at the frames it is never "priority"
     return {"total_score": total, "status": status, "visual_checked": visual is not None,
             "breakdown": {k: round(v, 1) for k, (v, _) in parts.items()},
+            "voice_coverage": vf["coverage"], "max_silence": vf["max_gap"], "seam_ssim": seam_ssim or [],
             "visual": visual, "gates": gates, "improvements": issues, "strengths": [],
             "subtitle_overlaps": overlaps, "text_layers": layers}

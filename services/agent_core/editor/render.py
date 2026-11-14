@@ -56,6 +56,8 @@ class RenderResult:
     subtitles: Path
     music_metadata: dict | None = None
     variants: list | None = None
+    voice_segments: list | None = None
+    seams: list | None = None
 
 
 def _motion_filter(motion: str, frames: int, w: int, h: int, fps: int) -> str:
@@ -164,8 +166,10 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
     else:
         meta = probe(settings.ffprobe_path, source)
         start = max(0.0, min(float(scene.get("start") or 0), max(0.0, meta["duration_sec"] - 0.5)))
-        inputs = ["-ss", f"{start:.3f}", "-t", f"{duration + 0.5:.3f}", "-i", str(source)]
-        pre = (f"[0:v]fps={fps},tpad=stop_mode=clone:stop_duration={duration + 0.5:.3f}"
+        speed = float(scene.get("speed") or 1.0)
+        inputs = ["-ss", f"{start:.3f}", "-t", f"{(duration + 0.5) * speed:.3f}", "-i", str(source)]
+        retime = f"setpts=PTS/{speed:.4f}," if abs(speed - 1.0) > 0.01 else ""
+        pre = (f"[0:v]{retime}fps={fps},tpad=stop_mode=clone:stop_duration={duration + 0.5:.3f}"
                f"[src];")
         prescale = 1.0
         keep_audio = settings.keep_source_audio and meta["has_audio"]
@@ -175,6 +179,10 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
 
     fill = (f"[src]scale={w}:{h}:flags=bicubic,setsar=1,format=yuv420p" if prescale == 0.0
             else _fill_916("src", w, h, prescale))
+    grade = scene.get("grade") or {}
+    if grade:   # even out brightness/saturation drift inside a sequence (S3.6)
+        fill += (f",eq=brightness={float(grade.get('brightness', 0)):.3f}"
+                 f":saturation={float(grade.get('saturation', 1)):.3f}")
     graph = (
         pre + fill + ","
         + _motion_filter(motion, frames, w, h, fps)
@@ -198,7 +206,7 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
     return out
 
 
-def chain_graph(durations: list[float], t: float, seed: int = 0, only: str | None = None
+def chain_graph(durations: list[float], t, seed: int = 0, only: str | None = None
                 ) -> tuple[list[str], str, str, float, list[float]]:
     """xfade/acrossfade chain over inputs 0..n-1.
 
@@ -211,13 +219,15 @@ def chain_graph(durations: list[float], t: float, seed: int = 0, only: str | Non
     length = durations[0]
     vprev, aprev = "0:v", "0:a"
     for i in range(1, len(durations)):
-        offset = length - t
+        ti = t[i] if isinstance(t, (list, tuple)) else t   # one length per seam (S3.5)
+        ti = max(0.04, ti)
+        offset = length - ti
         trans = only or TRANSITIONS[(i + seed) % len(TRANSITIONS)]
         vout, aout = f"xv{i}", f"xa{i}"
-        parts.append(f"[{vprev}][{i}:v]xfade=transition={trans}:duration={t}:offset={offset:.3f}[{vout}]")
-        parts.append(f"[{aprev}][{i}:a]acrossfade=d={t}:c1=tri:c2=tri[{aout}]")
+        parts.append(f"[{vprev}][{i}:v]xfade=transition={trans}:duration={ti}:offset={offset:.3f}[{vout}]")
+        parts.append(f"[{aprev}][{i}:a]acrossfade=d={ti}:c1=tri:c2=tri[{aout}]")
         starts.append(offset)
-        length = length + durations[i] - t
+        length = length + durations[i] - ti
         vprev, aprev = vout, aout
     return parts, vprev, aprev, length, starts
 
@@ -233,69 +243,37 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         raise RenderError("Timeline has no scenes with a visual source")
     seed = sum(map(ord, seed_text)) % 7
 
-    from .voice_track import scene_voice
     cast = timeline.get("voice_cast") or {}
     style = str(timeline.get("style_profile") or "")
     hard_cuts = style in {"ugc_phone", "sitcom_bright"}
     trans = 0.08 if hard_cuts else settings.transition_seconds
 
-    # 1) Voice per scene decides each scene's duration (never longer than the real footage
-    #    plus 0.3 s, so a freeze frame can no longer cover a long line).
-    voices = []
-    durations: list[float] = []
-    used_windows: dict[str, list[tuple[float, float]]] = {}
-    for i, scene in enumerate(scenes):
-        available = None
-        clip_window = None
-        if scene.get("kind", "video") == "video" and Path(scene["source"]).is_file():
-            try:
-                src_len = probe(settings.ffprobe_path, Path(scene["source"]))["duration_sec"]
-                available = max(0.5, src_len - float(scene.get("start") or 0))
-                if (scene.get("generated") and not scene.get("talking")
-                        and not float(scene.get("start") or 0) and src_len > float(scene.get("duration") or 4) + 1):
-                    shift = best_cut(settings, Path(scene["source"]), src_len,
-                                     float(scene.get("duration") or 4), used_windows.get(scene["source"]))
-                    if shift:
-                        scene = scenes[i] = {**scene, "start": shift}
-                        available = max(0.5, src_len - shift)
-                if scene.get("generated") and scene.get("talking"):
-                    # start the cut just before the character starts talking
-                    from .voice_track import speech_windows
-                    found = speech_windows(getattr(settings, "ffmpeg_path", "ffmpeg"),
-                                           Path(scene["source"]), 0.0, src_len)
-                    if found and found[0][0] > 0.4:
-                        shift = round(found[0][0] - 0.3, 3)
-                        scene = scenes[i] = {**scene, "start": shift}
-                        available = max(0.5, src_len - shift)
-                    clip_window = (Path(scene["source"]), float(scene.get("start") or 0), available)
-            except Exception:  # noqa: BLE001 - probe failure: keep old behaviour
-                available = None
-        voice = scene_voice(settings, scene, cast, work_dir, i, clip_window)
-        voices.append(voice)
-        wanted = float(scene.get("duration") or 2.5)
-        needed = voice.end + 0.3 + (trans if i else 0.15)
-        duration = max(MIN_SCENE, wanted, needed)
-        if available is not None:
-            duration = min(duration, available + 0.3) if needed <= available + 0.3 else duration
-        durations.append(round(min(MAX_SCENE + 4.5, duration), 3))
-        if scene.get("kind", "video") == "video":
-            start = float(scene.get("start") or 0)
-            used_windows.setdefault(scene["source"], []).append((start, start + durations[-1]))
+    voice_led = bool(getattr(settings, "voice_led", True) and timeline.get("creation_branch"))
+    edit = None
+    if voice_led:
+        edit = _voice_led_edit(settings, scenes, cast, work_dir)
+        scenes, voices, durations = edit["scenes"], edit["voices"], edit["durations"]
+    else:
+        voices, durations = _scene_led_durations(settings, scenes, cast, work_dir, trans)
     speeches = [Speech(None, v.end, v.words) for v in voices]
 
     # 2) Normalised scene clips
     clips = []
     for i, scene in enumerate(scenes):
-        if scene.get("generated") and hard_cuts:
+        if scene.get("generated") and (hard_cuts or voice_led):
             scene = {**scene, "motion": "none"}   # no fake zoom on real-looking footage
         clips.append(render_scene(settings, scene, durations[i], work_dir / f"scene_{i:02d}.mp4", i))
 
-    # 3) Transitions chain (phone-style profiles use near-hard cuts)
-    chain_parts, vchain, achain, total, starts = chain_graph(durations, trans, seed,
-                                                             "fade" if hard_cuts else None)
+    # 3) Transitions: voice-led edits cut inside a sequence and dissolve between sequences
+    if edit:
+        chain_parts, vchain, achain, total, starts = chain_graph(durations, edit["seams"], seed, "fade")
+        voice_offsets = edit["voice_offsets"]
+    else:
+        chain_parts, vchain, achain, total, starts = chain_graph(durations, trans, seed,
+                                                                 "fade" if hard_cuts else None)
+        voice_offsets = [starts[i] for i in range(len(scenes))]
 
     # 4) Subtitles & Voice offsets
-    voice_offsets = [starts[i] for i in range(len(scenes))]
     captions = [(voice_offsets[i], sp.words) for i, sp in enumerate(speeches)]
     labels = []
     if not timeline.get("creation_branch"):   # storyboards keep a single text layer
@@ -441,6 +419,18 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
             variants.append({"index": k, "hook": hook, "path": str(target)})
         except FFmpegError as exc:
             log.warning("hook variant %s failed: %s", k, exc)
+    voice_segments = []
+    for i, voice in enumerate(voices):
+        for part in voice.parts:
+            if part.duration > 0:
+                voice_segments.append((round(voice_offsets[i] + part.offset, 3),
+                                       round(voice_offsets[i] + part.offset + part.duration, 3)))
+    seams_report = []
+    for i in range(1, len(scenes)):
+        seams_report.append({"at": round(starts[i] + (edit["seams"][i] if edit else 0) / 2, 3),
+                             "same_sequence": bool(scenes[i].get("group")) and
+                             scenes[i].get("group") == scenes[i - 1].get("group"),
+                             "chained": bool(scenes[i].get("chain_in"))})
     scene_report = [
         {**scene, "rendered_duration": durations[i], "start_at": round(starts[i], 3),
          "voice": any(p.audio for p in voices[i].parts), "revoice": voices[i].revoice,
@@ -450,7 +440,8 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     shutil.copyfile(subs, output.with_suffix(".ass"))
     return RenderResult(output, round(total, 3), scene_report,
                         str(music) if music else None, has_voice, output.with_suffix(".ass"),
-                        music_metadata=music_meta, variants=variants)
+                        music_metadata=music_meta, variants=variants,
+                        voice_segments=voice_segments, seams=seams_report)
 
 
 def hook_variant(settings, work_dir: Path, main: Path, ass: str, cut: float | None,
@@ -474,6 +465,111 @@ def hook_variant(settings, work_dir: Path, main: Path, ass: str, cut: float | No
                     "-map", "0:v", "-map", "1:a", "-c", "copy", "-movflags", "+faststart",
                     "-t", f"{total:.3f}", str(target)], cwd=work_dir)
     return target
+
+
+def _scene_led_durations(settings, scenes, cast, work_dir, trans):
+    """Legacy edit (base videos): each scene lasts as long as its picture wants, voice inside."""
+    from .voice_track import scene_voice
+    voices, durations = [], []
+    used_windows: dict[str, list[tuple[float, float]]] = {}
+    for i, scene in enumerate(scenes):
+        available = None
+        if scene.get("kind", "video") == "video" and Path(scene["source"]).is_file():
+            try:
+                src_len = probe(settings.ffprobe_path, Path(scene["source"]))["duration_sec"]
+                available = max(0.5, src_len - float(scene.get("start") or 0))
+                if (scene.get("generated") and not float(scene.get("start") or 0)
+                        and src_len > float(scene.get("duration") or 4) + 1):
+                    shift = best_cut(settings, Path(scene["source"]), src_len,
+                                     float(scene.get("duration") or 4), used_windows.get(scene["source"]))
+                    if shift:
+                        scene = scenes[i] = {**scene, "start": shift}
+                        available = max(0.5, src_len - shift)
+            except Exception:  # noqa: BLE001
+                available = None
+        voice = scene_voice(settings, scene, cast, work_dir, i, None)
+        voices.append(voice)
+        wanted = float(scene.get("duration") or 2.5)
+        needed = voice.end + 0.3 + (trans if i else 0.15)
+        duration = max(MIN_SCENE, wanted, needed)
+        if available is not None:
+            duration = min(duration, available + 0.3) if needed <= available + 0.3 else duration
+        durations.append(round(min(MAX_SCENE + 4.5, duration), 3))
+        if scene.get("kind", "video") == "video":
+            start = float(scene.get("start") or 0)
+            used_windows.setdefault(scene["source"], []).append((start, start + durations[-1]))
+    return voices, durations
+
+
+def _voice_led_edit(settings, scenes, cast, work_dir) -> dict:
+    """S1 + S3: narration laid end to end, pictures cut to it, sequence continuity kept."""
+    from . import edit_plan
+    from .voice_track import SceneVoice, scene_voice, speech_windows
+    ffmpeg = getattr(settings, "ffmpeg_path", "ffmpeg")
+    scenes = [dict(sc) for sc in scenes]
+    lengths: dict[str, float] = {}
+
+    def src_len(path: str) -> float:
+        if path not in lengths:
+            try:
+                lengths[path] = float(probe(settings.ffprobe_path, Path(path))["duration_sec"])
+            except Exception:  # noqa: BLE001
+                lengths[path] = 0.0
+        return lengths[path]
+
+    groups = edit_plan.takes(scenes)
+    member_of = {i: g for g in groups for i in g}
+    voices = []
+    for i, scene in enumerate(scenes):
+        clip_window = None
+        alone = len(member_of.get(i, [i])) == 1 and not scene.get("chain_in") and not scene.get("chain_out")
+        if scene.get("generated") and scene.get("talking") and alone and src_len(scene["source"]):
+            found = speech_windows(ffmpeg, Path(scene["source"]), 0.0, src_len(scene["source"]))
+            if found and found[0][0] > 0.4:
+                scene["start"] = round(found[0][0] - edit_plan.LEAD, 3)
+            scene["fixed_start"] = True
+            start = float(scene.get("start") or 0)
+            clip_window = (Path(scene["source"]), start, max(0.5, src_len(scene["source"]) - start))
+        voice = scene_voice(settings, scene, cast, work_dir, i, clip_window)
+        first = min((p.offset for p in voice.parts), default=0.0)
+        for p in voice.parts:   # relative to the first word: the layout decides where it starts
+            p.offset = round(p.offset - first, 3)
+        voices.append(voice if voice.parts else SceneVoice())
+    plan = edit_plan.layout(scenes, [v.end for v in voices])
+    durations = plan["durations"]
+    # windows: which part of each take is shown, at what speed (S3.4)
+    for g in groups:
+        first, last = scenes[g[0]], scenes[g[-1]]
+        if any(scenes[i].get("fixed_start") for i in g):
+            continue
+        length = src_len(first["source"])
+        if not length:
+            continue
+        need = sum(durations[i] for i in g)
+        best = None
+        if not first.get("chain_in") and not last.get("chain_out"):
+            best = best_cut(settings, Path(first["source"]), length, min(need, length - 0.5))
+        start, speed = edit_plan.window(length, need, bool(first.get("chain_in")),
+                                        bool(last.get("chain_out")), best)
+        for i in g:
+            scenes[i]["start"], scenes[i]["speed"] = round(start, 3), speed
+            start += durations[i] * speed
+    # colour: each take toward the first take of its sequence (S3.6)
+    refs: dict[str, tuple[float, float]] = {}
+    for g in groups:
+        sc = scenes[g[0]]
+        stats = edit_plan.frame_stats(ffmpeg, Path(sc["source"]), float(sc.get("start") or 0) + 0.5)
+        if not stats:
+            continue
+        key = sc.get("group") or sc["source"]
+        if key not in refs:
+            refs[key] = stats
+            continue
+        grade = edit_plan.grade_to(refs[key], stats)
+        for i in g:
+            scenes[i]["grade"] = grade
+    return {"scenes": scenes, "voices": voices, "durations": durations, "seams": plan["seams"],
+            "voice_offsets": plan["voice_starts"], "cuts": plan["cuts"]}
 
 
 def extract_cover(settings, video: Path, at: float, out: Path) -> Path:

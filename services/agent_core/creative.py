@@ -184,12 +184,14 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
         "characters": [{"id": "me", "name": "", "role": "creator|mother|father|daughter|friend",
                         "gender": "female|male", "age": "28", "appearance": "English, cụ thể",
                         "wardrobe": "English, màu sắc cụ thể", "personality": ""}],
-        "scenes": [{"visual": "generate", "clip": None, "duration": 4, "group": "kitchen",
+        "takeaway": "MỘT câu người xem nhớ sau khi xem",
+        "script": "toàn bộ lời thoại/lời dẫn viết liền như một đoạn văn nói, đúng thứ tự các nhịp",
+        "scenes": [{"visual": "generate", "clip": None, "duration": 4, "group": "seq1_kitchen",
                     "cast": ["me"], "talking": False, "product_visible": False, "hands_only": False,
                     "lines": [{"speaker": "narrator", "text": "câu tiếng Việt đời thường"}],
                     "shot": {"action": "English, đúng 1 hành động", "setting": "English, bối cảnh Việt Nam cụ thể",
                              "camera": "English, góc điện thoại", "lighting": "", "emotion": "", "sound": ""},
-                    "reference_ids": [], "continuous": False, "reuse_of": None}],
+                    "reference_ids": [], "pause": False, "reuse_of": None}],
         "cta": "", "caption": "", "hashtags": ["#..."], "facebook_description": "", "cover_ratio": .1,
         "affiliate_keywords": [], "self_review": {"score": 8.0, "issues": []},
     }
@@ -219,15 +221,25 @@ Dữ liệu sản phẩm có thật: {json.dumps(_product_facts(product), ensure
 Mục tiêu: trông như clip đời thường người thật quay, KHÔNG như quảng cáo AI
 (trừ khi định dạng là hoạt hình/phim tài liệu: khi đó theo phong cách của định dạng).
 {format_block}
-Thời lượng tổng {low:.0f}-{high:.0f} giây. Mỗi cảnh 2-6 giây (clip AI dài 10 giây, app tự cắt đoạn đẹp nhất).
-Tối đa {limit} cảnh generate.
+Thời lượng tổng {low:.0f}-{high:.0f} giây. Tối đa {limit} cảnh generate.
+
+CÁCH VIẾT (bắt buộc theo thứ tự):
+1) Viết "script" TRƯỚC: lời liền mạch như một người kể cho bạn nghe, khoảng {int(low * 2.6)}-{int(high * 2.6)} từ
+   (giọng đọc ~2,6 từ/giây). Cấu trúc: hook đặt câu hỏi/lời hứa -> bối cảnh -> diễn biến có câu nối
+   ("vì", "nên", "nhưng", "hoá ra", "thế là", "rồi") -> payoff TRẢ LỜI đúng hook -> câu chốt.
+   Chỉ giữ 3-4 ý phục vụ "takeaway"; bỏ chi tiết lan man; không liệt kê sự kiện rời rạc.
+2) Chia script thành NHỊP (mỗi phần tử "scenes" là một nhịp): mỗi nhịp 1-2 câu của script (6-16 từ/câu),
+   ghép lại các "lines" phải ra đúng script. Thời lượng do app tính theo giọng đọc (trường "duration"
+   chỉ dùng cho nhịp không lời). "pause": true khi cần nghỉ lâu hơn cho khoảnh khắc cảm xúc (hiếm).
+3) Mỗi nhịp có hình MINH HOẠ ĐÚNG điều đang được nói ("nói gì cho xem nấy").
 
 Nhân vật và giọng:
 - "characters": mỗi người VÀ con vật chính xuất hiện (con vật: role "dog"/"cat"..., appearance gồm giống,
   màu lông, vết đốm, kích cỡ); gender, age, appearance, wardrobe cụ thể và giữ nguyên mọi cảnh.
-- Mỗi cảnh: "cast" = id người có mặt; "group" = id địa điểm (cảnh liên tiếp cùng group được nối hình).
-- "lines": từng câu nói kèm "speaker" (id nhân vật hoặc "narrator" = người dẫn/người review).
-  Mỗi câu <= 12 từ; tổng số từ của cảnh <= duration x 3; lời tự nhiên như nói chuyện, không văn mẫu.
+- Mỗi nhịp: "cast" = id người có mặt; "group" = id CHUỖI CẢNH (cùng bối cảnh, cùng nhân vật, liên tiếp).
+- "lines": từng câu kèm "speaker" (id nhân vật hoặc "narrator"). Định dạng giải thích/tài liệu/quy trình/
+  sản phẩm và nhánh review: MỘT người dẫn duy nhất (speaker "narrator", hoặc id người review nếu họ xuất
+  hiện), không đổi người đọc giữa chừng. Nhiều giọng chỉ khi kể chuyện/series có thoại nhân vật.
 - "talking": true CHỈ khi nhân vật nói thẳng vào camera (khẩu hình). Tối đa 2 cảnh talking mỗi video
   (thường là hook hoặc câu thoại then chốt). Các cảnh khác talking=false: lời là giọng dẫn hoặc độc thoại
   đặt trên cảnh hành động/phản ứng/tay/góc nhìn thứ nhất.
@@ -252,10 +264,12 @@ Hình ảnh:
 - Nguồn hình: user_clip nếu có clip; product_image/card chỉ khi có ảnh sản phẩm ({has_image});
   stock chỉ khi có Pexels ({has_stock}); generate khi ngân sách > 0.
 - reference_ids: tối đa 6 ID từ manifest được cung cấp; không tạo đường dẫn/URL.
-- Tiết kiệm clip AI: một clip AI dài 10 giây cho được 2 đoạn cắt. Cảnh cùng nhân vật, cùng bối cảnh
-  với một cảnh generate TRƯỚC ĐÓ có thể đặt "reuse_of": số thứ tự (0-based) của cảnh đó để lấy đoạn khác
-  của cùng clip (vd hành động rồi phản ứng). Video 30 giây thường chỉ cần khoảng 5 cảnh generate.
-- "continuous": true chỉ khi cảnh này phải nối liền khung hình cuối của cảnh ngay trước (hiếm dùng).
+- CHUỖI CẢNH: video có 2-4 chuỗi (group). Nhịp đầu mỗi chuỗi là cảnh toàn giới thiệu bối cảnh.
+  Trong một chuỗi, hành động nối tiếp nhau liên tục; app nối khung cuối clip trước vào đầu clip sau.
+  Giữ cùng phía máy quay, cùng thời điểm trong ngày, cùng thời tiết trong một chuỗi.
+- MỘT TAKE CHO 2 NHỊP: clip AI dài 10 giây. Nhịp kế tiếp cùng chuỗi có thể đặt "reuse_of": số thứ tự
+  (0-based) của nhịp generate ngay trước nó để lấy ĐOẠN TIẾP THEO của cùng take; khi đó shot.action của nhịp
+  generate mô tả cả hai hành động theo thứ tự ("first ..., then ..."). Video 30 giây thường 3-5 take.
 - "self_review": tự chấm 0-10 và nêu vấn đề còn lại (hook, nhịp, payoff, độ đời thường).
 
 Chữ trên màn hình: chỉ "hook" (0-2 giây) và phụ đề do app tạo từ lines. Không thêm chữ khác, không emoji.
@@ -429,6 +443,11 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
         result["duration_target_seconds"] = _num(plan["duration_target_seconds"], 25, 8, 90)
     if isinstance(plan.get("voice_cast"), dict):
         result["voice_cast"] = plan["voice_cast"]
+    for key, limit in (("takeaway", 200), ("script", 2500)):
+        if plan.get(key):
+            result[key] = _text(plan[key], limit)
+    if isinstance(plan.get("viewer_test"), dict):
+        result["viewer_test"] = plan["viewer_test"]
     if isinstance(plan.get("facts"), list):
         result["facts"] = [{"claim": _text(f.get("claim"), 200), "confidence": _num(f.get("confidence"), 50, 0, 100)}
                            for f in plan["facts"][:12] if isinstance(f, dict) and f.get("claim")]
@@ -480,13 +499,11 @@ def storyboard_issues(plan: dict) -> list[str]:
     branch = plan.get("creation_branch")
     if branch in DURATION_TARGETS:
         low, high = formats.duration_range(plan)
-        total = sum(float(s.get("duration") or 0) for s in plan.get("scenes") or [])
-        if total < low * 0.85 or total > high * 1.15:
-            issues.append(f"Tổng thời lượng {total:.0f}s ngoài mục tiêu {low:.0f}-{high:.0f}s")
-    for i, scene in enumerate(plan.get("scenes") or []):
-        words = sum(len(str(ln.get("text") or "").split()) for ln in scene.get("lines") or [])
-        if scene.get("duration") and words > float(scene["duration"]) * 3.3:
-            issues.append(f"Cảnh {i + 1}: {words} từ cho {scene['duration']}s, cần rút gọn")
+        # the voice decides the length now: estimate it from the words (silent beats add theirs)
+        silent = sum(float(sc.get("duration") or 2) for sc in plan.get("scenes") or [] if not sc.get("lines"))
+        total = len(spoken_script(plan).split()) / WORDS_PER_SECOND + silent
+        if total < low * 0.7 or total > high * 1.25:
+            issues.append(f"Thời lượng ước theo lời {total:.0f}s ngoài mục tiêu {low:.0f}-{high:.0f}s")
     hits = meta_word_lines(plan)
     if hits:
         issues.append("Câu nghe như báo cáo/rào đón (tối đa 1 câu rào đón): " + json.dumps(hits[:6], ensure_ascii=False))
@@ -496,10 +513,67 @@ def storyboard_issues(plan: dict) -> list[str]:
         weak = [f["claim"] for f in plan.get("facts") or [] if f.get("confidence", 0) < 70]
         if weak:
             issues.append("Khẳng định chưa chắc (< 70): bỏ hoặc nói mềm hơn: " + json.dumps(weak[:5], ensure_ascii=False))
+    issues += coherence_issues(plan)
     copied = originality_issues(plan)
     if copied:
         issues.append("Giống nội dung trend gốc, cần viết mới: " + json.dumps(copied[:4], ensure_ascii=False))
     return issues
+
+
+CONNECTORS = ("vì", "nên", "nhưng", "hoá ra", "hóa ra", "thế là", "rồi", "bởi", "để", "khi", "nhờ",
+              "thì", "vậy", "sau đó", "cuối cùng", "mà")
+WORDS_PER_SECOND = 2.6   # measured VieNeu speed (81 words -> 29.7 s)
+
+
+def spoken_script(plan: dict) -> str:
+    return " ".join(ln.get("text") or "" for sc in plan.get("scenes") or [] for ln in sc.get("lines") or [])
+
+
+def coherence_issues(plan: dict) -> list[str]:
+    """A story a stranger can follow: one takeaway, enough words for the length, joined ideas,
+    no strings of tiny fragments."""
+    if not plan.get("creation_branch"):
+        return []
+    from . import formats
+    issues = []
+    if not plan.get("takeaway"):
+        issues.append("Thiếu takeaway: video phải để lại MỘT ý rõ ràng")
+    text = spoken_script(plan)
+    words = len(text.split())
+    low, high = formats.duration_range(plan)
+    if words and words < low * WORDS_PER_SECOND * 0.75:
+        issues.append(f"Lời quá ít ({words} từ) cho {low:.0f}-{high:.0f}s: video sẽ có khoảng lặng; "
+                      f"cần khoảng {int(low * WORDS_PER_SECOND)}-{int(high * WORDS_PER_SECOND)} từ liền mạch")
+    if words > high * WORDS_PER_SECOND * 1.2:
+        issues.append(f"Lời quá dài ({words} từ) cho {high:.0f}s: rút gọn, giữ 3-4 ý")
+    lines = [ln.get("text") or "" for sc in plan.get("scenes") or [] for ln in sc.get("lines") or []]
+    tiny = [ln for ln in lines if 0 < len(ln.split()) < 5]
+    if lines and len(tiny) > max(1, len(lines) // 3):
+        issues.append("Quá nhiều câu cụt rời rạc: gộp thành câu đầy đủ có câu nối: " + json.dumps(tiny[:4], ensure_ascii=False))
+    low_text = f" {text.lower()} "
+    joins = sum(low_text.count(f" {c} ") for c in CONNECTORS)
+    if words >= 30 and joins < 2:
+        issues.append("Các câu chưa nối ý (thiếu 'vì/nên/nhưng/hoá ra/thế là...'): người xem phải tự liên kết")
+    test = plan.get("viewer_test") or {}
+    if test and (test.get("hook_answered") is False or test.get("matches_takeaway") is False):
+        issues.append("Người xem lạ hiểu sai/không thấy câu trả lời: " + str(test.get("summary") or "")[:200])
+    if test.get("unclear_lines"):
+        issues.append("Câu thiếu ngữ cảnh với người xem lạ: " + json.dumps(test["unclear_lines"][:4], ensure_ascii=False))
+    return issues
+
+
+def viewer_test_prompt(plan: dict) -> str:
+    """Cold viewer: only the words, no pictures, no brief."""
+    return f"""Bạn là người lướt Facebook Reels, lần đầu nghe đoạn lời dưới đây (không thấy hình, không biết gì trước).
+Hook trên màn hình: "{plan.get('hook') or ''}"
+Lời: "{spoken_script(plan)}"
+Trả lời thật lòng:
+- summary: video nói gì, trong MỘT câu.
+- hook_answered: cuối video có trả lời đúng điều hook gợi tò mò không (true/false).
+- matches_takeaway: summary của bạn có cùng ý với: "{plan.get('takeaway') or ''}" (true/false).
+- unclear_lines: các câu bạn không hiểu vì thiếu ngữ cảnh hoặc nhảy ý (trích nguyên văn, có thể rỗng).
+- flow: 0-10 mức liền mạch, dễ theo dõi.
+Trả DUY NHẤT JSON: {{"summary":"","hook_answered":true,"matches_takeaway":true,"unclear_lines":[],"flow":8}}"""
 
 
 def originality_issues(plan: dict, threshold: int = 85) -> list[str]:
@@ -571,6 +645,7 @@ def _storyboard_v2_fields(scene: dict, raw: dict) -> None:
         ln["speaker"] in scene["cast"] for ln in scene["lines"])
     scene["product_visible"] = bool(raw.get("product_visible"))
     scene["continuous"] = bool(raw.get("continuous"))
+    scene["pause"] = bool(raw.get("pause"))
     scene["hands_only"] = bool(raw.get("hands_only"))
 
 

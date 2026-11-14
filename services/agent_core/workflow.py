@@ -603,6 +603,28 @@ def _process_creation(settings, job, brief, client) -> dict:
                               analysis, product, affiliate_link, [], {})
 
 
+def _viewer_test(client, settings, plan: dict) -> dict:
+    """S2.3: a stranger reads only the words; mismatch or missing context triggers one fix."""
+    if not creative.spoken_script(plan).strip():
+        return {}
+    try:
+        raw = _ask_json(client, settings, creative.viewer_test_prompt(plan), temperature=0.2, max_tokens=700)
+    except AIClientError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the test is advice; the code checks still run
+        log.warning("viewer test skipped: %s", exc)
+        return {}
+    flow = raw.get("flow")
+    try:
+        flow = max(0.0, min(10.0, float(flow))) if flow is not None else None
+    except (TypeError, ValueError):
+        flow = None
+    return {"summary": str(raw.get("summary") or "")[:300],
+            "hook_answered": raw.get("hook_answered") if isinstance(raw.get("hook_answered"), bool) else None,
+            "matches_takeaway": raw.get("matches_takeaway") if isinstance(raw.get("matches_takeaway"), bool) else None,
+            "unclear_lines": [str(x)[:160] for x in (raw.get("unclear_lines") or [])[:5]], "flow": flow}
+
+
 def _brief_plan_fields(brief: dict) -> dict:
     """Content Director choices that travel from the brief into the storyboard and QA."""
     out = {k: brief[k] for k in ("format", "niche", "goal", "duration_range") if brief.get(k)}
@@ -650,6 +672,16 @@ def _cast_plan_voices(settings, plan: dict, brief: dict) -> None:
     pinned = {c["id"]: c["voice"] for c in (brief.get("template") or {}).get("characters") or []
               if isinstance(c, dict) and c.get("voice")}
     chars = [c for c in plan.get("characters") or [] if isinstance(c, dict) and c.get("id")]
+    dialogue = plan.get("creation_branch") == "template_series" or (
+        plan.get("creation_branch") == "viral_creator" and plan.get("format") in (None, "", "story"))
+    if not dialogue:
+        # S1.4: explainers, documentaries, process and product videos have ONE narrator voice:
+        # the on-screen creator if there is one, otherwise the narrator.
+        host = next((c["id"] for c in chars if str(c.get("role") or "").lower() in ("creator", "host")), None)
+        speaker = host or "narrator"
+        for scene in plan.get("scenes") or []:
+            for line in scene.get("lines") or []:
+                line["speaker"] = speaker
     if plan.get("creation_branch") == "product_review" and len(chars) == 1:
         # one reviewer: the "narrator" is that same person, so one voice for the whole video
         for scene in plan.get("scenes") or []:
@@ -805,6 +837,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
             creative.fix_visual_sources(plan, bool(settings.pexels_api_key.get_secret_value()),
                                         bool(gen_limit), bool(product_img))
             score = (plan.get("self_review") or {}).get("score")
+            plan["viewer_test"] = _viewer_test(client, settings, plan)
             issues = creative.storyboard_issues(plan)
             if issues and settings.viral_review:
                 try:   # one targeted fix only when a hard rule fails
@@ -820,6 +853,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                             mode, segments, n_clips)
                         creative.fix_visual_sources(candidate, bool(settings.pexels_api_key.get_secret_value()),
                                                     bool(gen_limit), bool(product_img))
+                        candidate["viewer_test"] = _viewer_test(client, settings, candidate)
                         if len(creative.storyboard_issues(candidate)) < len(issues):
                             plan = candidate
                             plan["revised_after_review"] = issues
@@ -1091,8 +1125,10 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
         item = {k: scene.get(k) for k in ("duration", "voiceover", "text", "motion")}
         if strict:
             item.update({k: scene[k] for k in ("shot", "reference_ids", "gen_prompt", "lines", "cast",
-                                               "talking", "group", "product_visible", "hands_only")
+                                               "talking", "group", "product_visible", "hands_only",
+                                               "pause", "reuse_of")
                          if k in scene})
+            item["beat"] = i
         if scene.get("clip") is not None and scene["clip"] < len(user_clips):
             item.update(_clip_scene(settings, job["id"], user_clips[scene["clip"]],
                                     scene.get("start_offset") or 0))
@@ -1136,6 +1172,15 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
             item.update(kind=kind, source=str(path), start=0.0, visual=visual,
                         generated=kind == "video" and visual == "generate")
         scenes.append(item)
+    if strict:   # which takes continue from the previous take's last frame (S3)
+        links = gen_engine.chain_map(plan["scenes"], settings)
+        by_beat = {sc.get("beat"): sc for sc in scenes}
+        for idx, prev in links.items():
+            if idx in by_beat and prev in by_beat and by_beat[idx].get("generated"):
+                by_beat[idx]["chain_in"] = True
+                # the take feeding it: the last scene that uses the previous take's clip
+                feeders = [sc for sc in scenes if sc.get("source") == by_beat[prev].get("source")]
+                feeders[-1]["chain_out"] = True
     if mode == "base" and product_img and scenes:
         scenes.append({"kind": "card", "source": str(product_img), "duration": 2.4,
                        "voiceover": "", "text": "", "motion": "zoom_in"})
@@ -1151,7 +1196,8 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
         result.update({k: plan[k] for k in ("creation_branch", "storyboard_version", "style", "characters",
                                             "voice_cast", "style_profile", "audience_gender",
                                             "hook_variants", "format", "niche", "goal",
-                                            "duration_range", "facts", "fast_mode",
+                                            "duration_range", "facts", "takeaway", "script",
+                                            "viewer_test", "fast_mode",
                                             "duration_target_seconds", "content_mode")
                        if k in plan})
     return result
@@ -1457,9 +1503,12 @@ def _save_review_package(settings, job, metadata, analysis, product, content, af
         log.warning("visual QA failed: %s", exc)
         visual = None
     pool.shutdown(wait=False)
+    from .qa_video import seam_similarity
     real_qa = score_video(timeline, result.scenes, float(metadata.get("duration_sec") or 0),
                           bool(getattr(result, "music", None)), visual, job.get("viral_score"),
-                          getattr(result, "subtitles", None), tech_qa.passed)
+                          getattr(result, "subtitles", None), tech_qa.passed,
+                          voice_segments=getattr(result, "voice_segments", None),
+                          seam_ssim=seam_similarity(settings, video_out, getattr(result, "seams", None)))
     if "wrong_product" in real_qa["gates"]:
         shopee_qa.reasons.append("QA: sản phẩm trong video không khớp sản phẩm thật")
         shopee_qa.passed = False
