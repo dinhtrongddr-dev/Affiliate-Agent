@@ -135,7 +135,7 @@ async function loadVersion(recheck) {
   if (last && last.at && last.at !== seen) {
     try { localStorage.setItem("aa-update-seen", last.at); } catch (e) { }
     if (Date.now() - new Date(last.at).getTime() < 30 * 60 * 1000) {
-      if (last.ok) toast("Đã cập nhật xong: " + (last.message || ""));
+      if (last.ok) toast(`Đã cập nhật xong: đang chạy bản #${loc.build} (${loc.hash})`);
       else showUpdateError(last);
     }
   }
