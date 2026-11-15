@@ -51,7 +51,7 @@
           {% if p.account_id %}<div class="muted">Account: {{ p.account_id }}</div>{% endif %}</td>
         <td><code>{{ p.proxy_server }}</code><div class="muted">{{ 'Có xác thực' if p.proxy_authenticated else 'Không cần xác thực' }}</div></td>
         <td>{{ p.cookie_count }} cookie{% if p.session_expires %}<div class="muted">Hết hạn: {{ p.session_expires }}</div>{% endif %}</td>
-        <td>{% if p.pushed_at %}<span class="badge ok">Đã đồng bộ</span><div class="muted">{{ p.pushed_at[:19].replace('T',' ') }} UTC</div>{% else %}<span class="badge warn">Chờ đồng bộ</span>{% endif %}</td></tr>
+        <td>{% if p.pushed_at %}<span class="badge ok">Đã đồng bộ</span><div class="muted">{{ p.pushed_at | localtime('%d/%m/%Y %H:%M:%S') }}</div>{% else %}<span class="badge warn">Chờ đồng bộ</span>{% endif %}</td></tr>
       {% endfor %}
     </table>
   </div>
@@ -89,7 +89,7 @@
     <p><span class="badge ok">Đã nhập</span> {{ session.label }} · cookie: {{ session.useful|join(', ') }}
       {% if session.session_expires %} · phiên hết hạn {{ session.session_expires }} (còn {{ session.days_left }} ngày){% endif %}</p>
     <p class="small muted">Lưu mã hoá Windows (DPAPI) trong máy này, không hiển thị lại giá trị cookie.
-      {% if session.pushed_at %}Đã gửi sang muse2api lúc {{ session.pushed_at[:16].replace('T',' ') }}.{% endif %}</p>
+      {% if session.pushed_at %}Đã gửi sang muse2api lúc {{ session.pushed_at | localtime }}.{% endif %}</p>
     <div class="row">
       <button class="btn primary" onclick="api('/api/muse/session/push',undefined,{ok:'Đã gửi phiên sang muse2api',reload:true})">Gửi sang muse2api</button>
       <button class="btn danger" onclick="api('/api/muse/session/delete',undefined,{ok:'Đã xoá phiên',reload:true})">Xoá phiên</button>
@@ -110,7 +110,7 @@
     <tr><th>Video</th><th>Cảnh</th><th>Trạng thái</th><th>Prompt</th><th>Ghi chú</th><th></th></tr>
     {% for t in tasks %}
     <tr>
-      <td class="small"><a href="/jobs/{{ t.job_id }}">{{ t.job_id[:10] }}</a><div class="muted">{{ t.created_at[5:16].replace('T',' ') }}</div></td>
+      <td class="small"><a href="/jobs/{{ t.job_id }}">{{ t.job_id[:10] }}</a><div class="muted">{{ t.created_at | localtime('%d/%m %H:%M') }}</div></td>
       <td class="small">{{ 'Ảnh nhân vật' if t.scene_index < 0 else 'Cảnh %d'|format(t.scene_index + 1) }}{% if t.attempt > 1 %}<div class="muted">lần {{ t.attempt }}</div>{% endif %}</td>
       <td><span class="badge {{ ST.get(t.status, ('', ''))[1] }}">{{ ST.get(t.status, (t.status, ''))[0] }}</span></td>
       <td class="small" style="max-width:380px">{{ t.prompt[:220] }}</td>

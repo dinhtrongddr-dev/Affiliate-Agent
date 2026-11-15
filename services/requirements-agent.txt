@@ -10,3 +10,5 @@ python-multipart>=0.0.9
 vieneu>=3.8
 py-cpuinfo>=9.0
 soundfile>=0.12
+pystray>=0.19
+pillow>=10

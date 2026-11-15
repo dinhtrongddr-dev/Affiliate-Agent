@@ -13,6 +13,10 @@ def setup_logging(logs_dir: Path, level: int = logging.INFO) -> None:
     logs_dir = Path(logs_dir)
     logs_dir.mkdir(parents=True, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    from .localtime import zone
+    tz = zone()
+    from datetime import datetime
+    fmt.converter = lambda secs: datetime.fromtimestamp(secs, tz).timetuple()   # Vietnam time in the log
     root = logging.getLogger()
     root.setLevel(level)
     console = logging.StreamHandler()

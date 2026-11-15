@@ -11,6 +11,6 @@
   <td class="small">{% if job.viral_score %}<span title="Điểm biên tập AI /10">⭐ {{ '%.1f' % job.viral_score }}</span>{% endif %}
     {% if job.qa_score %}<span title="Điểm QA video /100"> · QA {{ '%.0f' % job.qa_score }}</span>{% endif %}
     {% if job.duration_sec %}<div class="muted">{{ '%.0f' % job.duration_sec }}s</div>{% endif %}</td>
-  <td class="small muted">{{ job.updated_at[:16].replace('T', ' ') }}</td>
+  <td class="small muted">{{ job.updated_at | localtime }}</td>
 </tr>
 {%- endmacro %}

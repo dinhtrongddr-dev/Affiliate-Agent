@@ -61,7 +61,7 @@
           · z-score: {{ sc.metrics.z_score if sc.metrics.z_score is not none else '—' }}</div>
         {% for n in sc.notes %}<div class="muted">• {{ n }}</div>{% endfor %}{% endif %}
         <div style="margin-top:4px"><b>Ghi nhận gần nhất</b></div>
-        {% for o in t.observations %}<div class="muted">{{ o.observed_at[5:16].replace('T',' ') }} · {{ o.source }} · giá trị {{ '{:,.0f}'.format(o.value) if o.value is not none else '—' }}{% if o.rank %} · hạng {{ o.rank }}{% endif %}
+        {% for o in t.observations %}<div class="muted">{{ o.observed_at | localtime('%d/%m %H:%M') }} · {{ o.source }} · giá trị {{ '{:,.0f}'.format(o.value) if o.value is not none else '—' }}{% if o.rank %} · hạng {{ o.rank }}{% endif %}
           {% if o.meta.last7d is defined %} · báo: {{ o.meta.last24h }}/24h, {{ o.meta.last7d }}/7d, {{ o.meta.prev7d }} tuần trước{% endif %}
           {% if o.meta.views is defined %} · {{ o.meta.videos }} video, {{ '{:,}'.format(o.meta.views) }} view{% endif %}</div>{% endfor %}
       </details>

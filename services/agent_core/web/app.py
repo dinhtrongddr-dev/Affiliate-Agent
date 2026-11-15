@@ -159,6 +159,8 @@ def create_app(start_worker: bool = True) -> FastAPI:
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(label=label, platform_labels=PLATFORM_LABELS)
     templates.env.filters["fromjson"] = lambda v: json.loads(v) if v else None
+    from ..localtime import fmt as _localtime
+    templates.env.filters["localtime"] = _localtime   # stored UTC -> Vietnam time on every page
 
     def S():
         return state["settings"]

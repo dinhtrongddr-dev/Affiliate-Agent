@@ -63,7 +63,8 @@ if ($dirty) {
 # Stop the running app (only this folder's .venv python).
 $venvPy = (Join-Path $Root '.venv\Scripts\python.exe').ToLower()
 $procs = Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
-    Where-Object { $_.CommandLine -match 'agent_core\.cli' -and ($_.ExecutablePath -and $_.ExecutablePath.ToLower() -like "$($Root.ToLower())*") }
+    Where-Object { $_.CommandLine -match 'agent_core\.(cli|tray)' -and ($_.ExecutablePath -and $_.ExecutablePath.ToLower() -like "$($Root.ToLower())*") } |
+    Sort-Object { if ($_.CommandLine -match 'agent_core\.tray') { 0 } else { 1 } }   # tray first: no 'app stopped' alarm
 $wasRunning = [bool]$procs
 foreach ($p in $procs) { & taskkill /PID $p.ProcessId /T /F 2>$null | Out-Null }
 if ($wasRunning) { Write-Host 'Da tat app dang chay.'; Start-Sleep 2 }
@@ -113,6 +114,11 @@ if ($needsSetup) {
 $now = (git log -1 --format='%h %cd' --date=format:'%d/%m %H:%M').Trim()
 Write-Host "Da cap nhat: $current -> $now" -ForegroundColor Green
 if (-not $NoRestart) {
-    Start-Process -FilePath (Join-Path $Root 'scripts\start-app.cmd') -WorkingDirectory $Root -WindowStyle Minimized
+    $pyw = Join-Path $Root '.venv\Scripts\pythonw.exe'
+    if (Test-Path $pyw) {   # background + tray icon, no console window
+        Start-Process -FilePath $pyw -ArgumentList '-m', 'agent_core.tray' -WorkingDirectory (Join-Path $Root 'services')
+    } else {
+        Start-Process -FilePath (Join-Path $Root 'scripts\start-app.cmd') -WorkingDirectory $Root -WindowStyle Minimized
+    }
     Write-Host 'Da mo lai app.'
 }

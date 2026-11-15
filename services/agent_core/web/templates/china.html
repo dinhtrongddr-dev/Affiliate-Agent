@@ -45,7 +45,7 @@
           {% if t.scores %}<div class="muted" title="{{ t.scores.parts }}">{{ GOALS.get(t.goal,'') }}</div>{% endif %}</td>
         <td>{{ '%.0f%%' % (t.confidence*100) if t.confidence is not none else '—' }}
           {% if t.scores and t.scores.facts and t.scores.facts.why %}<div class="muted">{{ t.scores.facts.why }}</div>{% endif %}</td>
-        <td class="muted">{{ (t.first_seen or '')[:16].replace('T',' ') }}</td>
+        <td class="muted">{{ t.first_seen | localtime }}</td>
         <td>{% if t.status != 'BLOCKED' %}
           <button class="btn sm primary" onclick="api('/api/china/topics/{{ t.key }}/ideas',undefined,{ok:'AI đang phân tích công thức & viết ý tưởng…',reload:true,delay:6000})">💡 Ý tưởng</button>
           <button class="btn sm" onclick="api('/api/china/topics/{{ t.key }}/status',{status:'{{ 'NEW' if t.status=='IGNORED' else 'IGNORED' }}'},{reload:true})">{{ 'Mở lại' if t.status=='IGNORED' else 'Bỏ qua' }}</button>{% endif %}</td>
@@ -91,8 +91,8 @@
     {% for p, (support, label, note) in sources.items() %}{% set st = source_state.get(p, {}) %}
       <tr><td>{{ label }}</td>
         <td>{% if support=='auto' %}<span class="badge ok">Tự động, 3 giờ/lần</span>{% elif support=='manual' %}<span class="badge info">Nhập tay</span>{% else %}<span class="badge err">Không dùng</span>{% endif %}
-          {% if st.paused_until %}<span class="badge warn">Tạm dừng tới {{ st.paused_until[:16].replace('T',' ') }}</span>{% endif %}</td>
-        <td class="muted">{{ (st.last_ok or '')[:16].replace('T',' ') }}{% if st.items_last %} · {{ st.items_last }} mục{% endif %}</td>
+          {% if st.paused_until %}<span class="badge warn">Tạm dừng tới {{ st.paused_until | localtime }}</span>{% endif %}</td>
+        <td class="muted">{{ st.last_ok | localtime }}{% if st.items_last %} · {{ st.items_last }} mục{% endif %}</td>
         <td class="muted">{{ st.last_error if support=='auto' and st.last_error else '' }}</td><td class="muted">{{ note }}</td></tr>
     {% endfor %}</table>
 

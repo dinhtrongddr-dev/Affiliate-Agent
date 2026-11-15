@@ -168,7 +168,7 @@
       <tr><td>{{ platform_labels.get(p.platform, p.platform) }}</td>
         <td>{{ badge(p.status) }}{% if p.last_error %}<div class="small err-text">{{ p.last_error[:200] }}</div>{% endif %}
           {% if p.permalink %}<div><a href="{{ p.permalink }}" target="_blank" rel="noopener">Xem bài</a></div>{% endif %}</td>
-        <td class="small">{{ (p.scheduled_at or '')[:16].replace('T',' ') }}</td>
+        <td class="small">{{ p.scheduled_at | localtime }}</td>
         <td>{% if p.status in ('UPLOAD_NEEDS_RECONCILIATION','DRAFT_SUBMITTED_UNCONFIRMED','SUBMITTED_UNCONFIRMED') %}
           <div class="small muted">Kiểm tra trên nền tảng rồi xác nhận:</div>
           <button class="btn sm" onclick="reconcile('{{ p.platform }}',true)">Đã lên</button>
@@ -180,7 +180,7 @@
       <div style="margin-top:18px">
       <h3>Số liệu sau khi đăng</h3>
       <p class="small muted">Copy từ Meta Business Suite (Reels) hoặc Shopee Affiliate sau 24–72 giờ. Tỉ lệ nhập dạng 45 hoặc 0,45. Ô trống bỏ qua.</p>
-      {% for r in perf_rows %}<div class="small muted">Đã có: {{ r.platform }} · {{ r.views or 0 }} lượt xem · nhập lúc {{ r.recorded_at }}</div>{% endfor %}
+      {% for r in perf_rows %}<div class="small muted">Đã có: {{ r.platform }} · {{ r.views or 0 }} lượt xem · nhập lúc {{ r.recorded_at | localtime }}</div>{% endfor %}
       <div class="grid g2" id="perf-form">
         <div><label>Nền tảng</label><select id="perf-platform"><option value="facebook">Facebook Reels</option><option value="shopee">Shopee Video</option><option value="tiktok">TikTok</option></select></div>
         {% for key, (label, kind) in perf_fields.items() %}

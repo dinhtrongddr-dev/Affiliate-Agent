@@ -157,7 +157,7 @@ if ($LASTEXITCODE -ne 0) {
     & $venvPy -m pip install -r (Join-Path $Root 'services\requirements-agent.txt') --force-reinstall --quiet
 }
 $env:PYTHONPATH = Join-Path $Root 'services'
-& $venvPy -c "import fastapi, uvicorn, httpx, watchdog, rapidfuzz, pydantic_settings, playwright, jinja2, soundfile, vieneu, requests, websocket; import agent_core.web.app; print('import OK')"
+& $venvPy -c "import fastapi, uvicorn, httpx, watchdog, rapidfuzz, pydantic_settings, playwright, jinja2, soundfile, vieneu, requests, websocket, pystray, PIL; import agent_core.web.app, agent_core.tray; print('import OK')"
 if ($LASTEXITCODE -ne 0) { throw 'Thu vien chua dung: xem loi o tren.' }
 $ok.Add('Thu vien Python: OK')
 
@@ -321,17 +321,33 @@ Step 'Loi tat tren Desktop'
 try {
     $shell = New-Object -ComObject WScript.Shell
     $desk = [Environment]::GetFolderPath('Desktop')
+    # The app runs in the background with a tray icon (no console window); errors show as a
+    # message box. scripts\start-app.cmd still runs it in a console for troubleshooting.
+    $pyw = Join-Path $Root '.venv\Scripts\pythonw.exe'
     $items = @(
-        @{ Name = 'Affiliate Agent'; Target = (Join-Path $Root 'scripts\start-app.cmd'); Icon = (Join-Path $Root 'assets\app.ico') },
+        @{ Name = 'Affiliate Agent'; Exe = $pyw; Args = '-m agent_core.tray'; Cwd = (Join-Path $Root 'services');
+           Icon = (Join-Path $Root 'assets\app.ico') },
         @{ Name = 'Cap nhat Affiliate Agent'; Target = (Join-Path $Root 'scripts\update.cmd'); Icon = "$env:SystemRoot\System32\shell32.dll,238" }
     )
-    if ($script:ChatGPT2ApiStart) { $items += @{ Name = 'ChatGPT2API'; Target = $script:ChatGPT2ApiStart } }
+    if ($script:ChatGPT2ApiStart) {
+        $vbs = Join-Path (Split-Path -Parent $script:ChatGPT2ApiStart) 'start_tray.vbs'
+        if (Test-Path $vbs) {   # its own tray launcher: no console window either
+            $items += @{ Name = 'ChatGPT2API'; Exe = "$env:SystemRoot\System32\wscript.exe"; Args = '"' + $vbs + '"';
+                         Cwd = (Split-Path -Parent $vbs) }
+        } else { $items += @{ Name = 'ChatGPT2API'; Target = $script:ChatGPT2ApiStart } }
+    }
     foreach ($it in $items) {
         $lnk = $shell.CreateShortcut((Join-Path $desk ($it.Name + '.lnk')))
-        # cmd /k keeps the window open, so any error stays readable
-        $lnk.TargetPath = "$env:SystemRoot\System32\cmd.exe"
-        $lnk.Arguments = '/k "' + $it.Target + '"'
-        $lnk.WorkingDirectory = Split-Path -Parent $it.Target
+        if ($it.Exe) {
+            $lnk.TargetPath = $it.Exe
+            $lnk.Arguments = $it.Args
+            $lnk.WorkingDirectory = $it.Cwd
+        } else {
+            # cmd /k keeps the window open, so any error stays readable (update)
+            $lnk.TargetPath = "$env:SystemRoot\System32\cmd.exe"
+            $lnk.Arguments = '/k "' + $it.Target + '"'
+            $lnk.WorkingDirectory = Split-Path -Parent $it.Target
+        }
         if ($it.Icon -and (Test-Path ($it.Icon -replace ',\d+$', ''))) { $lnk.IconLocation = $it.Icon }
         $lnk.Description = $it.Name
         $lnk.Save()
