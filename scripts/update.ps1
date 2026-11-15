@@ -21,26 +21,48 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 if (-not (Test-Path (Join-Path $Root '.git'))) { throw 'Thu muc nay khong phai ban git clone: hay git clone https://github.com/dinhtrongddr-dev/Affiliate-Agent.git' }
 
+function Get-GitLocks {
+    # index.lock, HEAD.lock, refs\remotes\origin\main.lock, packed-refs.lock, config.lock ...
+    Get-ChildItem (Join-Path $Root '.git') -Recurse -Force -File -Filter '*.lock' -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\objects\\' }
+}
 function Clear-GitLock {
-    # A git command that was killed midway (closed window, app stopped, power cut) leaves
-    # .git\index.lock behind and every later git command fails with "index.lock: File exists".
-    # Wait briefly in case a real git is still working, then remove the stale lock.
-    $lock = Join-Path $Root '.git\index.lock'
-    for ($i = 0; $i -lt 10 -and (Test-Path $lock); $i++) {
-        $old = ((Get-Date) - (Get-Item $lock).LastWriteTime).TotalSeconds -gt 60
-        if ($old -or -not (Get-Process git -ErrorAction SilentlyContinue)) {
-            Remove-Item $lock -Force -ErrorAction SilentlyContinue
-            if (-not (Test-Path $lock)) { Write-Host 'Da go file khoa git con sot (.git\index.lock).' -ForegroundColor Yellow }
+    # A git command that was killed midway (window closed during an update, app stopped, power
+    # cut) leaves a *.lock file in .git and every later git command fails with "...lock: File
+    # exists". Wait briefly in case a real git is still working, then remove the stale locks.
+    for ($i = 0; $i -lt 10; $i++) {
+        $locks = @(Get-GitLocks)
+        if (-not $locks) { return }
+        $old = $locks | Where-Object { ((Get-Date) - $_.LastWriteTime).TotalSeconds -gt 60 }
+        if ($old.Count -eq $locks.Count -or -not (Get-Process git -ErrorAction SilentlyContinue)) {
+            foreach ($l in $locks) {
+                Remove-Item $l.FullName -Force -ErrorAction SilentlyContinue
+                if (-not (Test-Path $l.FullName)) {
+                    Write-Host ('Da go file khoa git con sot: ' + $l.FullName.Substring($Root.Length + 1)) -ForegroundColor Yellow
+                }
+            }
             break
         }
         Start-Sleep 2
     }
-    if (Test-Path $lock) { throw "Git dang ban (con $lock): dong cac cua so git/cap nhat khac roi chay lai." }
+    $left = @(Get-GitLocks)
+    if ($left) { throw ("Git dang ban (con " + $left[0].FullName + "): dong cac cua so git/cap nhat khac roi chay lai.") }
+}
+function Invoke-Git([string[]]$GitArgs) {
+    # PowerShell 5.1 turns git's stderr into a terminating error under 'Stop': capture it plainly
+    $ErrorActionPreference = 'Continue'
+    $o = (& git @GitArgs 2>&1 | ForEach-Object { "$_" } | Out-String)
+    return @{ Out = $o; Code = $LASTEXITCODE }
 }
 Clear-GitLock
 
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
-git fetch --quiet origin $branch
+$f = Invoke-Git @('fetch', '--quiet', 'origin', $branch)
+if ($f.Code -ne 0 -and $f.Out -match '\.lock') { Clear-GitLock; $f = Invoke-Git @('fetch', '--quiet', 'origin', $branch) }
+if ($f.Code -ne 0) {
+    Write-Host $f.Out.Trim() -ForegroundColor Red
+    throw 'Khong tai duoc ban moi tu GitHub (xem dong loi phia tren). Kiem tra mang roi chay lai.'
+}
 $behind = [int](git rev-list --count "HEAD..origin/$branch")
 $current = (git log -1 --format='%h %cd' --date=format:'%d/%m %H:%M').Trim()
 if ($behind -eq 0) {
@@ -75,21 +97,20 @@ if (Test-Path $db) {
     $bk = Join-Path $Root ('backups\affiliate-agent-before-update-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.sqlite3')
     New-Item -ItemType Directory -Force -Path (Split-Path $bk) | Out-Null
     Copy-Item $db $bk -Force   # the app is stopped, so a file copy is consistent
+    # keep the 5 newest; an old copy that cannot be deleted (e.g. made by an admin window during
+    # setup) is skipped - tidying up must never stop the update itself
     Get-ChildItem (Split-Path $bk) -Filter 'affiliate-agent-before-update-*.sqlite3' |
-        Sort-Object LastWriteTime -Descending | Select-Object -Skip 5 | Remove-Item -Force   # keep 5
+        Sort-Object Name -Descending | Select-Object -Skip 5 | ForEach-Object {
+            try { Remove-Item $_.FullName -Force -ErrorAction Stop }
+            catch { Write-Host ('(Bo qua, khong xoa duoc ban sao luu cu ' + $_.TargetObject + ')') -ForegroundColor DarkGray }
+        }
     Write-Host "Da sao luu CSDL: $bk"
 }
 
 $before = (git rev-parse HEAD).Trim()
 Clear-GitLock   # stopping the app above may have interrupted a git call
-function Invoke-Merge {
-    # PowerShell 5.1 turns git's stderr into a terminating error under 'Stop': capture it plainly
-    $ErrorActionPreference = 'Continue'
-    $o = (git merge --ff-only "origin/$branch" 2>&1 | ForEach-Object { "$_" } | Out-String)
-    return @{ Out = $o; Code = $LASTEXITCODE }
-}
-$m = Invoke-Merge
-if ($m.Code -ne 0 -and $m.Out -match 'index\.lock') { Clear-GitLock; $m = Invoke-Merge }
+$m = Invoke-Git @('merge', '--ff-only', "origin/$branch")
+if ($m.Code -ne 0 -and $m.Out -match '\.lock') { Clear-GitLock; $m = Invoke-Git @('merge', '--ff-only', "origin/$branch") }
 Write-Host $m.Out.Trim()
 if ($m.Code -ne 0) {
     $ahead = [int](git rev-list --count "origin/$branch..HEAD")
