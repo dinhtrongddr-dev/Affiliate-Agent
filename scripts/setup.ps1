@@ -234,7 +234,8 @@ if ($ChatGPT2ApiDir -and (Test-Path (Join-Path $ChatGPT2ApiDir 'main.py'))) {
         Where-Object { Test-Path $_ } | Select-Object -First 1
     $c2aOk = $false
     if ($c2aPy -and (Test-Path (Join-Path $ChatGPT2ApiDir '.env'))) {
-        & $c2aPy -c "import fastapi, uvicorn, curl_cffi, sqlalchemy" 2>$null
+        # pystray + tkinter: the tray icon that starts the server dies silently without them
+        & $c2aPy -c "import fastapi, uvicorn, curl_cffi, sqlalchemy, pystray, tkinter" 2>$null
         $c2aOk = ($LASTEXITCODE -eq 0)
     }
     if (-not $c2aOk) {
