@@ -7,10 +7,44 @@
 # Safe: stops if code files were edited on this machine (nothing is overwritten), backs up the
 # database first, only fast-forwards (never merges or rewrites), then repairs the libraries
 # the new version needs. Data, .env, keys and videos are outside git and are not touched.
-param([switch]$Check, [switch]$NoRestart, [switch]$Force)
+#   ... -LogFile logs\update-x.log   # started by the app's "Cap nhat" button: log to a file, and
+#                                      always reopen the app (also after an error) so it can report
+param([switch]$Check, [switch]$NoRestart, [switch]$Force, [string]$LogFile = '')
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+$ResultFile = Join-Path $Root 'logs\update-last.json'
+$script:From = ''
+if ($LogFile) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $LogFile) | Out-Null
+    try { Start-Transcript -Path $LogFile -Force | Out-Null } catch {}
+}
+function Write-Result([bool]$ok, [string]$message) {
+    if ($Check) { return }
+    $to = ''
+    try { $to = (git log -1 --format='%h' 2>$null).Trim() } catch {}
+    $data = @{ ok = $ok; message = $message; from = $script:From; to = $to; log = $LogFile;
+               at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $ResultFile) | Out-Null
+        [System.IO.File]::WriteAllText($ResultFile, ($data | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+    } catch {}
+}
+function Start-App {
+    $pyw = Join-Path $Root '.venv\Scripts\pythonw.exe'
+    if (Test-Path $pyw) {   # background + tray icon, no console window
+        Start-Process -FilePath $pyw -ArgumentList '-m', 'agent_core.tray' -WorkingDirectory (Join-Path $Root 'services')
+    } else {
+        Start-Process -FilePath (Join-Path $Root 'scripts\start-app.cmd') -WorkingDirectory $Root -WindowStyle Minimized
+    }
+}
+trap {
+    Write-Host "`nLOI: $_" -ForegroundColor Red
+    Write-Result $false "$_"
+    if ($LogFile -and -not $NoRestart) { Start-App }   # from the app: bring it back to show the error
+    try { if ($LogFile) { Stop-Transcript | Out-Null } } catch {}
+    exit 1
+}
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     if (Get-Command winget -ErrorAction SilentlyContinue) {
@@ -65,10 +99,11 @@ if ($f.Code -ne 0) {
 }
 $behind = [int](git rev-list --count "HEAD..origin/$branch")
 $current = (git log -1 --format='%h %cd' --date=format:'%d/%m %H:%M').Trim()
+$script:From = (git log -1 --format='%h').Trim()
 if ($behind -eq 0) {
     Write-Host "Da la ban moi nhat ($current)." -ForegroundColor Green
     if ($Check) { exit 0 }
-    if (-not $Force) { exit 0 }
+    if (-not $Force) { Write-Result $true 'Da la ban moi nhat'; exit 0 }
 }
 Write-Host "Co $behind cap nhat moi:" -ForegroundColor Cyan
 git log --format='  - %s' "HEAD..origin/$branch" | Select-Object -First 15
@@ -134,12 +169,9 @@ if ($needsSetup) {
 
 $now = (git log -1 --format='%h %cd' --date=format:'%d/%m %H:%M').Trim()
 Write-Host "Da cap nhat: $current -> $now" -ForegroundColor Green
+Write-Result $true "Da cap nhat: $current -> $now"
 if (-not $NoRestart) {
-    $pyw = Join-Path $Root '.venv\Scripts\pythonw.exe'
-    if (Test-Path $pyw) {   # background + tray icon, no console window
-        Start-Process -FilePath $pyw -ArgumentList '-m', 'agent_core.tray' -WorkingDirectory (Join-Path $Root 'services')
-    } else {
-        Start-Process -FilePath (Join-Path $Root 'scripts\start-app.cmd') -WorkingDirectory $Root -WindowStyle Minimized
-    }
+    Start-App
     Write-Host 'Da mo lai app.'
 }
+try { if ($LogFile) { Stop-Transcript | Out-Null } } catch {}

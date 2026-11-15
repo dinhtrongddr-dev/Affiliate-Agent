@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Affiliate Agent{% endblock %}</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
-<link rel="stylesheet" href="/static/app.css">
-<script src="/static/app.js"></script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<script src="/static/app.js?v={{ asset_v }}"></script>
 </head>
 <body data-busy="{{ '1' if busy else '0' }}">
 <div class="layout">
@@ -24,7 +24,11 @@
     <a href="/tasks" class="{{ 'active' if active == 'tasks' }}">⏱ Hàng đợi</a>
     <a href="/settings" class="{{ 'active' if active == 'settings' }}">⚙️ Cài đặt</a>
     <a href="/logs" class="{{ 'active' if active == 'logs' }}">📄 Nhật ký</a>
-    <div class="worker" id="worker">…</div>
+    <div class="side-foot">
+      <div class="version" id="version" title="Phiên bản app">…</div>
+      <button type="button" class="btn update-btn" id="update-btn" hidden>⬆ Cập nhật</button>
+      <div class="worker" id="worker">…</div>
+    </div>
   </nav>
   <main>{% block content %}{% endblock %}</main>
 </div>

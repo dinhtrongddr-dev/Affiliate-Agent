@@ -5,6 +5,7 @@ X-Requested-With: affiliate-agent, which cross-site pages cannot send without a
 CORS preflight (we never allow one), so other websites cannot trigger actions.
 """
 import json
+import time
 import logging
 import shutil
 from contextlib import asynccontextmanager
@@ -161,6 +162,10 @@ def create_app(start_worker: bool = True) -> FastAPI:
     templates.env.filters["fromjson"] = lambda v: json.loads(v) if v else None
     from ..localtime import fmt as _localtime
     templates.env.filters["localtime"] = _localtime   # stored UTC -> Vietnam time on every page
+    from .. import version_check as _vc
+    # static files carry the running version, so a browser never keeps old JS/CSS after an update
+    templates.env.globals["asset_v"] = (_vc.local(get_settings().project_root).get("hash")
+                                        or str(int(time.time())))
 
     def S():
         return state["settings"]
@@ -205,7 +210,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
         from .. import version_check
         ver = version_check.status()
         update = ([{"name": f"Có {ver['behind']} bản cập nhật mới trên GitHub", "ok": False,
-                    "hint": "Đóng app rồi chạy scripts\\update.cmd (tự sao lưu CSDL và mở lại app)"}]
+                    "hint": "Bấm ⬆ Cập nhật ở góc dưới bên trái (tự sao lưu CSDL và mở lại app)"}]
                   if ver.get("behind") else [])
         from ..ai_client import health_problem
         ai_problem = health_problem()
@@ -791,6 +796,29 @@ def create_app(start_worker: bool = True) -> FastAPI:
         return {"id": job_id, "status": job["status"], "label": label(job["status"])[0],
                 "busy": job["status"] in BUSY, "error": job.get("last_error"),
                 "updated_at": job["updated_at"]}
+
+    @app.get("/api/version")
+    def api_version():
+        from .. import version_check
+        s = S()
+        worker = state["worker"]
+        cur = worker.current if worker else None
+        return {"local": version_check.local(s.project_root), "remote": version_check.status(),
+                "last_update": version_check.last_result(s.project_root),
+                "busy": cur and {"kind": cur["kind"], "job_id": cur.get("job_id")}}
+
+    @app.post("/api/version/check")
+    def api_version_check():
+        from .. import version_check
+        return version_check.check(S().project_root)
+
+    @app.post("/api/version/update")
+    def api_version_update():
+        from .. import version_check
+        try:
+            return version_check.start_update(S().project_root)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @app.get("/api/status")
     def api_status():
