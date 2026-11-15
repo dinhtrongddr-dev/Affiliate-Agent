@@ -243,8 +243,9 @@ if ($ChatGPT2ApiDir -and (Test-Path (Join-Path $ChatGPT2ApiDir 'main.py'))) {
         if ($LASTEXITCODE -ne 0) { throw 'Cai ChatGPT2API loi: xem thong bao o tren.' }
     }
     $envC = Join-Path $ChatGPT2ApiDir '.env'
-    $line = Get-Content $envC -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_AUTH_KEY\s*=' } | Select-Object -First 1
-    $port = Get-Content $envC -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_PORT\s*=' } | Select-Object -First 1
+    # the LAST line wins, as in tray.py (an older tray appended a second key after a BOM hid the first)
+    $line = Get-Content $envC -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_AUTH_KEY\s*=' } | Select-Object -Last 1
+    $port = Get-Content $envC -Encoding UTF8 | Where-Object { $_ -match '^\s*CHATGPT2API_PORT\s*=' } | Select-Object -Last 1
     $port = if ($port) { ($port -split '=', 2)[1].Trim() } else { '13000' }
     if ($line) {
         Set-EnvValue 'AA_AI_API_KEY' (($line -split '=', 2)[1].Trim().Trim('"').Trim("'"))   # never printed
