@@ -1,5 +1,6 @@
 """Explicit creation branches and reusable cast management for the local UI."""
 import json
+from pathlib import Path
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -40,6 +41,19 @@ def previous_episodes(s, template_id: str, limit: int = 6) -> list[str]:
     return [t for t in titles if t][-limit:]
 
 
+STYLE_PICTURES = Path(__file__).resolve().parent / 'static' / 'styles'
+
+
+def style_previews() -> list[dict]:
+    """Art styles for the series editor, with a sample picture when one was made
+    (scripts/make_style_previews.py draws the same scene in every style)."""
+    rows = style_profiles.catalog()
+    for row in rows:
+        picture = STYLE_PICTURES / f"{row['id']}.jpg"
+        row['preview'] = f"/static/styles/{row['id']}.jpg?v={int(picture.stat().st_mtime)}" if picture.is_file() else ''
+    return rows
+
+
 def series_batch(s, template: dict, ideas: list[str], duration: int = 0) -> dict:
     """Several episodes at once. Without saved cast photos, episode 1 makes them and the others
     reuse them (and the series keeps them for later episodes)."""
@@ -75,7 +89,7 @@ def install_routes(app, settings, render):
                       products=products,
                       series=creative_series.list_templates(s), selected_catalog_id=catalog_id,
                       voices=[{'id': k, 'label': v} for k, v in VOICES.items()],
-                      styles=style_profiles.catalog(),
+                      styles=style_previews(),
                       selected_branch=branch if branch in {'product_review', 'viral_creator', 'template_series'} else 'product_review')
 
     @app.post('/api/create')

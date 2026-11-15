@@ -113,3 +113,13 @@ def test_child_voice_preview_is_pitched(s, monkeypatch):
         assert c.post("/api/tts/preview", headers=H, json={"voice": "Ái Hân", "child": True}).status_code == 200
         assert c.post("/api/tts/preview", headers=H, json={"voice": "Ái Hân"}).status_code == 200
     assert len(calls) == 1 and calls[0] > 1
+
+
+def test_every_style_has_a_preview_picture():
+    from agent_core.web.creation import STYLE_PICTURES, style_previews
+    rows = style_previews()
+    missing = [r["id"] for r in rows if not r["preview"]]
+    assert not missing, f"run scripts/make_style_previews.py {' '.join(missing)}"
+    for r in rows:
+        assert r["preview"].startswith(f"/static/styles/{r['id']}.jpg?v=")
+        assert (STYLE_PICTURES / f"{r['id']}.jpg").stat().st_size < 200_000   # small enough for the repo

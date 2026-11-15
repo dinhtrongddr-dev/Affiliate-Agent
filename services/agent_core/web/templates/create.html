@@ -10,6 +10,13 @@
   .style-card b { font-size: 14px; }
   .style-card .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #fff1ec; color: #c2410c; margin-left: 4px; }
   .style-card p { margin: 4px 0 0; font-size: 12px; color: #666; line-height: 1.4; }
+  .style-thumb { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px;
+    margin-bottom: 8px; background: #f1f1f1; cursor: zoom-in; }
+  .style-zoom { position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex; align-items: center;
+    justify-content: center; z-index: 1000; padding: 16px; }
+  .style-zoom figure { margin: 0; max-width: min(480px, 92vw); background: #fff; border-radius: 12px; overflow: hidden; }
+  .style-zoom img { display: block; width: 100%; max-height: 74vh; object-fit: contain; background: #111; }
+  .style-zoom figcaption { padding: 10px 14px; font-size: 13px; line-height: 1.45; }
   .char-card { border: 1px solid #e3e3e3; border-radius: 10px; padding: 12px 14px; margin: 10px 0; background: #fafafa; }
   .char-grid { display: grid; grid-template-columns: 2fr 1.3fr 1fr .8fr; gap: 8px; }
   .char-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -167,8 +174,16 @@ function summarise() {
   const t = current(); if (!t) return;
   const style = STYLES.find(s => s.id === t.style_profile);
   const people = (t.characters || []).map(c => c.name + (c.voice ? ' (' + c.voice + ')' : '')).join(', ');
-  $('series-summary').textContent = (style ? style.label + ' · ' : '') +
+  const text = (style ? style.label + ' · ' : '') +
     (t.voice_mode === 'narration' ? 'Thuyết minh' : 'Hội thoại') + ' · ' + people;
+  $('series-summary').replaceChildren();
+  if (style && style.preview) {
+    const img = el('img', {src: style.preview, alt: style.label, title: 'Xem mẫu phong cách',
+      style: 'width:42px;height:56px;object-fit:cover;border-radius:6px;vertical-align:middle;margin-right:8px;cursor:zoom-in'});
+    img.addEventListener('click', () => zoomStyle(style));
+    $('series-summary').append(img);
+  }
+  $('series-summary').append(text);
   const chars = $('character-id'); chars.replaceChildren();
   (t.characters || []).forEach(c => chars.add(new Option(c.name, c.id)));
 }
@@ -226,8 +241,23 @@ function renderStyles(selected) {
     const title = el('b', {textContent: s.label});
     const head = el('div', {}, [input, title]);
     if (s.trend) head.append(el('span', {className: 'tag', textContent: '🔥 trend'}));
-    box.append(el('label', {className: 'style-card'}, [head, el('p', {textContent: s.desc || ''})]));
+    const parts = [head, el('p', {textContent: s.desc || ''})];
+    if (s.preview) {
+      const img = el('img', {className: 'style-thumb', src: s.preview, loading: 'lazy', alt: 'Mẫu ' + s.label});
+      img.addEventListener('click', event => { event.preventDefault(); input.checked = true; zoomStyle(s); });
+      parts.unshift(img);
+    }
+    box.append(el('label', {className: 'style-card'}, parts));
   });
+}
+function zoomStyle(s) {
+  const close = () => overlay.remove();
+  const overlay = el('div', {className: 'style-zoom', title: 'Bấm để đóng'}, [
+    el('figure', {}, [el('img', {src: s.preview, alt: s.label}),
+      el('figcaption', {}, [el('b', {textContent: s.label + (s.trend ? '  🔥' : '')}), el('br'), s.desc || ''])])]);
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+  document.body.append(overlay);
 }
 
 function openEditor(t, isNew) {
