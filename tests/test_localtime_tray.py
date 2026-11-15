@@ -76,3 +76,22 @@ def test_tray_reports_an_unexpected_stop():
     with patch.object(tray, "message", side_effect=lambda *a, **k: shown.append(a)):
         app._watch(proc)                          # quitting on purpose: no alarm
     assert not shown
+
+
+def test_tray_starts_chatgpt2api_only_when_it_is_down(tmp_path):
+    c2a = tmp_path / "chatgpt2api-web"
+    c2a.mkdir()
+    (c2a / "main.py").write_text("")
+    (c2a / "start.cmd").write_text("@echo off")
+    (c2a / ".env").write_text("CHATGPT2API_PORT=13555\n")
+    with patch.object(tray, "chatgpt2api_dir", return_value=c2a), patch.object(tray.subprocess, "Popen") as popen:
+        with patch("httpx.get", side_effect=OSError("down")):
+            assert tray.ensure_chatgpt2api() == "http://127.0.0.1:13555"
+        popen.assert_called_once()
+        assert popen.call_args[0][0][-1].endswith("start.cmd")
+        popen.reset_mock()
+        with patch("httpx.get", return_value=object()):          # already answering
+            tray.ensure_chatgpt2api()
+        popen.assert_not_called()
+    with patch.object(tray, "chatgpt2api_dir", return_value=None):
+        assert tray.ensure_chatgpt2api() == ""                    # not installed: nothing to do

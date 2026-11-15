@@ -4,6 +4,7 @@
 param([string]$Dir = '')
 $ErrorActionPreference = 'Continue'
 $AppRoot = Split-Path -Parent $PSScriptRoot
+function Stop-WithError { Write-Host ''; Read-Host 'Nhan Enter de dong cua so nay' | Out-Null; exit 1 }
 
 if (-not $Dir) {
     foreach ($c in @((Join-Path (Split-Path -Parent $AppRoot) 'chatgpt2api-web'), 'D:\chatgpt2api-web',
@@ -11,7 +12,7 @@ if (-not $Dir) {
         if (Test-Path (Join-Path $c 'main.py')) { $Dir = $c; break }
     }
 }
-if (-not $Dir) { Write-Host 'Khong tim thay thu muc chatgpt2api-web canh app.' -ForegroundColor Red; exit 1 }
+if (-not $Dir) { Write-Host 'Khong tim thay thu muc chatgpt2api-web canh app.' -ForegroundColor Red; Stop-WithError }
 
 $port = '13000'
 $envFile = Join-Path $Dir '.env'
@@ -43,7 +44,7 @@ if (Test-Up) {
         if (-not (Test-Path (Join-Path $venv 'pyvenv.cfg')) -or -not (Test-Path (Join-Path $venv 'Scripts\pythonw.exe'))) {
             Write-Host 'LOI: .venv cua ChatGPT2API bi hong hoac chua cai.' -ForegroundColor Red
             Write-Host "Sua: chay  powershell -ExecutionPolicy Bypass -File `"$Dir\setup.ps1`"  roi mo lai loi tat nay." -ForegroundColor Yellow
-            exit 1
+            Stop-WithError
         }
     }
     Write-Host 'Dang khoi dong (icon o khay he thong)...'
@@ -59,7 +60,7 @@ if (Test-Up) {
         Show-Tail 'service.log'
         Write-Host "`nThuong gap: thieu thu vien (chay $Dir\setup.ps1), cong $port bi chuong trinh khac chiem," -ForegroundColor Yellow
         Write-Host 'hoac Windows Defender chan python. Gui anh cua so nay neu can ho tro.' -ForegroundColor Yellow
-        exit 1
+        Stop-WithError
     }
 }
 
@@ -68,4 +69,6 @@ try { $null = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:18620/v1/mode
 catch { $muse = [bool]$_.Exception.Response }
 if ($muse) { Write-Host 'Gateway Muse (video AI): dang chay tai http://127.0.0.1:18620' -ForegroundColor Green }
 else { Write-Host 'Gateway Muse (video AI): chi chay khi app Affiliate Agent dang mo (tu bat o cong 18620).' -ForegroundColor DarkGray }
+Write-Host "`nMoi thu on: cua so tu dong sau 4 giay (ChatGPT2API van chay o khay he thong)." -ForegroundColor DarkGray
+Start-Sleep 4
 exit 0

@@ -334,7 +334,7 @@ try {
         if (Test-Path $vbs) {   # its own tray launcher: no console window either
             $items += @{ Name = 'ChatGPT2API'; Exe = "$env:SystemRoot\System32\wscript.exe"; Args = '"' + $vbs + '"';
                          Cwd = (Split-Path -Parent $vbs) }
-        } else { $items += @{ Name = 'ChatGPT2API'; Target = $script:ChatGPT2ApiStart } }
+        } else { $items += @{ Name = 'ChatGPT2API'; Target = $script:ChatGPT2ApiStart; Close = $true } }
     }
     foreach ($it in $items) {
         $lnk = $shell.CreateShortcut((Join-Path $desk ($it.Name + '.lnk')))
@@ -345,7 +345,7 @@ try {
         } else {
             # cmd /k keeps the window open, so any error stays readable (update)
             $lnk.TargetPath = "$env:SystemRoot\System32\cmd.exe"
-            $lnk.Arguments = '/k "' + $it.Target + '"'
+            $lnk.Arguments = $(if ($it.Close) { '/c "' } else { '/k "' }) + $it.Target + '"'   # /c: the script pauses on errors itself
             $lnk.WorkingDirectory = Split-Path -Parent $it.Target
         }
         if ($it.Icon -and (Test-Path ($it.Icon -replace ',\d+$', ''))) { $lnk.IconLocation = $it.Icon }

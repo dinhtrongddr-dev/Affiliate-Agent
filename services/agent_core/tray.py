@@ -52,6 +52,46 @@ def app_running(timeout: float = 2) -> bool:
         return False
 
 
+def chatgpt2api_dir() -> Path | None:
+    """The ChatGPT2API folder installed next to the app (AffiliateSuite layout) or on a drive root."""
+    for c in (ROOT.parent / "chatgpt2api-web", Path("D:/chatgpt2api-web"), Path("E:/chatgpt2api-web"),
+              Path("C:/chatgpt2api-web")):
+        if (c / "main.py").is_file():
+            return c
+    return None
+
+
+def chatgpt2api_url(folder: Path | None) -> str:
+    port = "13000"
+    try:
+        for line in (folder / ".env").read_text(encoding="utf-8").splitlines() if folder else []:
+            if line.strip().startswith("CHATGPT2API_PORT="):
+                port = line.split("=", 1)[1].strip() or port
+    except OSError:
+        pass
+    return f"http://127.0.0.1:{port}"
+
+
+def ensure_chatgpt2api() -> str:
+    """Start ChatGPT2API (hidden, its own tray icon) when it is not running, so one shortcut is
+    enough. Returns its URL ('' when it is not installed)."""
+    import httpx
+    folder = chatgpt2api_dir()
+    if folder is None:
+        return ""
+    url = chatgpt2api_url(folder)
+    try:
+        httpx.get(url + "/v1/models", timeout=2, trust_env=False)   # any answer (even 401) = running
+        return url
+    except Exception:  # noqa: BLE001
+        pass
+    start = folder / "start.cmd"
+    if start.is_file():
+        subprocess.Popen(["cmd", "/c", str(start)], cwd=str(folder), creationflags=NO_WINDOW,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return url
+
+
 def message(title: str, text: str, error: bool = False) -> None:
     """A Windows message box (works without a console)."""
     try:
@@ -156,10 +196,20 @@ class App:
             return lambda *_: os.startfile(str(path)) if path.exists() else None  # noqa: S606
 
         media = self._media_root()
-        menu = pystray.Menu(
+        try:
+            c2a = ensure_chatgpt2api()          # the AI gateway the app needs, started with it
+        except Exception as exc:  # noqa: BLE001
+            print("ChatGPT2API start failed:", exc)
+            c2a = chatgpt2api_url(chatgpt2api_dir()) if chatgpt2api_dir() else ""
+        items = [
             pystray.MenuItem("Mở Affiliate Agent", lambda *_: webbrowser.open(URL), default=True),
             pystray.MenuItem(lambda _: f"Trạng thái: {self.state}", None, enabled=False),
             pystray.Menu.SEPARATOR,
+        ]
+        if c2a:   # where the ChatGPT account is logged in
+            items.append(pystray.MenuItem("Mở ChatGPT2API (đăng nhập ChatGPT)", lambda *_: webbrowser.open(c2a)))
+        menu = pystray.Menu(
+            *items,
             pystray.MenuItem("Thư mục video", open_folder(media / "outbox" if media else ROOT)),
             pystray.MenuItem("Nhật ký", open_folder(LOGS / "app-console.log")),
             pystray.MenuItem("Khởi động lại", self.restart),
