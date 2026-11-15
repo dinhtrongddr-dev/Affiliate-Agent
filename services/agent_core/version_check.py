@@ -38,13 +38,14 @@ def local(root: Path) -> dict:
     """The version this app runs (read once: it only changes with a restart)."""
     key = str(root)
     if key not in _local:
-        info = {"build": 0, "hash": "", "date": "", "title": "", "branch": "main"}
+        info = {"build": 0, "hash": "", "sha": "", "date": "", "title": "", "branch": "main"}
         try:
             if (Path(root) / ".git").exists():
                 info["build"] = int(_git(root, "rev-list", "--count", "HEAD") or 0)
                 line = _git(root, "log", "-1", "--format=%h%x1f%cI%x1f%s")
                 info["hash"], info["date"], info["title"] = (line.split("\x1f") + ["", "", ""])[:3]
                 info["branch"] = _git(root, "rev-parse", "--abbrev-ref", "HEAD") or "main"
+                info["sha"] = _git(root, "rev-parse", "HEAD")
         except Exception as exc:  # noqa: BLE001
             log.debug("version info: %s", exc)
         _local[key] = info
@@ -68,7 +69,8 @@ def check(root: Path) -> dict:
         latest = line.split()[0] if line else ""
         if not latest:
             raise RuntimeError("không đọc được bản mới nhất trên GitHub (mạng?)")
-        head = _git(root, "rev-parse", "HEAD")
+        # compare with the version that RUNS (the folder may already hold newer code)
+        head = mine.get("sha") or _git(root, "rev-parse", "HEAD")
         behind, changes = 0, []
         if latest != head:
             repo = _repo(root)
