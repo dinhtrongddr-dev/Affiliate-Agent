@@ -38,6 +38,15 @@ function Start-App {
         Start-Process -FilePath (Join-Path $Root 'scripts\start-app.cmd') -WorkingDirectory $Root -WindowStyle Minimized
     }
 }
+function Stop-App {
+    # Stop the running app (only this folder's .venv python); tray first: no 'app stopped' alarm
+    $procs = Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
+        Where-Object { $_.CommandLine -match 'agent_core\.(cli|tray)' -and ($_.ExecutablePath -and $_.ExecutablePath.ToLower() -like "$($Root.ToLower())*") } |
+        Sort-Object { if ($_.CommandLine -match 'agent_core\.tray') { 0 } else { 1 } }
+    foreach ($p in $procs) { & taskkill /PID $p.ProcessId /T /F 2>$null | Out-Null }
+    if ($procs) { Write-Host 'Da tat app dang chay.'; Start-Sleep 2 }
+    return [bool]$procs
+}
 trap {
     Write-Host "`nLOI: $_" -ForegroundColor Red
     Write-Result $false "$_"
@@ -103,7 +112,18 @@ $script:From = (git log -1 --format='%h').Trim()
 if ($behind -eq 0) {
     Write-Host "Da la ban moi nhat ($current)." -ForegroundColor Green
     if ($Check) { exit 0 }
-    if (-not $Force) { Write-Result $true 'Da la ban moi nhat'; exit 0 }
+    if (-not $Force) {
+        if ($LogFile -and -not $NoRestart) {
+            # started by the app's button: the code here can be newer than the running app
+            # (pulled without a restart), so restart it to run what is on disk
+            Stop-App | Out-Null
+            Write-Result $true "Da la ban moi nhat ($current), da khoi dong lai app"
+            Start-App
+            try { Stop-Transcript | Out-Null } catch {}
+            exit 0
+        }
+        Write-Result $true 'Da la ban moi nhat'; exit 0
+    }
 }
 Write-Host "Co $behind cap nhat moi:" -ForegroundColor Cyan
 git log --format='  - %s' "HEAD..origin/$branch" | Select-Object -First 15
@@ -117,14 +137,7 @@ if ($dirty) {
     throw 'Dung cap nhat de khong ghi de. Sao luu/huy cac thay doi do (git stash) roi chay lai.'
 }
 
-# Stop the running app (only this folder's .venv python).
-$venvPy = (Join-Path $Root '.venv\Scripts\python.exe').ToLower()
-$procs = Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
-    Where-Object { $_.CommandLine -match 'agent_core\.(cli|tray)' -and ($_.ExecutablePath -and $_.ExecutablePath.ToLower() -like "$($Root.ToLower())*") } |
-    Sort-Object { if ($_.CommandLine -match 'agent_core\.tray') { 0 } else { 1 } }   # tray first: no 'app stopped' alarm
-$wasRunning = [bool]$procs
-foreach ($p in $procs) { & taskkill /PID $p.ProcessId /T /F 2>$null | Out-Null }
-if ($wasRunning) { Write-Host 'Da tat app dang chay.'; Start-Sleep 2 }
+$wasRunning = Stop-App
 
 # Back up the database before the new version touches it.
 $db = Join-Path $Root 'state\affiliate-agent.sqlite3'

@@ -187,8 +187,9 @@ function waitForRestart() {
     const v = await fetch("/api/version", {cache: "no-store"}).then(r => r.json()).catch(() => null);
     if (!v) wentDown = true;
     const changed = v && v.local && v.local.hash && v.local.hash !== before;
-    const failed = v && v.last_update && !v.last_update.ok && new Date(v.last_update.at).getTime() > started - 5000;
-    if (v && (changed || failed || (wentDown && Date.now() - started > 15000))) { location.reload(); return; }
+    // a result written after the click (done, nothing new, or an error) ends the wait as well
+    const finished = v && v.last_update && new Date(v.last_update.at).getTime() > started - 5000;
+    if (v && (changed || finished || (wentDown && Date.now() - started > 15000))) { location.reload(); return; }
     if (Date.now() - started > 15 * 60 * 1000) {
       status.textContent = "Cập nhật lâu hơn bình thường. Xem logs\\update-*.log hoặc mở lại app từ shortcut.";
       return;
