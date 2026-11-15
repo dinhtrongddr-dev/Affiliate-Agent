@@ -62,21 +62,22 @@ SURI_FAMILY = {
     "voice_mode": "dialogue",
 }
 
-# How a series speaks: "dialogue" = the characters talk to each other on screen with the voices
-# Muse generates; "narration" = a VieNeu narrator / first-person voice-over (knowledge, niche,
-# review-style series). Review and trend videos always use VieNeu.
-VOICE_MODES = {"dialogue": "Hội thoại giữa nhân vật (giọng Muse)",
+# How a series is written: "dialogue" = the characters talk to each other on screen (one VieNeu
+# voice per character, fitted to the mouth); "narration" = a narrator / first-person voice-over
+# (knowledge and niche series). Every voice is VieNeu: Muse's own speech is discarded because it
+# improvises its own words instead of the scripted line (measured Nov 2026: 0/8 lines matched).
+VOICE_MODES = {"dialogue": "Hội thoại giữa nhân vật (mỗi nhân vật một giọng VieNeu)",
                "narration": "Thuyết minh / ngôi thứ nhất (giọng VieNeu)"}
 
 
-def voice_source(brief: dict) -> str:
-    """'native' when the characters' own generated voices are kept, else 'tts' (VieNeu)."""
+def is_dialogue(brief: dict) -> bool:
+    """A series written as character-to-character dialogue."""
     if (brief or {}).get("creation_branch") != "template_series":
-        return "tts"
+        return False
     tpl = brief.get("template") or {}
     mode = (brief.get("voice_mode") or tpl.get("voice_mode")
             or ("dialogue" if tpl.get("id") == "suri-family" else ""))
-    return "native" if mode == "dialogue" else "tts"
+    return mode == "dialogue"
 
 
 def _context(value, depth=0):

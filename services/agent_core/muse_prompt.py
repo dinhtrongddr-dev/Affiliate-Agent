@@ -50,30 +50,6 @@ def _person(c: dict) -> str:
     return _clip(f"{c.get('name') or c['id']}" + (f" ({head})" if head else "") + (f": {look}" if look else ""), 230)
 
 
-def voice_hint(c: dict) -> str:
-    """The same short voice description for a character in every clip, so Muse keeps one voice."""
-    if c.get("voice_desc"):
-        return _clip(c["voice_desc"], 60)
-    try:
-        age = int(str(c.get("age") or "").strip()[:3])
-    except ValueError:
-        age = None
-    gender = str(c.get("gender") or "").lower()
-    if not gender:   # templates saved without gender: infer from the role/name words
-        who = f" {c.get('role') or ''} {c.get('name') or ''} {c.get('id') or ''} ".lower()
-        if any(w in who for w in (" mẹ", "mother", " mom", " bà", "grandma", " chị", " cô ", "wife", "vợ")):
-            gender = "female"
-        elif any(w in who for w in (" bố", "father", " dad", " ba ", " ông", "grandpa", " anh", " chú", "husband", "chồng")):
-            gender = "male"
-    if age is not None and age <= 10:
-        return "high bright child voice"
-    if gender.startswith(("f", "nữ")):
-        return "warm young woman's voice" if (age or 30) < 45 else "gentle older woman's voice"
-    if gender.startswith(("m", "nam")):
-        return "friendly young man's voice" if (age or 30) < 45 else "deep older man's voice"
-    return "natural voice"
-
-
 def compile_shot(scene: dict, plan: dict, references: list[dict] | None = None,
                  duration: int = 10, override_style: str | None = None) -> str:
     references = references or []
@@ -121,14 +97,12 @@ def compile_shot(scene: dict, plan: dict, references: list[dict] | None = None,
     lines = [ln for ln in scene.get("lines") or [] if ln.get("text")]
     names = {c["id"]: c.get("name") or c["id"] for c in cast}
     on_camera = [ln for ln in lines if ln.get("speaker") in names]
-    if scene.get("talking") and on_camera and plan.get("voice_source") == "native":
-        # dialogue series: this clip's own voices are kept, so the speech must be right here
-        by_id = {c["id"]: c for c in cast}
-        said = "; ".join(f'{names[ln["speaker"]]} ({voice_hint(by_id[ln["speaker"]])}) says in Vietnamese: '
-                         f'"{_clip(ln["text"], 90)}"' for ln in on_camera[:2])
-        parts.append("Dialogue: " + said + " They talk to each other, natural lip sync, clear standard "
-                     "Vietnamese, lively emotion. Audio: only these voices and soft room sound, "
-                     "no background music.")
+    if scene.get("talking") and on_camera and plan.get("dialogue"):
+        # dialogue series: the characters face each other; the voice is dubbed later (VieNeu),
+        # so only a short, clear mouth movement for exactly this line is wanted
+        said = "; ".join(f'{names[ln["speaker"]]} says: "{_clip(ln["text"], 90)}"' for ln in on_camera[:2])
+        parts.append("Dialogue: " + said + " They talk to each other with natural mouth movement, "
+                     "say only this line once, then react without speaking.")
     elif scene.get("talking") and on_camera:
         said = "; ".join(f'{names[ln["speaker"]]} says to camera: "{_clip(ln["text"], 90)}"'
                          for ln in on_camera[:2])
