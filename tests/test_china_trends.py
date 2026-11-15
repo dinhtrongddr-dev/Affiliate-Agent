@@ -270,3 +270,59 @@ def test_china_page_and_api(tmp_path, monkeypatch):
         page = c.get("/china?tab=sources")
         assert "Xiaohongshu" in page.text and "收纳技巧" in c.get("/china").text
         assert c.get("/performance").status_code == 200
+
+
+def test_ideas_run_in_parallel_and_failed_topics_wait(s):
+    """A pass makes ideas for the best topics at once; a topic that failed is not retried for a day,
+    and one pass tries at most 2 x the wanted number of topics (an AI time-out used to cost 3 min each)."""
+    import threading
+    import time as _time
+    keys = []
+    for n in range(8):
+        k = collectors.add_manual(s, "douyin", f"话题{n}号很火")
+        store.update_topic(s.database_path, k, title_vi=f"Chủ đề {n}", opportunity=90 - n, stage="rising",
+                           niche="ky_nang")
+        keys.append(k)
+    pipeline._idea_failed.clear()
+    tried, running, peak = [], [0], [0]
+    lock = threading.Lock()
+
+    def fake(settings, key, ask=None):
+        with lock:
+            tried.append(key)
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        _time.sleep(0.2)
+        with lock:
+            running[0] -= 1
+        raise RuntimeError("AI endpoint unavailable: timed out")
+
+    with patch.object(formula, "generate_ideas", side_effect=fake):
+        assert pipeline._ideas(s, 3, None) == 0
+    assert len(tried) == 6 and peak[0] == 3                 # 2 waves of 3, at the same time
+    tried.clear()
+    with patch.object(formula, "generate_ideas", side_effect=fake):
+        pipeline._ideas(s, 3, None)
+    assert set(tried).isdisjoint(keys[:6])                  # yesterday's failures wait
+    pipeline._idea_failed.clear()
+
+
+def test_label_batches_run_in_parallel(s):
+    import threading
+    import time as _time
+    for n in range(45):
+        collectors.add_manual(s, "weibo", f"热搜第{n}条")
+    topics = store.list_topics(s.database_path, since_hours=None)
+    running, peak, lock = [0], [0], threading.Lock()
+
+    def ask(prompt):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        _time.sleep(0.2)
+        with lock:
+            running[0] -= 1
+        return _label_reply(prompt)
+
+    assert analysis.label_topics(s, topics, ask=ask) == len(topics)
+    assert peak[0] == 3                                     # 45 topics = 3 batches, all at once

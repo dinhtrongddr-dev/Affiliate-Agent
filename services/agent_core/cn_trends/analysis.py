@@ -33,6 +33,7 @@ STAGE_LABELS = {"early_signal": "Tín hiệu sớm", "rising": "Đang lên", "pe
                 "saturated": "Bão hoà"}
 RISK_FACTOR = {"low": 1.0, "medium": 0.8, "high": 0.5}
 LABEL_BATCH = 20
+PARALLEL_AI = 3   # AI calls of one China-trend pass that run at the same time
 
 
 # ------------------------------------------------------------------ AI labels
@@ -79,22 +80,30 @@ def label_topics(settings, topics: list[dict], ask=None) -> int:
         return 0
     if ask is None:
         from ..workflow import _ask_json, _client
-        client = _client(settings)
 
-        def ask(prompt):
-            return _ask_json(client, settings, prompt, temperature=0.2, max_tokens=4000)
+        def ask(prompt):   # one client per call: batches run in parallel
+            return _ask_json(_client(settings), settings, prompt, temperature=0.2, max_tokens=4000)
     db = settings.database_path
     known = [n["id"] for n in store.niches(db) if n["status"] == "active"] or list(DEFAULT_NICHES)
-    done = 0
-    for start in range(0, len(topics), LABEL_BATCH):
-        chunk = topics[start:start + LABEL_BATCH]
+    chunks = [topics[i:i + LABEL_BATCH] for i in range(0, len(topics), LABEL_BATCH)]
+    for chunk in chunks:
         for t in chunk:
             obs = store.observations(db, t["key"], 1)
             t["meta"] = json.loads(obs[-1]["meta_json"] or "{}") if obs else {}
+
+    def call(chunk):
         try:
-            reply = ask(label_prompt(chunk, known)) or {}
+            return chunk, ask(label_prompt(chunk, known)) or {}
         except Exception as exc:  # noqa: BLE001 - unlabelled topics simply wait for the next run
             log.warning("cn label batch failed: %s", exc)
+            return chunk, None
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max(1, min(PARALLEL_AI, len(chunks)))) as ex:   # batches at once, not in turn
+        replies = list(ex.map(call, chunks))
+    done = 0
+    for chunk, reply in replies:
+        if reply is None:
             continue
         keys = {t["key"] for t in chunk}
         for item in reply.get("topics") or []:

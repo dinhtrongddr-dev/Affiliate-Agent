@@ -102,7 +102,7 @@ def generate_ideas(settings, key: str, ask=None) -> list[str]:
     if ask is None:
         from ..workflow import _ask_json, _client
         client = _client(settings)
-        reply = _ask_json(client, settings, prompt, images or None, temperature=0.8, max_tokens=3500)
+        reply = _ask_json(client, settings, prompt, images or None, temperature=0.8, max_tokens=4000)
     else:
         reply = ask(prompt, images)
     formula = reply.get("formula") if isinstance(reply.get("formula"), dict) else {}

@@ -32,23 +32,47 @@ def run(settings, collect: bool = True, ask=None, ideas_ask=None) -> dict:
         summary["label_error"] = str(exc)[:200]
     summary["scored"] = analysis.score_all(settings)
     summary["proposed_niches"] = analysis.propose_niches(settings)
-    made = 0
     want = int(getattr(settings, "cn_auto_ideas", 3) or 0)
-    if want:
-        for t in store.list_topics(db, 100, since_hours=48, status=["NEW"]):
-            if made >= want:
-                break
-            if (t.get("opportunity") or 0) < 55 or t.get("stage") == "saturated":
-                continue
-            if store.list_ideas(db, topic_key=t["key"], limit=1):
-                continue
-            try:
-                formula.generate_ideas(settings, t["key"], ask=ideas_ask)
-                made += 1
-            except Exception as exc:  # noqa: BLE001
-                log.warning("ideas for %s failed: %s", t["key"], exc)
-    summary["ideas_for_topics"] = made
+    summary["ideas_for_topics"] = _ideas(settings, want, ideas_ask) if want else 0
     return summary
+
+
+IDEA_RETRY_HOURS = 24
+_idea_failed: dict[str, float] = {}   # topic -> time of the last failed attempt (this worker process)
+
+
+def _ideas(settings, want: int, ask=None) -> int:
+    """Ideas for the best `want` topics that have none: all at once, at most two waves.
+
+    Before, topics were tried one after another and a failure (an AI time-out cost 3 minutes)
+    did not count, so the loop kept trying more topics, and the same failing topics were tried
+    again on every run. Now a failed topic waits IDEA_RETRY_HOURS and a run tries at most
+    2 x `want` topics.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    db = settings.database_path
+    now = time.time()
+    queue = [t["key"] for t in store.list_topics(db, 100, since_hours=48, status=["NEW"])
+             if (t.get("opportunity") or 0) >= 55 and t.get("stage") != "saturated"
+             and now - _idea_failed.get(t["key"], 0) > IDEA_RETRY_HOURS * 3600
+             and not store.list_ideas(db, topic_key=t["key"], limit=1)][:2 * want]
+
+    def one(key):
+        try:
+            formula.generate_ideas(settings, key, ask=ask)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            _idea_failed[key] = time.time()
+            log.warning("ideas for %s failed: %s", key, exc)
+            return False
+
+    made = 0
+    while queue and made < want:
+        wave, queue = queue[:want - made], queue[want - made:]
+        with ThreadPoolExecutor(min(analysis.PARALLEL_AI, len(wave))) as ex:
+            made += sum(ex.map(one, wave))
+    return made
 
 
 def _mix(text: str) -> dict[str, float]:
