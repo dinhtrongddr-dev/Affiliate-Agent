@@ -43,7 +43,14 @@ function Stop-App {
     $procs = Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
         Where-Object { $_.CommandLine -match 'agent_core\.(cli|tray)' -and ($_.ExecutablePath -and $_.ExecutablePath.ToLower() -like "$($Root.ToLower())*") } |
         Sort-Object { if ($_.CommandLine -match 'agent_core\.tray') { 0 } else { 1 } }
-    foreach ($p in $procs) { & taskkill /PID $p.ProcessId /T /F 2>$null | Out-Null }
+    # /T already ends the children, so a later PID may be gone: taskkill then writes to stderr,
+    # which PowerShell 5.1 under 'Stop' turns into a fatal error - run it with 'Continue'
+    $ErrorActionPreference = 'Continue'
+    foreach ($p in $procs) {
+        if (Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue) {
+            & taskkill /PID $p.ProcessId /T /F 2>&1 | Out-Null
+        }
+    }
     if ($procs) { Write-Host 'Da tat app dang chay.'; Start-Sleep 2 }
     return [bool]$procs
 }
