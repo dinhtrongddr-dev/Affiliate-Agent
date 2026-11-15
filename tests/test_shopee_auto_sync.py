@@ -15,6 +15,7 @@ from agent_core.shopee_intelligence.catalog import get_product
 def settings(tmp_path, monkeypatch):
     value = SimpleNamespace(database_path=tmp_path / 'sync.sqlite3',
                             timezone='Asia/Ho_Chi_Minh', seed_keywords=['home', 'tech'])
+    monkeypatch.setattr(sync, '_sleep', lambda seconds: None)
     monkeypatch.setattr(sync.addlive_config, 'summary', lambda _: {'configured': True})
     monkeypatch.setattr(sync.addlive_config, 'load', lambda _: {
         'api_key': 'synthetic', 'base_rate': None, 'cap': 40000,
@@ -58,7 +59,7 @@ def test_config_and_validation(settings):
         assert 'synthetic' not in conn.execute('SELECT values_json FROM shopee_sync_config').fetchone()[0]
 
 
-@pytest.mark.parametrize('values', [{'max_api': 21}, {'max_items': 101}, {'discovery_limit': 21},
+@pytest.mark.parametrize('values', [{'max_api': 21}, {'max_items': 1001}, {'discovery_limit': 1001},
                                     {'local_time': '24:00'}, {'enabled': 1}, {'api_key': 'secret'}])
 def test_invalid_config(settings, values):
     with pytest.raises(ValueError):
@@ -87,11 +88,11 @@ def test_real_import_and_daily_reservation(settings):
     result = sync.run(settings, at(), client)
     assert result['status'] == 'completed'
     assert result['imported'] == 1
-    assert [call[0] for call in client.calls] == ['offers', 'batch']
-    assert client.calls[1][2]['max_api'] == 10
+    assert [call[0] for call in client.calls] == ['offers', 'offers', 'batch']
+    assert client.calls[2][2]['max_api'] == 10
     assert get_product(settings.database_path, '123')['affiliate_link'] is None
     assert sync.run(settings, at(), client)['status'] == 'skipped'
-    assert len(client.calls) == 2
+    assert len(client.calls) == 3
 
 
 @pytest.mark.parametrize('partial,expected', [(True, 'partial'), (False, 'completed')])
@@ -161,7 +162,7 @@ def test_standalone_and_worker_claim_same_day_once(settings):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: sync.run(settings, at(), client), range(2)))
     assert sorted(r['status'] for r in results) == ['completed', 'skipped']
-    assert [c[0] for c in client.calls] == ['offers', 'batch']
+    assert [c[0] for c in client.calls] == ['offers', 'offers', 'batch']
 
 
 def test_hidden_product_not_rediscovered_or_refreshed(settings):
@@ -171,7 +172,7 @@ def test_hidden_product_not_rediscovered_or_refreshed(settings):
     client = Client()
     result = sync.run(settings, at(14), client)
     assert result['requested'] == 0
-    assert len(client.calls) == 1
+    assert [c[0] for c in client.calls] == ['offers', 'offers']
 
 
 def test_worker_dispatch_passes_day_and_stays_data_only(settings, monkeypatch):
@@ -192,4 +193,66 @@ def test_discovery_alternates_with_refresh_before_source_budget(settings, monkey
     monkeypatch.setattr(sync, '_tracked_ids', lambda *a: ['998', '997', '996'])
     client = Client()
     sync.run(settings, at(), client)
-    assert client.calls[1][1] == ['123', '998', '997', '996']
+    assert client.calls[2][1] == ['123', '998', '997', '996']
+
+
+class PagedClient:
+    """Synthetic source: 50 rows per page, 3 pages per keyword, batch of at most 100."""
+    def __init__(self, cooldown_rows=0, cooldown=7):
+        self.calls, self.cooldown_rows, self.cooldown = [], cooldown_rows, cooldown
+
+    def offers(self, kind, keyword='', page=1, limit=20, **kwargs):
+        self.calls.append(('offers', keyword, page, limit))
+        base = {'home': 1000, 'tech': 5000}[keyword] + (page - 1) * 50
+        return {'status': 'success', 'hasNextPage': page < 3,
+                'products': [{'itemId': str(base + i)} for i in range(min(limit, 50))], 'limits': {}}
+
+    def batch(self, references, **kwargs):
+        assert len(references) <= 100
+        self.calls.append(('batch', list(references)))
+        rows, cooled = [], self.cooldown_rows
+        for item in references:
+            if cooled:
+                cooled -= 1
+                rows.append({'status': 'stale', 'itemId': int(item), 'input': item, 'dataSource': 'db_stale',
+                             'reason': 'source_cooldown', 'productInfo': {}})
+            else:
+                rows.append({'status': 'success', 'itemId': item, 'dataSource': 'api', 'productInfo': {
+                    'itemId': item, 'productName': 'Fixture', 'productLink': f'https://shopee.vn/product/4/{item}',
+                    'price': 100000, 'sales': 100}})
+        self.cooldown_rows = 0
+        return {'status': 'success', 'products': rows, 'summary': {'fromApi': len(rows)},
+                'limits': {'sourceCooldownSeconds': self.cooldown if any(r['status'] == 'stale' for r in rows) else 0}}
+
+
+def test_discovery_pages_through_keywords_and_batches_by_100(settings):
+    sync.save_config(settings, {'discovery_limit': 250, 'max_items': 250})
+    client = PagedClient()
+    result = sync.run(settings, at(), client)
+    offers = [c for c in client.calls if c[0] == 'offers']
+    batches = [c for c in client.calls if c[0] == 'batch']
+    assert result['discovered'] == 250 and result['imported'] == 250 and result['status'] == 'completed'
+    assert all(c[3] <= 50 for c in offers)
+    # round-robin over both keywords, page by page
+    assert [(c[1], c[2]) for c in offers][:4] == [('tech', 1), ('home', 1), ('tech', 2), ('home', 2)]
+    assert [len(b[1]) for b in batches] == [100, 100, 50]
+
+
+def test_short_cooldown_is_waited_out_and_rows_retried(settings, monkeypatch):
+    waits = []
+    monkeypatch.setattr(sync, '_sleep', waits.append)
+    sync.save_config(settings, {'discovery_limit': 30, 'max_items': 30})
+    client = PagedClient(cooldown_rows=30, cooldown=7)
+    result = sync.run(settings, at(), client)
+    batches = [c for c in client.calls if c[0] == 'batch']
+    assert len(batches) == 2 and len(batches[1][1]) == 30      # all 30 retried once
+    assert waits == [8]
+    assert result['imported'] == 30 and result['status'] == 'completed'
+
+
+def test_old_hard_caps_follow_new_defaults(settings):
+    with connect(settings.database_path) as conn:
+        sync.config(settings)
+        conn.execute("INSERT INTO shopee_sync_config VALUES (1, ?)", ('{"discovery_limit": 20, "max_items": 100}',))
+    cfg = sync.config(settings)
+    assert cfg['discovery_limit'] == sync.DEFAULTS['discovery_limit'] and cfg['max_items'] == sync.DEFAULTS['max_items']

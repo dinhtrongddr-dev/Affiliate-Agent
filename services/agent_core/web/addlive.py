@@ -45,8 +45,8 @@ class Automation(BaseModel):
     enabled: bool = True
     local_time: str = Field(default="07:00", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
     max_api: int = Field(default=10, ge=1, le=20, strict=True)
-    discovery_limit: int = Field(default=20, ge=1, le=20, strict=True)
-    max_items: int = Field(default=100, ge=1, le=100, strict=True)
+    discovery_limit: int = Field(default=200, ge=1, le=1000, strict=True)
+    max_items: int = Field(default=300, ge=1, le=1000, strict=True)
 
 
 def install_routes(app, settings, render):

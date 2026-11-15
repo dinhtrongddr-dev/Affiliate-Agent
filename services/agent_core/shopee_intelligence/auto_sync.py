@@ -4,7 +4,9 @@ The daily reservation is committed before network I/O. A failed/expired run is
 not replayed that day because the source may already have charged its budget.
 """
 import json
+import math
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -14,7 +16,12 @@ from . import addlive_config, addlive_service
 from .addlive_client import AddLiveClient, AddLiveError, item_id_from_reference
 from .unified_catalog import hidden_ids
 
-DEFAULTS = {"local_time": "07:00", "max_api": 10, "discovery_limit": 20, "max_items": 100}
+DEFAULTS = {"local_time": "07:00", "max_api": 10, "discovery_limit": 200, "max_items": 300}
+MAXIMA = {"max_api": 20, "discovery_limit": 1000, "max_items": 1000}
+PAGE_SIZE = 50        # AddLiveTag offers return at most 50 rows per page (larger limits are clamped)
+BATCH_SIZE = 100      # product-data-batch accepts at most 100 items per request
+SHORT_WAIT = 60       # cooldowns up to this many seconds are waited out instead of ending the day
+_sleep = time.sleep   # tests replace this
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS shopee_sync_config (id INTEGER PRIMARY KEY CHECK(id=1), values_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS shopee_sync_runs (
@@ -66,6 +73,11 @@ def config(settings) -> dict:
     with connect(settings.database_path) as conn:
         row = conn.execute("SELECT values_json FROM shopee_sync_config WHERE id=1").fetchone()
     saved = json.loads(row[0]) if row else {}
+    # 20 / 100 were the old hard caps, not a choice: let them follow the new defaults
+    if saved.get("discovery_limit") == 20:
+        saved.pop("discovery_limit")
+    if saved.get("max_items") == 100:
+        saved.pop("max_items")
     return {**DEFAULTS, "enabled": configured, **saved, "configured": configured,
             "config_error": config_error, "timezone": settings.timezone}
 
@@ -85,7 +97,7 @@ def save_config(settings, values) -> dict:
             if not isinstance(value, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value):
                 raise ValueError("Giờ đồng bộ cần định dạng HH:MM")
         else:
-            maximum = {"max_api": 20, "discovery_limit": 20, "max_items": 100}[key]
+            maximum = MAXIMA[key]
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
                 raise ValueError(f"{key} phải từ 1 đến {maximum}")
         clean[key] = value
@@ -207,31 +219,59 @@ def run(settings, now=None, client=None, sync_day=None) -> dict:
             conn.execute("INSERT INTO shopee_sync_runs(day,status,queued_at) VALUES (?,'queued',?)", (day, stamp))
         conn.execute("UPDATE shopee_sync_runs SET status='running',owner=?,started_at=?,lease_until=?,"
                      "source_reserved=?,discovery_reserved=1 WHERE day=?",
-                     (owner, stamp, _stamp(local + timedelta(minutes=10)), cfg["max_api"], day))
+                     (owner, stamp, _stamp(local + timedelta(minutes=30)), cfg["max_api"], day))
     result = {"day": day, "requested": 0, "imported": 0, "discovered": 0,
               "source_reserved": cfg["max_api"], "offers_requests": 0, "batch_requests": 0}
     try:
         credentials = addlive_config.load(settings)
         provider = client or AddLiveClient(credentials["api_key"])
+        def bump(column, value):
+            with connect(settings.database_path) as conn:
+                conn.execute(f"UPDATE shopee_sync_runs SET {column}=? WHERE day=? AND owner=?", (value, day, owner))
+
+        def pause(limits):
+            """Wait out a short source cooldown; return the wait if it is too long (stop for today)."""
+            limits = limits if isinstance(limits, dict) else {}
+            wait = max(0, min(86400, math.ceil(float(limits.get("sourceCooldownSeconds") or 0))))
+            if limits.get("sourceRateLimited"):
+                return max(120, wait)
+            if wait > SHORT_WAIT:
+                return wait
+            if wait:
+                _sleep(wait + 1)
+            return 0
+
+        # 1) discovery: page through every seed keyword (50 per page), starting with today's
         keywords = settings.seed_keywords or [""]
-        keyword = keywords[local.date().toordinal() % len(keywords)]
-        with connect(settings.database_path) as conn:
-            conn.execute("UPDATE shopee_sync_runs SET offers_requests=1 WHERE day=? AND owner=?", (day, owner))
-        result["offers_requests"] = 1
-        offers = provider.offers("products", keyword=keyword, limit=cfg["discovery_limit"], sort_type=1)
-        if not isinstance(offers, dict) or offers.get("status") != "success" or not isinstance(offers.get("products"), list):
-            raise ValueError("Invalid offers envelope")
-        discovered = []
-        hidden = hidden_ids(settings.database_path)
-        for offer in offers["products"][:cfg["discovery_limit"]]:
-            if not isinstance(offer, dict):
-                raise ValueError("Invalid offer row")
-            try:
-                item_id = item_id_from_reference(offer.get("itemId"))
-            except AddLiveError:
-                continue
-            if item_id not in discovered and item_id not in hidden:
-                discovered.append(item_id)
+        first = local.date().toordinal() % len(keywords)
+        queue = [[kw, 1] for kw in keywords[first:] + keywords[:first]]
+        target = cfg["discovery_limit"]
+        discovered, hidden, blocked_wait = [], hidden_ids(settings.database_path), 0
+        max_calls = math.ceil(target / PAGE_SIZE) + len(keywords) + 2
+        while queue and len(discovered) < target and result["offers_requests"] < max_calls:
+            entry = queue.pop(0)
+            result["offers_requests"] += 1
+            bump("offers_requests", result["offers_requests"])
+            offers = provider.offers("products", keyword=entry[0], page=entry[1],
+                                     limit=min(PAGE_SIZE, max(1, target - len(discovered))), sort_type=1)
+            if not isinstance(offers, dict) or offers.get("status") != "success" or not isinstance(offers.get("products"), list):
+                raise ValueError("Invalid offers envelope")
+            fresh = 0
+            for offer in offers["products"]:
+                if not isinstance(offer, dict):
+                    raise ValueError("Invalid offer row")
+                try:
+                    item_id = item_id_from_reference(offer.get("itemId"))
+                except AddLiveError:
+                    continue
+                if item_id not in discovered and item_id not in hidden and len(discovered) < target:
+                    discovered.append(item_id)
+                    fresh += 1
+            if offers.get("hasNextPage") and fresh:
+                queue.append([entry[0], entry[1] + 1])   # round-robin: the other keywords go first
+            blocked_wait = pause(offers.get("limits"))
+            if blocked_wait:
+                break
         result["discovered"] = len(discovered)
         # Alternate new discoveries and oldest tracked records so a source budget
         # consumed in request order cannot indefinitely bury newly found products.
@@ -245,34 +285,53 @@ def run(settings, now=None, client=None, sync_day=None) -> dict:
                 references.append(tracked[index])
         references = references[:cfg["max_items"]]
         result["requested"] = len(references)
-        limits = offers.get("limits") or {}
-        if limits.get("sourceRateLimited") or limits.get("sourceCooldownSeconds", 0):
-            wait = max(120, min(86400, int(limits.get("sourceCooldownSeconds") or 0)))
+        if blocked_wait:
             return _finish(settings, day, owner, "blocked", result,
-                           "Nguồn AddLiveTag đang nghỉ theo hạn mức; không gọi lô tiếp.", wait, now)
+                           "Nguồn AddLiveTag đang nghỉ theo hạn mức; không gọi lô tiếp.", blocked_wait, now)
         if not references:
             return _finish(settings, day, owner, "completed", result, now=now)
-        with connect(settings.database_path) as conn:
-            conn.execute("UPDATE shopee_sync_runs SET batch_requests=1,requested=? WHERE day=? AND owner=?",
-                         (len(references), day, owner))
-        result["batch_requests"] = 1
-        imported = addlive_service.import_batch(settings, provider, references,
-            base_rate=(credentials["base_rate"] / 100 if credentials.get("base_rate") is not None else None),
-            cap=credentials.get("cap", 40000), max_api=cfg["max_api"],
-            affiliate_id=credentials.get("affiliate_id", ""), sub_id=credentials.get("sub_id", ""))
-        result["imported"] = imported["imported"]
-        result["summary"] = {key: int(value) for key, value in imported.get("summary", {}).items()
-                             if isinstance(value, int) and not isinstance(value, bool)}
-        limits = imported.get("limits") or {}
-        result["source_rate_limited"] = bool(limits.get("sourceRateLimited"))
-        wait = max(0, min(86400, int(limits.get("sourceCooldownSeconds") or 0)))
-        if result["source_rate_limited"]:
-            wait = max(120, wait)
+        bump("requested", len(references))
+
+        # 2) details in batches of 100; rows refused only because of a short source cooldown
+        #    are retried once after waiting it out
+        summary, retry = {}, []
+        base_rate = credentials["base_rate"] / 100 if credentials.get("base_rate") is not None else None
+
+        def run_batch(chunk):
+            result["batch_requests"] += 1
+            bump("batch_requests", result["batch_requests"])
+            imported = addlive_service.import_batch(settings, provider, chunk, base_rate=base_rate,
+                cap=credentials.get("cap", 40000), max_api=cfg["max_api"],
+                affiliate_id=credentials.get("affiliate_id", ""), sub_id=credentials.get("sub_id", ""))
+            result["imported"] += imported["imported"]
+            bump("imported", result["imported"])
+            for key, value in (imported.get("summary") or {}).items():
+                if isinstance(value, int) and not isinstance(value, bool):
+                    summary[key] = summary.get(key, 0) + value
+            for row in imported.get("results") or []:
+                if not row.get("imported") and row.get("reason") == "source_cooldown":
+                    try:
+                        retry.append(item_id_from_reference(row.get("itemId") or row.get("input")))
+                    except AddLiveError:
+                        pass
+            return pause(imported.get("limits"))
+
+        wait = 0
+        for begin in range(0, len(references), BATCH_SIZE):
+            wait = run_batch(references[begin:begin + BATCH_SIZE])
+            if wait:
+                break
+        if retry and not wait:
+            again = list(retry)
+            retry.clear()
+            for begin in range(0, len(again), BATCH_SIZE):
+                wait = run_batch(again[begin:begin + BATCH_SIZE])
+                if wait:
+                    break
+        result["summary"] = summary
+        result["source_rate_limited"] = bool(wait)
         partial = result["imported"] != len(references) or bool(wait)
         state = "partial" if partial else "completed"
-        with connect(settings.database_path) as conn:
-            conn.execute("UPDATE shopee_sync_runs SET imported=? WHERE day=? AND owner=?",
-                         (result["imported"], day, owner))
         return _finish(settings, day, owner, state, result,
                        "Một số sản phẩm chưa được nhập; giữ các dữ liệu đã nhập, không phát lại trong ngày."
                        if partial else None, wait, now)

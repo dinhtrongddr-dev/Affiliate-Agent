@@ -36,8 +36,8 @@
 <label class="check"><input name="enabled" type="checkbox" {{ 'checked' if cfg.enabled }}> Tự động đồng bộ mỗi ngày</label>
 <label>Giờ địa phương ({{ cfg.timezone }})<input name="local_time" type="time" value="{{ cfg.local_time }}" required></label>
 <label>Lượt lấy dữ liệu mới / ngày<input name="max_api" type="number" min="1" max="20" value="{{ cfg.max_api }}" required></label>
-<label>Sản phẩm khám phá mỗi ngày<input name="discovery_limit" type="number" min="1" max="20" value="{{ cfg.discovery_limit }}" required></label>
-<label>Sản phẩm theo dõi tối đa / lượt<input name="max_items" type="number" min="1" max="100" value="{{ cfg.max_items }}" required></label><div style="align-self:end"><button class="btn">Lưu lịch tự động</button></div>
+<label>Sản phẩm khám phá mỗi ngày<input name="discovery_limit" type="number" min="1" max="1000" value="{{ cfg.discovery_limit }}" required></label>
+<label>Sản phẩm theo dõi tối đa / lượt<input name="max_items" type="number" min="1" max="1000" value="{{ cfg.max_items }}" required></label><div style="align-self:end"><button class="btn">Lưu lịch tự động</button></div>
 <p class="small muted">Mỗi ngày một lượt có giới hạn; bấm đồng bộ ngay không tạo lượt trùng. Máy cần bật và có mạng. Chỉ cập nhật dữ liệu, không tự tạo hoặc đăng video.</p>
 </form>
 <h2>Nhập danh sách có sẵn (tuỳ chọn)</h2><div class="drop" id="csv-drop"><input type="file" accept=".csv,text/csv" hidden><b>Chọn hoặc thả CSV Shopee Affiliate / TikTok Shop</b></div>
