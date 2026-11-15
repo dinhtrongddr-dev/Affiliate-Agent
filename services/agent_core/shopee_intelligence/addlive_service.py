@@ -71,6 +71,18 @@ def normalize_product(info, *, data_source='', warning='', existing=None):
     }
 
 
+def _newer(current, candidate) -> bool:
+    """True when the catalog's timestamp is strictly newer than the incoming cache timestamp."""
+    def parse(value):
+        try:
+            dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    a, b = parse(current) if current else None, parse(candidate) if candidate else None
+    return bool(a and b and a > b)
+
+
 def _persist(db_path, row, *, affiliate_id='', sub_id=''):
     info = row.get('productInfo') or {}
     item_id = normalize_product(info)['item_id']
@@ -92,12 +104,16 @@ def _persist(db_path, row, *, affiliate_id='', sub_id=''):
     if affiliate_id and not product.get('affiliate_link'):
         product['affiliate_link'] = 'https://s.shopee.vn/an_redir?' + urlencode({
             'origin_link': product['product_url'], 'affiliate_id': affiliate_id, 'sub_id': sub_id})
-    # Explicit stale flags override even an inconsistent success status.
-    usable = row.get('status') == 'success' and source in {'api', 'db'} and not warning and not row.get('stale')
+    # Stale rows (older cache: AddLiveTag's per-request fresh budget is only 10 items) carry full
+    # details and are imported as cache data with the provider's own timestamp, never as a fresh
+    # observation. Explicit stale flags override even an inconsistent success status.
+    stale = row.get('status') == 'stale' or bool(row.get('stale')) or source == 'db_stale'
+    usable = (row.get('status') in {'success', 'stale'} and source in {'api', 'db', 'db_stale'}
+              and not warning)
     if not usable:
         return {**row, 'imported': False, 'normalized': product, 'data_source': source,
                 'warnings': [warning] if warning else []}
-    if source == 'api':
+    if source == 'api' and not stale:
         # Observation uniqueness must not silently collapse separate same-second
         # retrievals. Cache imports deliberately never take this path.
         product['observed_at'] = datetime.now(timezone.utc).isoformat(timespec='microseconds')
@@ -113,6 +129,12 @@ def _persist(db_path, row, *, affiliate_id='', sub_id=''):
             source_stamp = source_time.astimezone(timezone.utc).isoformat()
         except ValueError:
             source_stamp = (existing or {}).get('updated_at') or ''
+            if stale and existing:
+                source_stamp = ''   # undated old cache: never replaces what the catalog has
+        if existing and (_newer(existing.get('updated_at'), source_stamp) or (stale and not source_stamp)):
+            # older cache never overwrites fresher catalog data; the product is already there
+            return {**row, 'itemId': product['item_id'], 'imported': True, 'kept_newer': True,
+                    'normalized': product, 'product': existing, 'data_source': source, 'warnings': []}
         columns = [k for k in product if k != 'addlive']
         values = {k: product[k] for k in columns}
         values.update(source_type='addlive_db', observed_at=(existing or {}).get('observed_at') or source_stamp,
@@ -145,7 +167,7 @@ def _import_response(settings, response, *, affiliate_id='', sub_id=''):
             for flag in ('warning', 'stale', 'dataSource'):
                 if response.get(flag) and flag not in row:
                     row[flag] = response[flag]
-            if row.get('status') != 'success' or not isinstance(row.get('productInfo'), dict):
+            if row.get('status') not in {'success', 'stale'} or not isinstance(row.get('productInfo'), dict):
                 results.append({**row, 'imported': False, 'data_source': row.get('dataSource', ''),
                                 'warnings': [str(row['warning'])] if row.get('warning') else []})
                 continue

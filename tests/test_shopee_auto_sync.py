@@ -198,8 +198,9 @@ def test_discovery_alternates_with_refresh_before_source_budget(settings, monkey
 
 class PagedClient:
     """Synthetic source: 50 rows per page, 3 pages per keyword, batch of at most 100."""
-    def __init__(self, cooldown_rows=0, cooldown=7):
+    def __init__(self, cooldown_rows=0, cooldown=7, stale_info=False):
         self.calls, self.cooldown_rows, self.cooldown = [], cooldown_rows, cooldown
+        self.stale_info = stale_info
 
     def offers(self, kind, keyword='', page=1, limit=20, **kwargs):
         self.calls.append(('offers', keyword, page, limit))
@@ -215,7 +216,10 @@ class PagedClient:
             if cooled:
                 cooled -= 1
                 rows.append({'status': 'stale', 'itemId': int(item), 'input': item, 'dataSource': 'db_stale',
-                             'reason': 'source_cooldown', 'productInfo': {}})
+                             'reason': 'source_cooldown', 'productInfo': {} if not self.stale_info else {
+                                 'itemId': item, 'productName': 'Old', 'dataSource': 'db_stale',
+                                 'productLink': f'https://shopee.vn/product/4/{item}', 'price': 90000,
+                                 'lastUpdate': '2026-11-01 08:00:00'}})
             else:
                 rows.append({'status': 'success', 'itemId': item, 'dataSource': 'api', 'productInfo': {
                     'itemId': item, 'productName': 'Fixture', 'productLink': f'https://shopee.vn/product/4/{item}',
@@ -256,3 +260,13 @@ def test_old_hard_caps_follow_new_defaults(settings):
         conn.execute("INSERT INTO shopee_sync_config VALUES (1, ?)", ('{"discovery_limit": 20, "max_items": 100}',))
     cfg = sync.config(settings)
     assert cfg['discovery_limit'] == sync.DEFAULTS['discovery_limit'] and cfg['max_items'] == sync.DEFAULTS['max_items']
+
+
+def test_stale_cache_counts_once_and_is_refreshed_after_cooldown(settings):
+    sync.save_config(settings, {'discovery_limit': 30, 'max_items': 30})
+    client = PagedClient(cooldown_rows=30, cooldown=7, stale_info=True)
+    result = sync.run(settings, at(), client)
+    batches = [c for c in client.calls if c[0] == 'batch']
+    assert len(batches) == 2                       # cache now, then one try for fresh data
+    assert result['imported'] == 30 and result['status'] == 'completed'
+    assert get_product(settings.database_path, batches[0][1][0])['source_type'] == 'addlive_api'

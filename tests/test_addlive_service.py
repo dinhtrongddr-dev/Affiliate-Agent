@@ -104,7 +104,9 @@ def test_batch_mixed_results_retains_provider_order_and_limits(tmp_path):
     limits = {'sourceRateLimited': True, 'sourceCooldownSeconds': 120}
     c = Client({'status': 'success', 'products': rows, 'summary': {'stale': 1}, 'limits': limits})
     result = import_batch(s, c, ['456'], cache_only=True, max_api=0)
-    assert result['imported'] == 1
+    # the undated stale row never overwrites the fresh row already saved: kept, counted present
+    assert result['imported'] == 2
+    assert result['results'][1].get('kept_newer') is True
     assert [r['status'] for r in result['results']] == [r['status'] for r in rows]
     assert result['limits'] == limits
     assert len(c.calls) == 1
@@ -207,3 +209,26 @@ def test_history_preserves_recorded_and_suspect_and_no_db(tmp_path):
     assert result['normalized'] is True
     assert len(result['warnings']) == 3
     assert not list(tmp_path.iterdir())
+
+
+def test_stale_cache_rows_are_imported_as_cache_with_provider_time(tmp_path):
+    """AddLiveTag only refreshes 10 items per request; older cache rows still carry full details."""
+    s = settings(tmp_path)
+    row = {'status': 'stale', 'dataSource': 'db_stale', 'reason': 'api_budget_exhausted',
+           'productInfo': info(dataSource='db_stale', lastUpdate='2026-11-06 08:18:18')}
+    result = import_batch(s, Client({'status': 'success', 'products': [row]}), ['456'])
+    assert result['imported'] == 1
+    p = get_product(s.database_path, '456')
+    assert p['source_type'] == 'addlive_db' and p['updated_at'] == '2026-11-06T01:18:18+00:00'
+    assert observations(s.database_path) == []          # old cache is never a new sales observation
+
+
+def test_older_stale_cache_never_overwrites_fresher_data(tmp_path):
+    s = settings(tmp_path)
+    import_product(s, Client({'status': 'success', 'productInfo': info(sales=500)}), '456')
+    row = {'status': 'stale', 'dataSource': 'db_stale',
+           'productInfo': info(dataSource='db_stale', sales=1, lastUpdate='2026-01-01 00:00:00')}
+    result = import_batch(s, Client({'status': 'success', 'products': [row]}), ['456'])
+    assert result['imported'] == 1 and result['results'][0]['kept_newer'] is True
+    p = get_product(s.database_path, '456')
+    assert p['total_sold'] == 500 and p['source_type'] == 'addlive_api'

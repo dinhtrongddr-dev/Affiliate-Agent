@@ -294,8 +294,15 @@ def run(settings, now=None, client=None, sync_day=None) -> dict:
 
         # 2) details in batches of 100; rows refused only because of a short source cooldown
         #    are retried once after waiting it out
-        summary, retry = {}, []
+        summary, retry, done = {}, [], set()
         base_rate = credentials["base_rate"] / 100 if credentials.get("base_rate") is not None else None
+
+        def row_id(row):
+            try:
+                return item_id_from_reference(row.get("itemId") or row.get("input")
+                                              or (row.get("normalized") or {}).get("item_id"))
+            except AddLiveError:
+                return None
 
         def run_batch(chunk):
             result["batch_requests"] += 1
@@ -303,17 +310,23 @@ def run(settings, now=None, client=None, sync_day=None) -> dict:
             imported = addlive_service.import_batch(settings, provider, chunk, base_rate=base_rate,
                 cap=credentials.get("cap", 40000), max_api=cfg["max_api"],
                 affiliate_id=credentials.get("affiliate_id", ""), sub_id=credentials.get("sub_id", ""))
-            result["imported"] += imported["imported"]
-            bump("imported", result["imported"])
             for key, value in (imported.get("summary") or {}).items():
                 if isinstance(value, int) and not isinstance(value, bool):
                     summary[key] = summary.get(key, 0) + value
-            for row in imported.get("results") or []:
-                if not row.get("imported") and row.get("reason") == "source_cooldown":
-                    try:
-                        retry.append(item_id_from_reference(row.get("itemId") or row.get("input")))
-                    except AddLiveError:
-                        pass
+            results = imported.get("results")
+            if results is None:   # provider stub without per-row results: trust the count
+                result["imported"] += imported["imported"]
+            for row in results or []:
+                item = row_id(row)
+                if row.get("imported") and item:
+                    done.add(item)
+                # refused fresh data only because the source was resting (it may still have come
+                # in as older cache): one more try for fresh data after the pause
+                if row.get("reason") == "source_cooldown" and item:
+                    retry.append(item)
+            if results is not None:
+                result["imported"] = len(done)
+            bump("imported", result["imported"])
             return pause(imported.get("limits"))
 
         wait = 0
