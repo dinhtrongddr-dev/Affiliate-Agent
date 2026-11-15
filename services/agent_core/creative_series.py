@@ -20,18 +20,26 @@ _BUILTIN = {
     'setting': 'Gia đình Việt hiện đại trong ngôi nhà ấm cúng; không gian sinh hoạt đời thường.',
     'characters': [
         {'id': 'suri', 'name': 'Suri', 'age': 4, 'gender': 'female', 'role': 'daughter',
-         'description': 'Bé gái 4 tuổi tò mò, lanh lợi, tinh nghịch đáng yêu; phản ứng hồn nhiên.'},
+         'description': 'Bé gái 4 tuổi tò mò, lanh lợi, tinh nghịch đáng yêu; phản ứng hồn nhiên.',
+         'personality': 'Hồn nhiên, hay hỏi "tại sao", lý sự đáng yêu, hay mặc cả với bố mẹ.',
+         'voice': 'Ái Hân'},
         {'id': 'mother', 'name': 'Mẹ Suri', 'age': 30, 'gender': 'female', 'role': 'mother',
-         'description': 'Người mẹ gần gũi, nhanh trí, biểu cảm hài hước và ấm áp.'},
+         'description': 'Người mẹ gần gũi, nhanh trí, biểu cảm hài hước và ấm áp.',
+         'personality': 'Dịu dàng nhưng nghiêm khi cần, nói ngắn gọn, hay trêu bố.', 'voice': 'Mỹ Duyên'},
         {'id': 'father', 'name': 'Bố Suri', 'age': 32, 'gender': 'male', 'role': 'father',
-         'description': 'Người bố vui tính, hơi vụng về, quan tâm gia đình.'},
+         'description': 'Người bố vui tính, hơi vụng về, quan tâm gia đình.',
+         'personality': 'Tự tin thái quá, kế hoạch hay hỏng một cách vô hại, chiều con.', 'voice': 'Mạnh Dũng'},
     ],
+    'style_profile': 'chibi_3d',
+    'script_notes': 'Hài gia đình ấm áp: một tình huống đời thường, thoại qua lại nhanh, cao trào nhỏ, '
+                    'kết bằng câu chốt dễ thương hoặc bài học nhẹ.',
     'continuity_rules': ['Giữ nguyên danh tính, tuổi, khuôn mặt và tỷ lệ cơ thể từng nhân vật.',
                          'Trang phục, giọng nói và bối cảnh nhất quán trong cùng một tập.',
                          'Không tự nhận ảnh tham khảo đã được cung cấp khi kho tham khảo trống.'],
     'reference_assets': [],
-    'voice_mode': 'dialogue',   # family sitcom: the characters talk with their own (Muse) voices
+    'voice_mode': 'dialogue',   # family sitcom: the characters talk to each other (VieNeu voices)
 }
+_TEXT = {'gender': 20, 'role': 60, 'personality': 1000, 'appearance': 1000, 'wardrobe': 600}
 
 
 def _identifier(value):
@@ -91,6 +99,14 @@ def _with_mode(template):
     """Templates saved before voice modes existed: the family sitcom talks, others narrate."""
     data = copy.deepcopy(template)
     data.setdefault('voice_mode', 'dialogue' if data.get('id') == 'suri-family' else 'narration')
+    if data.get('id') == 'suri-family':   # a Suri saved before voices/personality existed: fill them in
+        for key in ('style_profile', 'script_notes'):
+            data.setdefault(key, _BUILTIN[key])
+        builtin = {c['id']: c for c in _BUILTIN['characters']}
+        for c in data.get('characters') or []:
+            for key in ('gender', 'role', 'personality', 'voice'):
+                if not c.get(key) and builtin.get(c.get('id'), {}).get(key):
+                    c[key] = builtin[c['id']][key]
     return data
 
 
@@ -113,17 +129,43 @@ def _validate(data):
             raise ValueError('ID nhân vật trùng hoặc tuổi không hợp lệ.')
         ids.add(cid)
         name, description = str(character.get('name') or '').strip(), str(character.get('description') or '').strip()
-        if not name or len(name) > 160 or not description or len(description) > 3000:
+        if not name or len(name) > 160 or len(description) > 3000:
             raise ValueError('Tên/mô tả nhân vật thiếu hoặc quá dài.')
-        result['characters'].append({'id': cid, 'name': name, 'description': description, 'age': age})
+        item = {'id': cid, 'name': name, 'description': description, 'age': age}
+        for key, bound in _TEXT.items():
+            value = str(character.get(key) or '').strip()
+            if len(value) > bound:
+                raise ValueError(f'{key} của {name} quá dài.')
+            if value:
+                item[key] = value
+        if not (description or item.get('personality') or item.get('appearance')):
+            raise ValueError(f'Nhân vật {name}: cần mô tả, tính cách hoặc ngoại hình.')
+        voice = str(character.get('voice') or '').strip()
+        if voice:
+            from .editor.tts import VOICES
+            if voice not in VOICES:
+                raise ValueError(f'Giọng "{voice}" không có trong danh sách giọng VieNeu.')
+            item['voice'] = voice
+        result['characters'].append(item)
     rules = data.get('continuity_rules') or []
     if not isinstance(rules, list) or len(rules) > 30 or any(not isinstance(r, str) or len(r) > 1000 for r in rules):
         raise ValueError('Quy tắc liên tục không hợp lệ.')
     result['continuity_rules'] = rules
     mode = data.get('voice_mode') or ('dialogue' if result['id'] == 'suri-family' else 'narration')
     if mode not in ('dialogue', 'narration'):
-        raise ValueError('voice_mode phải là "dialogue" (hội thoại, giọng Muse) hoặc "narration" (thuyết minh VieNeu).')
+        raise ValueError('voice_mode phải là "dialogue" (hội thoại) hoặc "narration" (thuyết minh).')
     result['voice_mode'] = mode
+    style = str(data.get('style_profile') or '').strip()
+    if style:
+        from .style_profiles import PROFILES
+        if style not in PROFILES:
+            raise ValueError(f'Phong cách "{style}" không có.')
+        result['style_profile'] = style
+    notes = str(data.get('script_notes') or '').strip()
+    if len(notes) > 3000:
+        raise ValueError('Kịch bản/giọng điệu chung quá dài (tối đa 3000 ký tự).')
+    if notes:
+        result['script_notes'] = notes
     return result
 
 

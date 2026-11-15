@@ -657,8 +657,9 @@ def _brief_plan_fields(brief: dict) -> dict:
     out = {k: brief[k] for k in ("format", "niche", "goal", "duration_range") if brief.get(k)}
     if brief.get("fixed_characters"):
         out["characters"] = brief["fixed_characters"]
-    if brief.get("fixed_style"):
-        out["style_profile"] = brief["fixed_style"]
+    tpl_style = (brief.get("template") or {}).get("style_profile")
+    if brief.get("fixed_style") or tpl_style:   # long-video parts, or the series' chosen art style
+        out["style_profile"] = brief.get("fixed_style") or tpl_style
     if brief.get("fixed_music_mood"):
         out["music_mood"] = brief["fixed_music_mood"]
     from .creation_branches import is_dialogue

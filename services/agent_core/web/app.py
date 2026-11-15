@@ -1074,6 +1074,16 @@ def create_app(start_worker: bool = True) -> FastAPI:
         try:
             from ..editor.tts import synthesize_bytes
             data, media_type = synthesize_bytes(text, voice=voice, mode=mode, rate=rate)
+            if body.get("child"):   # series child characters: the same pitch lift the render uses
+                import tempfile
+                from pathlib import Path as _P
+                from ..editor.voice_track import _retime
+                from ..voice_cast import CHILD_PITCH
+                with tempfile.TemporaryDirectory() as tmp:
+                    src, out = _P(tmp) / "a.wav", _P(tmp) / "b.wav"
+                    src.write_bytes(data)
+                    _retime(get_settings().ffmpeg_path, src, out, 1.0, CHILD_PITCH)
+                    data = out.read_bytes()
             from fastapi import Response
             return Response(content=data, media_type=media_type)
         except Exception as exc:

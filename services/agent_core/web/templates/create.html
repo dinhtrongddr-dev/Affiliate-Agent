@@ -1,6 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Không gian sáng tạo · Affiliate Agent{% endblock %}
 {% block content %}
+<style>
+  .series-editor { max-width: 840px; border-top: 1px solid #ddd; padding-top: 20px; margin-top: 8px; }
+  .style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin: 8px 0 4px; }
+  .style-card { display: block; border: 1px solid #d9d9d9; border-radius: 10px; padding: 10px 12px; cursor: pointer; background: #fff; }
+  .style-card:has(input:checked) { border-color: #ee4d2d; box-shadow: 0 0 0 2px rgba(238,77,45,.18); }
+  .style-card input { width: auto; margin: 0 6px 0 0; vertical-align: middle; }
+  .style-card b { font-size: 14px; }
+  .style-card .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #fff1ec; color: #c2410c; margin-left: 4px; }
+  .style-card p { margin: 4px 0 0; font-size: 12px; color: #666; line-height: 1.4; }
+  .char-card { border: 1px solid #e3e3e3; border-radius: 10px; padding: 12px 14px; margin: 10px 0; background: #fafafa; }
+  .char-grid { display: grid; grid-template-columns: 2fr 1.3fr 1fr .8fr; gap: 8px; }
+  .char-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .char-card label { margin-top: 6px; font-size: 12px; }
+  .voice-row { display: flex; gap: 8px; align-items: center; }
+  .voice-row select { flex: 1; }
+  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  @media (max-width: 640px) { .char-grid, .char-grid2 { grid-template-columns: 1fr 1fr; } }
+</style>
 <h1>Không gian sáng tạo</h1>
 <p class="sub">Chọn cách kể chuyện. Sản phẩm affiliate có thể gắn sau khi duyệt kịch bản.</p>
 <div id="creation-workspace">
@@ -23,16 +41,22 @@
     <section data-for="viral_creator" hidden><h2>Kể chuyện từ một ý tưởng</h2><p class="muted">Lên nội dung và storyboard trước; chọn sản phẩm phù hợp ở bước sau.</p></section>
     <section data-for="template_series" hidden>
       <h2>Giữ nhân vật xuyên suốt các tập</h2>
-      <label for="template-id">Mẫu series</label>
-      <select id="template-id">{% for t in series %}<option value="{{ t.id }}">{{ t.label }} · v{{ t.version }} · {{ t.reference_assets|length }} ảnh tham khảo</option>{% endfor %}</select>
-      <p class="small muted">Gia đình Suri có 3 nhân vật; bé Suri 4 tuổi. Phong cách hoạt hình chibi 3D. Nhân vật chưa có ảnh sẽ được Muse tạo ảnh ở tập đầu, rồi lưu vào mẫu để mọi tập sau giữ đúng khuôn mặt.</p>
-      <label for="voice-mode" style="margin-top:12px">Kiểu lời thoại</label>
+      <label for="template-id">Series</label>
+      <div class="voice-row">
+        <select id="template-id">{% for t in series %}<option value="{{ t.id }}">{{ t.label }} · v{{ t.version }} · {{ t.reference_assets|length }} ảnh nhân vật</option>{% endfor %}</select>
+        <button type="button" class="btn" id="edit-series">✏️ Chỉnh series</button>
+        <button type="button" class="btn" id="new-series">＋ Series mới</button>
+      </div>
+      <p class="small muted" id="series-summary"></p>
+      <label for="voice-mode" style="margin-top:12px">Kiểu lời thoại cho lần tạo này</label>
       <select id="voice-mode">
-        <option value="">Theo mẫu (Gia đình Suri: hội thoại)</option>
+        <option value="">Theo series</option>
         <option value="dialogue">Hội thoại giữa nhân vật — mỗi nhân vật một giọng VieNeu</option>
-        <option value="narration">Thuyết minh / ngôi thứ nhất — giọng VieNeu (series kiến thức, ngách)</option>
+        <option value="narration">Thuyết minh / ngôi thứ nhất — một giọng VieNeu</option>
       </select>
-      <p class="small muted">Hội thoại: kịch bản là thoại qua lại giữa các nhân vật, mỗi nhân vật một giọng VieNeu riêng (bé có giọng trẻ con), lồng khớp khẩu hình. Thuyết minh: một người dẫn kể chuyện.</p>
+      <label for="series-script" style="margin-top:12px">Kịch bản mong muốn (tùy chọn)</label>
+      <textarea id="series-script" rows="5" maxlength="3000" placeholder="Diễn biến hoặc câu thoại bạn muốn có, ví dụ:&#10;- Suri xin xem thêm 1 tập hoạt hình&#10;- Bố đồng ý ngay, mẹ lườm bố&#10;- Kết: cả nhà ngủ quên trên sofa"></textarea>
+      <p class="small muted">AI bám theo diễn biến và câu thoại chính, chỉ chỉnh lời cho tự nhiên và đủ thời lượng.</p>
       <label for="series-ideas" style="margin-top:12px">Làm nhiều tập một lúc (mỗi dòng một ý tưởng, tối đa 10)</label>
       <textarea id="series-ideas" rows="4" placeholder="Suri dạy bố gấp quần áo&#10;Suri đi siêu thị cùng mẹ&#10;..."></textarea>
       <p class="small muted">Để trống nếu chỉ làm 1 tập theo ô chủ đề bên dưới. Mỗi tập biết các tập trước để không lặp tình huống.</p>
@@ -52,56 +76,233 @@
     <label class="check" style="margin-top:10px"><input type="checkbox" id="fast-mode"> ⚡ Chế độ nhanh: tối đa 3 clip AI, 1 hook (khoảng 6–8 phút thay vì 12–18 phút)</label>
     <button class="btn primary" type="submit" style="margin-top:18px">Tạo storyboard & video</button>
   </form>
-  <details style="max-width:840px;border-top:1px solid #ddd;padding-top:20px">
-    <summary>Quản lý mẫu và ảnh nhân vật</summary>
-    <p class="small muted">Ảnh và phiên bản mẫu được chốt khi tạo tập. Thêm ảnh sau đó không đổi tập cũ; tạo tập mới để dùng ảnh vừa thêm.</p>
-    <label for="template-json">Mẫu series (JSON)</label><textarea id="template-json" rows="16" spellcheck="false"></textarea>
-    <button type="button" class="btn" id="save-template">Lưu phiên bản mới</button>
-    <form id="reference-form" style="margin-top:24px">
-      <label for="character-id">Nhân vật</label><select id="character-id"></select>
-      <label for="reference-image">Ảnh tham khảo PNG / JPEG / WebP (tối đa 10 MB)</label><input id="reference-image" type="file" accept="image/png,image/jpeg,image/webp" required>
-      <label for="reference-rights">Quyền sử dụng</label><select id="reference-rights"><option value="owned">Ảnh tôi sở hữu</option><option value="permission">Được cho phép</option><option value="licensed">Có giấy phép</option><option value="official">Tài sản chính thức được phép dùng</option></select>
-      <button class="btn" style="margin-top:12px">Thêm ảnh vào nhân vật</button>
-    </form>
-  </details>
+
+  <section class="series-editor" id="series-editor" hidden>
+    <h2 id="editor-title">Chỉnh series</h2>
+    <p class="small muted">Mỗi lần lưu tạo một phiên bản mới của series. Tập đã tạo giữ phiên bản cũ, tập mới dùng bản vừa lưu.</p>
+    <div class="char-grid2">
+      <div><label for="s-label">Tên series</label><input id="s-label" maxlength="160" placeholder="Ví dụ: Gia đình Suri"></div>
+      <div><label for="s-id">Mã series (không dấu)</label><input id="s-id" maxlength="64" placeholder="tự tạo từ tên"></div>
+    </div>
+    <label style="margin-top:14px">Phong cách nghệ thuật</label>
+    <div class="style-grid" id="s-styles"></div>
+    <p class="small muted">🔥 = phong cách đang thịnh hành trên Reels/TikTok/Shorts. Phong cách quyết định cách Muse vẽ nhân vật, ánh sáng và góc máy.</p>
+    <label for="s-style">Mô tả phong cách thêm</label>
+    <textarea id="s-style" rows="2" maxlength="5000" placeholder="Màu sắc chủ đạo, chất liệu, không khí… (ví dụ: tông pastel ấm, đồ vật bo tròn)"></textarea>
+    <label for="s-setting">Bối cảnh chung</label>
+    <textarea id="s-setting" rows="2" maxlength="3000" placeholder="Ví dụ: căn hộ chung cư ấm cúng ở Hà Nội, có ban công trồng cây"></textarea>
+    <div class="char-grid2">
+      <div><label for="s-voice-mode">Kiểu lời mặc định</label>
+        <select id="s-voice-mode"><option value="dialogue">Hội thoại giữa nhân vật</option><option value="narration">Thuyết minh / ngôi thứ nhất</option></select></div>
+      <div></div>
+    </div>
+    <label for="s-notes">Kịch bản / giọng điệu chung của series</label>
+    <textarea id="s-notes" rows="3" maxlength="3000" placeholder="Ví dụ: hài gia đình ấm áp, mỗi tập 1 tình huống đời thường, thoại nhanh, kết bằng câu chốt dễ thương"></textarea>
+
+    <h3 style="margin-top:18px">Nhân vật <span class="small muted">(tối đa 6)</span></h3>
+    <div id="s-chars"></div>
+    <button type="button" class="btn" id="add-char">＋ Thêm nhân vật</button>
+
+    <label for="s-rules" style="margin-top:14px">Quy tắc giữ liên tục (mỗi dòng một quy tắc)</label>
+    <textarea id="s-rules" rows="3" maxlength="6000"></textarea>
+    <div class="row-actions">
+      <button type="button" class="btn primary" id="save-series">💾 Lưu series</button>
+      <button type="button" class="btn" id="close-editor">Đóng</button>
+    </div>
+
+    <details style="margin-top:20px">
+      <summary>Ảnh nhân vật (giữ đúng khuôn mặt qua các tập)</summary>
+      <p class="small muted">Nhân vật chưa có ảnh sẽ được Muse tạo ở tập đầu rồi lưu vào series. Có thể tự thêm ảnh của bạn.</p>
+      <form id="reference-form">
+        <label for="character-id">Nhân vật</label><select id="character-id"></select>
+        <label for="reference-image">Ảnh tham khảo PNG / JPEG / WebP (tối đa 10 MB)</label><input id="reference-image" type="file" accept="image/png,image/jpeg,image/webp" required>
+        <label for="reference-rights">Quyền sử dụng</label><select id="reference-rights"><option value="owned">Ảnh tôi sở hữu</option><option value="permission">Được cho phép</option><option value="licensed">Có giấy phép</option><option value="official">Tài sản chính thức được phép dùng</option></select>
+        <button class="btn" style="margin-top:12px">Thêm ảnh vào nhân vật</button>
+      </form>
+    </details>
+    <details style="margin-top:12px">
+      <summary>Nâng cao: sửa JSON</summary>
+      <textarea id="template-json" rows="14" spellcheck="false"></textarea>
+      <button type="button" class="btn" id="save-template">Lưu từ JSON</button>
+    </details>
+  </section>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
 const seriesData = {{ series | tojson }};
+const VOICES = {{ voices | tojson }};
+const STYLES = {{ styles | tojson }};
+const ROLES = [['daughter','Con gái'],['son','Con trai'],['mother','Mẹ'],['father','Bố'],['grandmother','Bà'],
+  ['grandfather','Ông'],['sibling','Anh/chị/em'],['friend','Bạn'],['host','Người dẫn'],['teacher','Thầy/cô'],
+  ['pet','Thú cưng'],['other','Khác']];
+const $ = id => document.getElementById(id);
 let branch = {{ selected_branch | default('product_review') | tojson }};
 document.querySelectorAll('[data-branch]').forEach(button => button.addEventListener('click', () => {
   branch = button.dataset.branch;
   document.querySelectorAll('[data-branch]').forEach(b => b.classList.toggle('active', b === button));
   document.querySelectorAll('[data-for]').forEach(panel => panel.hidden = panel.dataset.for !== branch);
+  if (branch !== 'template_series') $('series-editor').hidden = true;
 }));
 document.querySelector('[data-branch="'+branch+'"]').click();
-function loadSeries() {
-  const t = seriesData.find(t => t.id === document.getElementById('template-id').value);
-  document.getElementById('template-json').value = JSON.stringify(t, null, 2);
-  const chars = document.getElementById('character-id'); chars.replaceChildren();
+
+function el(tag, props = {}, children = []) {
+  const node = Object.assign(document.createElement(tag), props);
+  children.forEach(c => node.append(c));
+  return node;
+}
+function options(select, pairs, value) {
+  pairs.forEach(([v, label]) => select.add(new Option(label, v)));
+  select.value = value || '';
+  return select;
+}
+function slug(text) {
+  const s = (text || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  return /^[a-z]/.test(s) ? s : ('s-' + s).slice(0, 63);
+}
+function current() { return seriesData.find(t => t.id === $('template-id').value) || seriesData[0]; }
+
+function summarise() {
+  const t = current(); if (!t) return;
+  const style = STYLES.find(s => s.id === t.style_profile);
+  const people = (t.characters || []).map(c => c.name + (c.voice ? ' (' + c.voice + ')' : '')).join(', ');
+  $('series-summary').textContent = (style ? style.label + ' · ' : '') +
+    (t.voice_mode === 'narration' ? 'Thuyết minh' : 'Hội thoại') + ' · ' + people;
+  const chars = $('character-id'); chars.replaceChildren();
   (t.characters || []).forEach(c => chars.add(new Option(c.name, c.id)));
 }
-document.getElementById('template-id').addEventListener('change', loadSeries); loadSeries();
-document.getElementById('creation-form').addEventListener('submit', async event => {
+
+function voicePicker(value, child) {
+  const select = options(el('select'), [['', 'Tự động (app chọn theo vai)'], ...VOICES.map(v => [v.id, v.label])], value);
+  const play = el('button', {type: 'button', className: 'btn', textContent: '▶ Nghe'});
+  play.addEventListener('click', async () => {
+    const voice = select.value || (VOICES[0] || {}).id; play.disabled = true;
+    try {
+      const res = await fetch('/api/tts/preview', {method: 'POST', headers: {'Content-Type': 'application/json',
+        'X-Requested-With': 'affiliate-agent'}, body: JSON.stringify({voice, child: child(),
+        text: 'Xin chào, đây là giọng nhân vật trong series của mình nhé.'})});
+      if (!res.ok) throw new Error('Không tạo được giọng nghe thử');
+      new Audio(URL.createObjectURL(await res.blob())).play();
+      if (child()) toast('Nhân vật dưới 13 tuổi: giọng được nâng tông như trong video');
+    } catch (e) { toast(e.message, true); } finally { play.disabled = false; }
+  });
+  return [select, play];
+}
+
+function charCard(c = {}) {
+  const card = el('div', {className: 'char-card'});
+  card.dataset.id = c.id || '';
+  const name = el('input', {maxLength: 160, value: c.name || '', placeholder: 'Tên (vd: Suri)'});
+  const role = options(el('select'), [['', 'Vai…'], ...ROLES], c.role);
+  const gender = options(el('select'), [['', 'Giới tính…'], ['female', 'Nữ'], ['male', 'Nam']], c.gender);
+  const age = el('input', {type: 'number', min: 0, max: 120, value: c.age ?? '', placeholder: 'Tuổi'});
+  const [voice, play] = voicePicker(c.voice, () => (parseInt(age.value) || 99) < 13);
+  const area = (value, ph, rows = 2, max = 1000) => el('textarea', {rows, maxLength: max, value: value || '', placeholder: ph});
+  const personality = area(c.personality, 'Tính cách, cách nói chuyện, câu cửa miệng… (vd: lý sự đáng yêu, hay hỏi “tại sao”)');
+  const appearance = area(c.appearance, 'Ngoại hình (vd: tóc buộc 2 bên, má phúng phính)');
+  const wardrobe = area(c.wardrobe, 'Trang phục cố định (vd: váy vàng chấm bi)', 2, 600);
+  const description = area(c.description, 'Mô tả ngắn / vai trò trong series', 2, 3000);
+  const remove = el('button', {type: 'button', className: 'btn', textContent: '✕ Xoá nhân vật'});
+  remove.addEventListener('click', () => card.remove());
+  const lab = (text, input) => el('div', {}, [el('label', {textContent: text}), input]);
+  card.append(
+    el('div', {className: 'char-grid'}, [lab('Tên', name), lab('Vai', role), lab('Giới tính', gender), lab('Tuổi', age)]),
+    lab('Giọng đọc (VieNeu)', el('div', {className: 'voice-row'}, [voice, play])),
+    lab('Tính cách', personality),
+    el('div', {className: 'char-grid2'}, [lab('Ngoại hình', appearance), lab('Trang phục', wardrobe)]),
+    lab('Mô tả', description),
+    el('div', {className: 'row-actions'}, [remove]));
+  card.read = () => ({id: card.dataset.id || slug(name.value), name: name.value.trim(), role: role.value,
+    gender: gender.value, age: parseInt(age.value), voice: voice.value, personality: personality.value.trim(),
+    appearance: appearance.value.trim(), wardrobe: wardrobe.value.trim(), description: description.value.trim()});
+  return card;
+}
+
+function renderStyles(selected) {
+  const box = $('s-styles'); box.replaceChildren();
+  STYLES.forEach(s => {
+    const input = el('input', {type: 'radio', name: 's-style-profile', value: s.id, checked: s.id === selected});
+    const title = el('b', {textContent: s.label});
+    const head = el('div', {}, [input, title]);
+    if (s.trend) head.append(el('span', {className: 'tag', textContent: '🔥 trend'}));
+    box.append(el('label', {className: 'style-card'}, [head, el('p', {textContent: s.desc || ''})]));
+  });
+}
+
+function openEditor(t, isNew) {
+  $('series-editor').hidden = false;
+  $('editor-title').textContent = isNew ? 'Tạo series mới' : 'Chỉnh series: ' + t.label;
+  $('s-label').value = t.label || ''; $('s-id').value = t.id || ''; $('s-id').readOnly = !isNew;
+  renderStyles(t.style_profile || 'chibi_3d');
+  $('s-style').value = t.style || ''; $('s-setting').value = t.setting || '';
+  $('s-voice-mode').value = t.voice_mode || (isNew ? 'dialogue' : 'narration');
+  $('s-notes').value = t.script_notes || '';
+  $('s-rules').value = (t.continuity_rules || []).join('\n');
+  $('s-chars').replaceChildren(...(t.characters || [{}]).map(charCard));
+  $('template-json').value = JSON.stringify(t, null, 2);
+  $('series-editor').scrollIntoView({behavior: 'smooth'});
+}
+function readEditor() {
+  const label = $('s-label').value.trim();
+  const picked = document.querySelector('input[name="s-style-profile"]:checked');
+  return {id: $('s-id').value.trim() || slug(label), label,
+    style_profile: picked ? picked.value : '',
+    style: $('s-style').value.trim() || (picked ? STYLES.find(s => s.id === picked.value).label : ''),
+    setting: $('s-setting').value.trim(), voice_mode: $('s-voice-mode').value,
+    script_notes: $('s-notes').value.trim(),
+    characters: [...$('s-chars').children].map(card => card.read()),
+    continuity_rules: $('s-rules').value.split('\n').map(x => x.trim()).filter(Boolean)};
+}
+async function saveSeries(body) {
+  const saved = await api('/api/creative-templates', body, {ok: 'Đã lưu series (phiên bản mới)'});
+  try { localStorage.setItem('aa-series', saved.id || body.id); } catch (e) {}
+  setTimeout(() => location.reload(), 600);
+}
+
+$('add-char').addEventListener('click', () => {
+  if ($('s-chars').children.length >= 6) { toast('Tối đa 6 nhân vật', true); return; }
+  $('s-chars').append(charCard());
+});
+$('edit-series').addEventListener('click', () => openEditor(current(), false));
+$('new-series').addEventListener('click', () => openEditor({voice_mode: 'dialogue', style_profile: 'feature_3d',
+  characters: [{}], continuity_rules: ['Giữ nguyên khuôn mặt, tuổi, trang phục từng nhân vật qua các tập.']}, true));
+$('close-editor').addEventListener('click', () => { $('series-editor').hidden = true; });
+$('save-series').addEventListener('click', async () => {
+  const body = readEditor();
+  if (!body.label || !body.setting) { toast('Nhập tên series và bối cảnh', true); return; }
+  if (body.characters.some(c => !c.name || isNaN(c.age))) { toast('Mỗi nhân vật cần tên và tuổi', true); return; }
+  try { await saveSeries(body); } catch (e) {}
+});
+$('save-template').addEventListener('click', async () => {
+  try { await saveSeries(JSON.parse($('template-json').value)); }
+  catch (e) { if (e instanceof SyntaxError) toast('JSON chưa hợp lệ', true); }
+});
+
+try { const last = localStorage.getItem('aa-series'); if (last && seriesData.some(t => t.id === last)) $('template-id').value = last; } catch (e) {}
+$('template-id').addEventListener('change', () => {
+  summarise(); try { localStorage.setItem('aa-series', $('template-id').value); } catch (e) {}
+  if (!$('series-editor').hidden) openEditor(current(), false);
+});
+summarise();
+
+$('creation-form').addEventListener('submit', async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
-  try { await api('/api/create', {creation_branch:branch, topic:document.getElementById('creation-topic').value,
-    catalog_id:document.getElementById('catalog-id').value, template_id:document.getElementById('template-id').value,
-    fast_mode:document.getElementById('fast-mode').checked, voice_mode:document.getElementById('voice-mode').value,
-    duration_seconds:parseInt(document.getElementById('duration-seconds').value)||0,
-    ideas:branch==='template_series'?document.getElementById('series-ideas').value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,10):[],
-    experience:{basis:document.getElementById('experience-basis').value,notes:document.getElementById('experience-notes').value}}, {go:r=>'/jobs/'+r.job_id}); }
-  catch(e) {} finally {button.disabled = false;}
+  const series = branch === 'template_series';
+  try { await api('/api/create', {creation_branch: branch, topic: $('creation-topic').value,
+    catalog_id: $('catalog-id').value, template_id: $('template-id').value,
+    fast_mode: $('fast-mode').checked, voice_mode: series ? $('voice-mode').value : '',
+    script: series ? $('series-script').value : '',
+    duration_seconds: parseInt($('duration-seconds').value) || 0,
+    ideas: series ? $('series-ideas').value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 10) : [],
+    experience: {basis: $('experience-basis').value, notes: $('experience-notes').value}}, {go: r => '/jobs/' + r.job_id}); }
+  catch (e) {} finally { button.disabled = false; }
 });
-document.getElementById('save-template').addEventListener('click', async () => {
-  try {const body = JSON.parse(document.getElementById('template-json').value); await api('/api/creative-templates', body, {ok:'Đã lưu phiên bản mẫu',reload:true});}
-  catch(e) {if (e instanceof SyntaxError) toast('JSON chưa hợp lệ',true);}
-});
-document.getElementById('reference-form').addEventListener('submit', async event => {
-  event.preventDefault(); const fd = new FormData(); const file = document.getElementById('reference-image').files[0];
-  if (!file || file.size > 10*1024*1024) {toast('Ảnh cần nhỏ hơn 10 MB',true);return;}
-  fd.append('file',file);fd.append('character_id',document.getElementById('character-id').value);fd.append('rights',document.getElementById('reference-rights').value);
-  try {await api('/api/creative-templates/'+encodeURIComponent(document.getElementById('template-id').value)+'/references',fd,{ok:'Đã thêm ảnh nhân vật',reload:true});} catch(e) {}
+$('reference-form').addEventListener('submit', async event => {
+  event.preventDefault(); const fd = new FormData(); const file = $('reference-image').files[0];
+  if (!file || file.size > 10 * 1024 * 1024) { toast('Ảnh cần nhỏ hơn 10 MB', true); return; }
+  fd.append('file', file); fd.append('character_id', $('character-id').value); fd.append('rights', $('reference-rights').value);
+  try { await api('/api/creative-templates/' + encodeURIComponent($('template-id').value) + '/references', fd, {ok: 'Đã thêm ảnh nhân vật', reload: true}); } catch (e) {}
 });
 </script>
 {% endblock %}

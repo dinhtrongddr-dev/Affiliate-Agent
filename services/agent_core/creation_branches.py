@@ -128,6 +128,8 @@ def normalise_brief(branch, *, experience=None, template=None, product_context=N
             "continuity_rules": _context(raw.get("continuity_rules", "")),
             "episode_idea": bounded_text(raw.get("episode_idea"), 3000),
             "characters": normalise_characters(raw.get("characters")),
+            "style_profile": reference_id(raw.get("style_profile")),
+            "script_notes": bounded_text(raw.get("script_notes"), 3000),
             # the built-in family sitcom talks; a custom template narrates unless it says otherwise
             "voice_mode": raw.get("voice_mode") if raw.get("voice_mode") in VOICE_MODES else
                           ("dialogue" if template is None or raw.get("id") == "suri-family" else "narration"),

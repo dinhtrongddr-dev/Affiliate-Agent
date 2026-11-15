@@ -4,8 +4,9 @@ import json
 from fastapi import File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from .. import catalog, creative_series, db, workflow
+from .. import catalog, creative_series, db, style_profiles, workflow
 from ..creation_context import build_product_context
+from ..editor.tts import VOICES
 
 
 class Creation(BaseModel):
@@ -18,6 +19,7 @@ class Creation(BaseModel):
     duration_seconds: int = Field(default=0, ge=0, le=180)
     ideas: list[str] = Field(default_factory=list, max_length=10)   # series: one episode per idea
     voice_mode: str = Field(default='', max_length=20)   # series: '' = template's, dialogue | narration
+    script: str = Field(default='', max_length=3000)     # the owner's desired plot / key lines
 
 
 def product_offer(settings, product):
@@ -72,6 +74,8 @@ def install_routes(app, settings, render):
         return render(request, 'create.html', active='create',
                       products=products,
                       series=creative_series.list_templates(s), selected_catalog_id=catalog_id,
+                      voices=[{'id': k, 'label': v} for k, v in VOICES.items()],
+                      styles=style_profiles.catalog(),
                       selected_branch=branch if branch in {'product_review', 'viral_creator', 'template_series'} else 'product_review')
 
     @app.post('/api/create')
@@ -112,11 +116,13 @@ def install_routes(app, settings, render):
             job_id = workflow.create_trend_job(s, topic, **options)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
-        if body.fast_mode or body.duration_seconds:
+        if body.fast_mode or body.duration_seconds or body.script.strip():
             job = db.get_job(s.database_path, job_id)
             brief = json.loads(job.get('brief_json') or '{}')
             if body.fast_mode:
                 brief['fast_mode'] = True
+            if body.script.strip():
+                brief['desired_script'] = body.script.strip()
             if body.duration_seconds:
                 d = body.duration_seconds
                 brief['duration_range'] = [max(8, d - 5), d + 5]

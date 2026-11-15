@@ -132,10 +132,12 @@ def strip_internal(prompt: str) -> str:
 def character_sheet_prompt(character: dict, plan: dict, override_style: str | None = None) -> str:
     style = style_profiles.get(plan.get("style_profile"), plan.get("creation_branch"), override_style)
     if style_profiles.is_animated(style["name"]):
-        kind = "chibi 3D" if style["name"] == "chibi_3d" else "3D animated"
+        kind = style.get("sheet") or "3D animated"
+        body = ("big head and small rounded body, expressive eyes" if style["name"] == "chibi_3d"
+                else _clip(style["look"], 220))
         return _clip(
-            f"Vertical {kind} character sheet: one cute stylised character, full body, front view, "
-            "big head and small rounded body, expressive eyes, plain light background, soft colourful "
+            f"Vertical {kind} character sheet: one stylised character, full body, front view, "
+            f"{body}, plain light background, soft colourful "
             f"light. {_person(character)}. Personality: {character.get('personality') or ''}. "
             f"{style['avoid']}.", MAX_CHARS) + f"\n{INTERNAL}cast:{character['id']}"
     if is_animal(character):

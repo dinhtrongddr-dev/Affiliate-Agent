@@ -221,6 +221,16 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
             + (f"Kết bằng một câu dẫn sang phần sau: {seg.get('next')}. " if seg.get('next')
                else "Phần cuối: kết luận/payoff trọn vẹn. ")
             + "Giữ ĐÚNG id, ngoại hình, trang phục nhân vật trong \"characters\" của brief.")
+    tpl = brief.get("template") or {}
+    if tpl.get("script_notes"):
+        extra.append(f"Giọng điệu / cách kể chung của series (chủ kênh đặt): {tpl['script_notes']}")
+    if any(c.get("personality") for c in tpl.get("characters") or []):
+        extra.append("Tính cách nhân vật (giữ đúng trong lời thoại và hành động): " + "; ".join(
+            f"{c.get('name') or c.get('id')}: {c['personality']}" for c in tpl["characters"] if c.get("personality")))
+    if brief.get("desired_script"):
+        extra.append("KỊCH BẢN MONG MUỐN của chủ kênh (bám sát diễn biến, nhân vật và câu thoại chính; "
+                     "được trau chuốt lời cho tự nhiên và đúng thời lượng, không đổi ý): "
+                     + str(brief["desired_script"])[:3000])
     episode = brief.get("episode") or {}
     if episode:
         extra.append(
