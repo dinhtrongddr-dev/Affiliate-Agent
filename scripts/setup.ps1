@@ -192,6 +192,15 @@ if (-not $media -or -not (Test-Path (Split-Path -Qualifier $media))) {
     $media = Join-Path (Split-Path -Parent $Root) 'AffiliateAgentMedia'
 }
 Set-EnvValue 'AA_MEDIA_ROOT' $media
+
+# AI model: machines still on the old default (gpt-6-astra-wm + extended) move to the measured
+# single model; a model the owner picked by hand is left alone.
+$aiModel = Get-EnvValue 'AA_AI_MODEL'
+if (-not $aiModel -or $aiModel -eq 'gpt-6-astra-wm') {
+    Set-EnvValue 'AA_AI_MODEL' 'gpt-6-thinking'
+    Set-EnvValue 'AA_AI_THINKING_EFFORT' ''
+    $ok.Add('Model AI: gpt-6-thinking (nhanh hon ~3 lan, chat luong tuong duong hoac tot hon)')
+}
 New-Item -ItemType Directory -Force -Path $media | Out-Null
 $ok.Add("Thu muc video: $media")
 

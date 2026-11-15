@@ -151,3 +151,29 @@ def test_long_ai_call_retries_once_with_light_thinking():
         raise AssertionError("short calls must not be retried here")
     except AIClientError:
         assert short.calls == ["extended"]
+
+
+def test_long_ai_call_at_default_effort_also_retries_a_dropped_connection():
+    from types import SimpleNamespace
+
+    from agent_core import workflow
+    from agent_core.ai_client import AIClientError
+    from agent_core.settings import Settings
+
+    class Flaky:
+        timeout, thinking_effort = 180, ""
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, temperature=0.2, max_tokens=1600):
+            self.calls += 1
+            if self.calls == 1:
+                raise AIClientError("AI endpoint returned HTTP 502: Bad Gateway")
+            return {"role": "assistant", "content": '{"ok": 2}'}
+
+    client = Flaky()
+    assert workflow._ask_json(client, SimpleNamespace(ai_protocol="openai"), "p", max_tokens=5000) == {"ok": 2}
+    assert client.calls == 2
+    s = Settings(_env_file=None)
+    assert s.ai_model == "gpt-6-thinking" and s.ai_thinking_effort == ""   # the one measured model

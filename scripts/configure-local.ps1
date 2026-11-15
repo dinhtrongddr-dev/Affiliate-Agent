@@ -69,10 +69,10 @@ if ([string]::IsNullOrWhiteSpace($AIKey)) {
 Set-EnvLine 'AA_AI_PROTOCOL' 'openai'
 Set-EnvLine 'AA_AI_BASE_URL' 'http://127.0.0.1:13000/v1'
 Set-EnvLine 'AA_AI_API_KEY' $AIKey
-Set-EnvLine 'AA_AI_MODEL' 'gpt-6-astra-wm'
-Set-EnvLine 'AA_AI_THINKING_EFFORT' 'extended'
+Set-EnvLine 'AA_AI_MODEL' 'gpt-6-thinking'
+Set-EnvLine 'AA_AI_THINKING_EFFORT' ''
 Write-Host 'AffiliateAgent now points to local ChatGPT2API (key hidden).'
-Write-Host 'Model: gpt-6-astra-wm | Thinking: extended'
+Write-Host 'Model: gpt-6-thinking | Thinking: default'
 
 $UpdateShopee = Read-Host 'Configure Shopee Affiliate App ID and Secret now? (y/n)'
 if ($UpdateShopee -match '^(y|yes)$') {

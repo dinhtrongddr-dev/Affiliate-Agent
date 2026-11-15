@@ -31,8 +31,12 @@ class Settings(BaseSettings):
     ai_protocol: str = "openai"
     ai_base_url: str = "http://127.0.0.1:13000/v1"
     ai_api_key: SecretStr = SecretStr("")
-    ai_model: str = "gpt-6-astra-wm"
-    ai_thinking_effort: str = "extended"
+    # One model for every text/vision task. Measured Nov 2026 on the app's real tasks (storyboard,
+    # dialogue episode, visual QA; 3 rounds, blind judged): gpt-6-thinking at the default effort
+    # scored highest (6.4/10) and is ~3x faster than the old gpt-6-astra-wm + "extended"
+    # (storyboard ~70 s vs ~285 s). "extended" made every model 3-4x slower without a quality gain.
+    ai_model: str = "gpt-6-thinking"
+    ai_thinking_effort: str = ""
     ai_timeout_seconds: int = 180
 
     # Shopee

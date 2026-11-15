@@ -213,10 +213,12 @@ def _ask_json(client: AIClient, settings, prompt: str, images: list[Path] | None
         except AIClientError as exc:
             # Long replies with extended thinking are the ones the upstream web session
             # drops (timeouts, 5xx, broken SSE). Retry once right away with light thinking.
+            # Same for a plain dropped connection at the default effort: one retry.
             effort = getattr(client, "thinking_effort", "")
-            if max_tokens < 4000 or not effort or not _transient_ai_error(exc):
+            if max_tokens < 4000 or not _transient_ai_error(exc):
                 raise
-            log.warning("Long AI call failed (%s); retrying once without extended thinking", exc)
+            log.warning("Long AI call failed (%s); retrying once%s", exc,
+                        " without extended thinking" if effort else "")
             client.thinking_effort = ""
             try:
                 reply = client.chat(messages, temperature=temperature, max_tokens=max_tokens)

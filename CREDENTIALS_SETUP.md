@@ -6,7 +6,7 @@ AffiliateAgent uses the existing local ChatGPT2API service directly. It does not
 
 - Base URL: http://127.0.0.1:13000/v1
 - Protocol: OpenAI Chat Completions
-- Model: gpt-6-astra-wm
+- Model: gpt-6-thinking (default reasoning; one model for all AI tasks)
 - Thinking effort: extended
 
 Run the following from a local PowerShell window:
@@ -22,7 +22,7 @@ Verify the configuration:
     .\.venv\Scripts\python.exe -m agent_core.cli credentials
     .\.venv\Scripts\python.exe -m agent_core.cli doctor
 
-The AI gateway should report protocol=openai, model=gpt-6-astra-wm and configured=true.
+The AI gateway should report protocol=openai, model=gpt-6-thinking and configured=true.
 
 ChatGPT2API's current Web conduit normalizes thinking_effort=extended to its supported deep-reasoning mode. Values such as high are normalized to no additional thinking effort by this installed version.
 
