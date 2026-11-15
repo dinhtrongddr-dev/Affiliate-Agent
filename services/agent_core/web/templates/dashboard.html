@@ -34,7 +34,8 @@
     <ul class="health">
       {% for h in health %}
       <li><span><i class="dot {{ 'ok' if h.ok else ('opt' if h.optional else 'no') }}"></i>{{ h.name }}</span>
-        {% if not h.ok %}<span class="small muted" title="{{ h.hint }}">{{ 'tuỳ chọn' if h.optional else 'cần cấu hình' }}</span>{% endif %}</li>
+        {% if not h.ok %}<span class="small muted" title="{{ h.hint }}">{{ 'tuỳ chọn' if h.optional else 'cần cấu hình' }}</span>{% endif %}
+        {% if h.urgent %}<div class="small" style="flex-basis:100%;color:#b42318;margin:2px 0 0 14px">{{ h.hint }}</div>{% endif %}</li>
       {% endfor %}
     </ul>
     <a class="small" href="/settings">Mở cài đặt →</a>

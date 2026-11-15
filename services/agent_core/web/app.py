@@ -205,10 +205,14 @@ def create_app(start_worker: bool = True) -> FastAPI:
         update = ([{"name": f"Có {ver['behind']} bản cập nhật mới trên GitHub", "ok": False,
                     "hint": "Đóng app rồi chạy scripts\\update.cmd (tự sao lưu CSDL và mở lại app)"}]
                   if ver.get("behind") else [])
+        from ..ai_client import health_problem
+        ai_problem = health_problem()
+        ai_row = ({"name": ai_problem[0], "ok": False, "hint": ai_problem[1], "urgent": True} if ai_problem else
+                  {"name": f"AI ({s.ai_model})", "ok": bool(s.ai_api_key.get_secret_value()),
+                   "hint": "Nhập AI API key trong Cài đặt"})
         return update + [
             {"name": "FFmpeg", "ok": bool(shutil.which(s.ffmpeg_path)), "hint": "Cài FFmpeg vào PATH"},
-            {"name": "AI gateway", "ok": bool(s.ai_api_key.get_secret_value()),
-             "hint": "Nhập AI API key trong Cài đặt"},
+            ai_row,
             {"name": "Shopee Open API", "ok": s.shopee_affiliate_enabled and aff["configured"],
              "hint": "Chưa có thì dán link affiliate tạo tay (Custom Link) ở từng video",
              "optional": True},

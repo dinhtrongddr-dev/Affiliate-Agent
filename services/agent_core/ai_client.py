@@ -7,6 +7,31 @@ class AIClientError(RuntimeError):
     pass
 
 
+# Outcome of the latest AI call in this process, for the dashboard: a configured key is not
+# proof that AI works (e.g. ChatGPT2API running with no ChatGPT account logged in).
+LAST_CALL: dict[str, Any] = {"ok": None, "error": "", "at": 0.0}
+
+
+def _record(ok: bool, error: str = "") -> None:
+    import time
+    LAST_CALL.update(ok=ok, error=error[:300], at=time.time())
+
+
+def health_problem() -> tuple[str, str] | None:
+    """(short status, what to do) when the latest AI call failed, else None."""
+    if LAST_CALL["ok"] is not False:
+        return None
+    err = LAST_CALL["error"]
+    if "no available text account" in err or "no available" in err and "account" in err:
+        return ("AI: ChatGPT2API chưa có tài khoản ChatGPT đăng nhập",
+                "Mở http://127.0.0.1:13000, đăng nhập tài khoản ChatGPT, rồi bấm làm mới trang")
+    if "401" in err:
+        return ("AI: sai API key", "Chạy lại scripts\\setup.ps1 để khớp key với ChatGPT2API")
+    if "unavailable" in err or "Connection" in err or "connect" in err.lower():
+        return ("AI: không kết nối được ChatGPT2API", "Mở ChatGPT2API (lối tắt ChatGPT2API trên Desktop)")
+    return ("AI: lần gọi gần nhất bị lỗi", err[:160])
+
+
 class AIClient:
     """Small local AI adapter for Anthropic Messages or OpenAI Chat Completions.
 
@@ -38,11 +63,18 @@ class AIClient:
         temperature: float = 0.2,
         max_tokens: int = 1600,
     ) -> dict[str, Any]:
-        if self.protocol == "anthropic-messages":
-            return self._anthropic_chat(messages, temperature, max_tokens)
-        if self.protocol in {"openai", "openai-chat-completions"}:
-            return self._openai_chat(messages, temperature, max_tokens)
-        raise AIClientError(f"Unsupported AI protocol: {self.protocol}")
+        try:
+            if self.protocol == "anthropic-messages":
+                reply = self._anthropic_chat(messages, temperature, max_tokens)
+            elif self.protocol in {"openai", "openai-chat-completions"}:
+                reply = self._openai_chat(messages, temperature, max_tokens)
+            else:
+                raise AIClientError(f"Unsupported AI protocol: {self.protocol}")
+        except AIClientError as exc:
+            _record(False, str(exc))
+            raise
+        _record(True)
+        return reply
 
     def _anthropic_chat(self, messages, temperature, max_tokens):
         url = f"{self.base_url}/messages"
