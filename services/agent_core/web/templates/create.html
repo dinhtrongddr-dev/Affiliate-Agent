@@ -26,6 +26,13 @@
       <label for="template-id">Mẫu series</label>
       <select id="template-id">{% for t in series %}<option value="{{ t.id }}">{{ t.label }} · v{{ t.version }} · {{ t.reference_assets|length }} ảnh tham khảo</option>{% endfor %}</select>
       <p class="small muted">Gia đình Suri có 3 nhân vật; bé Suri 4 tuổi. Phong cách hoạt hình chibi 3D. Nhân vật chưa có ảnh sẽ được Muse tạo ảnh ở tập đầu, rồi lưu vào mẫu để mọi tập sau giữ đúng khuôn mặt.</p>
+      <label for="voice-mode" style="margin-top:12px">Kiểu lời thoại</label>
+      <select id="voice-mode">
+        <option value="">Theo mẫu (Gia đình Suri: hội thoại)</option>
+        <option value="dialogue">Hội thoại giữa nhân vật — giọng của Muse trong clip</option>
+        <option value="narration">Thuyết minh / ngôi thứ nhất — giọng VieNeu (series kiến thức, ngách)</option>
+      </select>
+      <p class="small muted">Hội thoại: nhân vật nói với nhau bằng giọng Muse tạo cùng hình (khẩu hình khớp). Cảnh Muse không nói được sẽ tự lồng giọng VieNeu.</p>
       <label for="series-ideas" style="margin-top:12px">Làm nhiều tập một lúc (mỗi dòng một ý tưởng, tối đa 10)</label>
       <textarea id="series-ideas" rows="4" placeholder="Suri dạy bố gấp quần áo&#10;Suri đi siêu thị cùng mẹ&#10;..."></textarea>
       <p class="small muted">Để trống nếu chỉ làm 1 tập theo ô chủ đề bên dưới. Mỗi tập biết các tập trước để không lặp tình huống.</p>
@@ -80,7 +87,7 @@ document.getElementById('creation-form').addEventListener('submit', async event 
   event.preventDefault(); const button = event.submitter; button.disabled = true;
   try { await api('/api/create', {creation_branch:branch, topic:document.getElementById('creation-topic').value,
     catalog_id:document.getElementById('catalog-id').value, template_id:document.getElementById('template-id').value,
-    fast_mode:document.getElementById('fast-mode').checked,
+    fast_mode:document.getElementById('fast-mode').checked, voice_mode:document.getElementById('voice-mode').value,
     duration_seconds:parseInt(document.getElementById('duration-seconds').value)||0,
     ideas:branch==='template_series'?document.getElementById('series-ideas').value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,10):[],
     experience:{basis:document.getElementById('experience-basis').value,notes:document.getElementById('experience-notes').value}}, {go:r=>'/jobs/'+r.job_id}); }

@@ -30,6 +30,7 @@ _BUILTIN = {
                          'Trang phục, giọng nói và bối cảnh nhất quán trong cùng một tập.',
                          'Không tự nhận ảnh tham khảo đã được cung cấp khi kho tham khảo trống.'],
     'reference_assets': [],
+    'voice_mode': 'dialogue',   # family sitcom: the characters talk with their own (Muse) voices
 }
 
 
@@ -72,7 +73,7 @@ def _write(settings, templates):
 def list_templates(settings):
     with _LOCK:
         templates = {'suri-family': _BUILTIN, **_load(settings)}
-        return copy.deepcopy(list(templates.values()))
+        return [_with_mode(t) for t in templates.values()]
 
 
 def get_template(settings, tid):
@@ -83,7 +84,14 @@ def get_template(settings, tid):
             data = _BUILTIN
         if data is None:
             raise ValueError('Không tìm thấy mẫu nhân vật.')
-        return copy.deepcopy(data)
+        return _with_mode(data)
+
+
+def _with_mode(template):
+    """Templates saved before voice modes existed: the family sitcom talks, others narrate."""
+    data = copy.deepcopy(template)
+    data.setdefault('voice_mode', 'dialogue' if data.get('id') == 'suri-family' else 'narration')
+    return data
 
 
 def _validate(data):
@@ -112,6 +120,10 @@ def _validate(data):
     if not isinstance(rules, list) or len(rules) > 30 or any(not isinstance(r, str) or len(r) > 1000 for r in rules):
         raise ValueError('Quy tắc liên tục không hợp lệ.')
     result['continuity_rules'] = rules
+    mode = data.get('voice_mode') or ('dialogue' if result['id'] == 'suri-family' else 'narration')
+    if mode not in ('dialogue', 'narration'):
+        raise ValueError('voice_mode phải là "dialogue" (hội thoại, giọng Muse) hoặc "narration" (thuyết minh VieNeu).')
+    result['voice_mode'] = mode
     return result
 
 

@@ -2,7 +2,8 @@
 import json
 from typing import Any
 
-from .creation_branches import DURATION_TARGETS, normalise_characters, reference_id, validate_branch
+from .creation_branches import (DURATION_TARGETS, normalise_characters, reference_id, validate_branch,
+                                voice_source)
 
 HOOK_FORMULAS = """
 1. Khoảng trống tò mò: câu hỏi hoặc mâu thuẫn buộc người xem xem tiếp để có lời giải.
@@ -226,6 +227,11 @@ def branch_plan_prompt(brief: dict, product: dict, can_generate: bool, has_stock
             f"Đây là TẬP {episode.get('number')} của series. Các tập trước: "
             + json.dumps(episode.get("previous") or [], ensure_ascii=False)
             + ". Tình huống mới, không lặp tập trước; giữ tính cách và quan hệ nhân vật.")
+    native = voice_source({**brief, "creation_branch": branch}) == "native"
+    rate = speech_rate({"voice_source": "native" if native else ""})
+    words = target_words(low, high, rate)
+    if native:
+        extra.append(DIALOGUE_RULES.format(limit=limit))
     format_block = "\n".join(extra)
     avoid = ""
     if recent_hooks:
@@ -241,8 +247,8 @@ không "nhựa" kiểu AI rẻ tiền; hoạt hình/phim tài liệu thì theo p
 Thời lượng tổng {low:.0f}-{high:.0f} giây. Tối đa {limit} cảnh generate.
 
 CÁCH VIẾT (bắt buộc theo thứ tự):
-1) Viết "script" TRƯỚC: lời liền mạch như một người kể cho bạn nghe, {target_words(low, high)[0]}-{target_words(low, high)[2]} từ,
-   NHẮM KHOẢNG {target_words(low, high)[1]} TỪ (giọng đọc ~{WORDS_PER_SECOND:g} từ/giây; ít lời hơn thì video hụt thời lượng). Cấu trúc: hook đặt câu hỏi/lời hứa -> bối cảnh -> diễn biến có câu nối
+1) Viết "script" TRƯỚC: lời liền mạch như một người kể cho bạn nghe, {words[0]}-{words[2]} từ,
+   NHẮM KHOẢNG {words[1]} TỪ (giọng {'nhân vật' if native else 'đọc'} ~{rate:g} từ/giây; ít lời hơn thì video hụt thời lượng). Cấu trúc: hook đặt câu hỏi/lời hứa -> bối cảnh -> diễn biến có câu nối
    ("vì", "nên", "nhưng", "hoá ra", "thế là", "rồi") -> payoff TRẢ LỜI đúng hook -> câu chốt.
    Chỉ giữ 3-4 ý phục vụ "takeaway"; bỏ chi tiết lan man; không liệt kê sự kiện rời rạc.
 2) Chia script thành NHỊP (mỗi phần tử "scenes" là một nhịp): mỗi nhịp 1-2 câu của script (6-16 từ/câu),
@@ -424,7 +430,7 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
         ref = scene.pop("reuse_of", None)
         if ref is not None and 0 <= ref < i and scenes[ref].get("visual") == "generate":
             scene["visual"], scene["reuse_of"] = "reuse", ref
-    if explicit:  # at most two on-camera talking shots; the rest is voice-over
+    if explicit and plan.get("voice_source") != "native":  # max two talking shots, rest voice-over
         talking = [s for s in scenes if s.get("talking")]
         for extra in talking[2:]:
             extra["talking"] = False
@@ -478,6 +484,8 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
     for key in ("format", "niche", "goal"):
         if plan.get(key):
             result[key] = _text(plan[key], 40)
+    if plan.get("voice_source") == "native":
+        result["voice_source"] = "native"
     if isinstance(plan.get("duration_range"), (list, tuple)) and len(plan["duration_range"]) == 2:
         result["duration_range"] = [float(plan["duration_range"][0]), float(plan["duration_range"][1])]
     if isinstance(plan.get("source_texts"), list):
@@ -525,7 +533,7 @@ def storyboard_issues(plan: dict) -> list[str]:
         low, high = formats.duration_range(plan)
         # the voice decides the length now: estimate it from the words (silent beats add theirs)
         silent = sum(float(sc.get("duration") or 2) for sc in plan.get("scenes") or [] if not sc.get("lines"))
-        total = len(spoken_script(plan).split()) / WORDS_PER_SECOND + silent
+        total = len(spoken_script(plan).split()) / speech_rate(plan) + silent
         if total < low * 0.9 or total > high * 1.25:
             issues.append(f"Thời lượng ước theo lời {total:.0f}s ngoài mục tiêu {low:.0f}-{high:.0f}s")
     hits = meta_word_lines(plan)
@@ -551,10 +559,30 @@ CONNECTORS = ("vì", "nên", "nhưng", "hoá ra", "hóa ra", "thế là", "rồi
 WORDS_PER_SECOND = 3.5
 
 
-def target_words(low: float, high: float) -> tuple[int, int, int]:
+# Muse characters speak slower and each line sits inside its own take (measured ~2.4-2.5 words/s).
+NATIVE_WORDS_PER_SECOND = 2.5
+
+
+def speech_rate(plan: dict) -> float:
+    return NATIVE_WORDS_PER_SECOND if (plan or {}).get("voice_source") == "native" else WORDS_PER_SECOND
+
+
+def target_words(low: float, high: float, rate: float = 0.0) -> tuple[int, int, int]:
     """(min, aim, max) spoken words for a video of low-high seconds."""
+    rate = rate or WORDS_PER_SECOND
     mid = (low + high) / 2
-    return int(low * WORDS_PER_SECOND), int(mid * WORDS_PER_SECOND), int(high * WORDS_PER_SECOND)
+    return int(low * rate), int(mid * rate), int(high * rate)
+
+
+DIALOGUE_RULES = """SERIES HỘI THOẠI (giọng thật của nhân vật trong clip, KHÔNG có người dẫn):
+- Toàn bộ lời là THOẠI giữa các nhân vật nói với nhau trên màn hình; KHÔNG dùng speaker "narrator",
+  không độc thoại kể chuyện, không lời bình ngoài hình.
+- Mỗi nhịp có lời = MỘT cảnh "visual": "generate", "talking": true; người nói phải có trong "cast" của nhịp đó.
+  Mỗi nhịp 1-2 câu thoại (tối đa 2 người nói), tổng <= 16 từ, nói trong ~6 giây: câu ngắn, khẩu ngữ tự nhiên,
+  có cảm xúc (ngạc nhiên, trêu, dỗi, cười), xưng hô đúng quan hệ (bố/mẹ/con, anh/em...).
+- Câu chuyện đi bằng qua lại hỏi - đáp - phản ứng, có tình huống, cao trào nhỏ và câu chốt hài/ấm áp.
+- Nhịp không lời (phản ứng, hành động) để "lines": [] và "talking": false.
+- Tối đa {limit} cảnh generate: ưu tiên cảnh thoại; không "reuse" cho cảnh thoại."""
 
 
 def spoken_script(plan: dict) -> str:
@@ -573,11 +601,12 @@ def coherence_issues(plan: dict) -> list[str]:
     text = spoken_script(plan)
     words = len(text.split())
     low, high = formats.duration_range(plan)
-    if words and words < low * WORDS_PER_SECOND * 0.9:
-        least, aim, most = target_words(low, high)
+    rate = speech_rate(plan)
+    if words and words < low * rate * 0.9:
+        least, aim, most = target_words(low, high, rate)
         issues.append(f"Lời quá ít ({words} từ) cho {low:.0f}-{high:.0f}s: video sẽ hụt thời lượng; "
                       f"cần {least}-{most} từ liền mạch (nhắm {aim}), thêm ý/chi tiết thật, không độn chữ")
-    if words > high * WORDS_PER_SECOND * 1.2:
+    if words > high * rate * 1.2:
         issues.append(f"Lời quá dài ({words} từ) cho {high:.0f}s: rút gọn, giữ 3-4 ý")
     lines = [ln.get("text") or "" for sc in plan.get("scenes") or [] for ln in sc.get("lines") or []]
     tiny = [ln for ln in lines if 0 < len(ln.split()) < 5]

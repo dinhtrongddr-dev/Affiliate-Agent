@@ -172,7 +172,7 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
         pre = (f"[0:v]{retime}fps={fps},tpad=stop_mode=clone:stop_duration={duration + 0.5:.3f}"
                f"[src];")
         prescale = 1.0
-        keep_audio = settings.keep_source_audio and meta["has_audio"]
+        keep_audio = (settings.keep_source_audio or scene.get("native_audio")) and meta["has_audio"]
         if meta.get("width") and meta.get("height") and \
                 abs(meta["width"] / meta["height"] - w / h) < 0.02:
             prescale = 0.0   # already 9:16: plain scale, no blurred background pass
@@ -190,7 +190,7 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
     )
     if keep_audio:
         graph += (f";[0:a]aresample=44100,aformat=channel_layouts=stereo,"
-                  f"volume={settings.source_audio_volume},apad,"
+                  f"volume={1.0 if scene.get('native_audio') else settings.source_audio_volume},apad,"
                   f"atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[a]")
         audio_map = ["-map", "[a]"]
     else:
@@ -249,6 +249,9 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     trans = 0.08 if hard_cuts else settings.transition_seconds
 
     voice_led = bool(getattr(settings, "voice_led", True) and timeline.get("creation_branch"))
+    if timeline.get("voice_source") == "native":   # dialogue series: characters keep their Muse voices
+        scenes = [{**s, "native_voice": True} if s.get("talking") and s.get("generated") else s
+                  for s in scenes]
     edit = None
     if voice_led:
         edit = _voice_led_edit(settings, scenes, cast, work_dir)
@@ -345,6 +348,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     )
     music_meta = music.to_dict() if hasattr(music, "to_dict") else None
     has_voice = bool(voice_labels)
+    native = any(sc.get("native_audio") for sc in scenes)   # character speech lives in the scene audio
     if has_voice:
         filters.append("".join(voice_labels)
                        + f"amix=inputs={len(voice_labels)}:normalize=0:dropout_transition=0,"
@@ -355,12 +359,24 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
         filters.append(f"[{idx}:a]aresample=44100,aformat=channel_layouts=stereo,"
                        f"atrim=duration={total:.3f},volume={settings.music_volume},"
                        f"afade=t=in:d=0.4,afade=t=out:st={max(0, total - 1.2):.3f}:d=1.2[mus]")
+        keys, scene_audio = [], f"[{achain}]"
+        if native:
+            filters.append(f"[{achain}]asplit=2[src_mix][src_sc]")
+            keys.append("[src_sc]")
+            scene_audio = "[src_mix]"
         if has_voice:
             filters.append("[voice]asplit=2[voice_mix][voice_sc]")
+            keys.append("[voice_sc]")
+        if keys:
+            if len(keys) == 2:
+                filters.append("[voice_sc][src_sc]amix=inputs=2:normalize=0[duck_key]")
+                key = "[duck_key]"
+            else:
+                key = keys[0]
             # Smooth ducking: natural breathing without sudden drops
-            filters.append("[mus][voice_sc]sidechaincompress=threshold=0.06:ratio=4:"
+            filters.append(f"[mus]{key}sidechaincompress=threshold=0.06:ratio=4:"
                            "attack=20:release=400[duck]")
-            mix = [f"[{achain}]", "[voice_mix]", "[duck]"]
+            mix = [scene_audio] + (["[voice_mix]"] if has_voice else []) + ["[duck]"]
         else:
             mix = [f"[{achain}]", "[mus]"]
     else:
@@ -441,7 +457,7 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
     ]
     shutil.copyfile(subs, output.with_suffix(".ass"))
     return RenderResult(output, round(total, 3), scene_report,
-                        str(music) if music else None, has_voice, output.with_suffix(".ass"),
+                        str(music) if music else None, has_voice or native, output.with_suffix(".ass"),
                         music_metadata=music_meta, variants=variants,
                         voice_segments=voice_segments, seams=seams_report)
 
@@ -533,6 +549,8 @@ def _voice_led_edit(settings, scenes, cast, work_dir) -> dict:
             start = float(scene.get("start") or 0)
             clip_window = (Path(scene["source"]), start, max(0.5, src_len(scene["source"]) - start))
         voice = scene_voice(settings, scene, cast, work_dir, i, clip_window)
+        if voice.native:
+            scene["native_audio"] = True   # the clip's own speech is the sound of this scene
         first = min((p.offset for p in voice.parts), default=0.0)
         for p in voice.parts:   # relative to the first word: the layout decides where it starts
             p.offset = round(p.offset - first, 3)

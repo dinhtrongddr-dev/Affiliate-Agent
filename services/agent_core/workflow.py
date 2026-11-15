@@ -661,6 +661,9 @@ def _brief_plan_fields(brief: dict) -> dict:
         out["style_profile"] = brief["fixed_style"]
     if brief.get("fixed_music_mood"):
         out["music_mood"] = brief["fixed_music_mood"]
+    from .creation_branches import voice_source
+    if voice_source(brief) == "native":   # dialogue series: characters speak with their Muse voices
+        out["voice_source"] = "native"
     source = brief.get("trend_source") or {}
     texts = [source.get("title_vi"), source.get("summary_vi"), source.get("title_zh")]
     if any(texts):
@@ -1270,7 +1273,7 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
                                             "hook_variants", "format", "niche", "goal",
                                             "duration_range", "facts", "takeaway", "script",
                                             "viewer_test", "fast_mode", "no_music", "no_variants",
-                                            "no_hook",
+                                            "no_hook", "voice_source",
                                             "duration_target_seconds", "content_mode")
                        if k in plan})
     return result

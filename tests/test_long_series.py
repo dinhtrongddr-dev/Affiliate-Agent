@@ -153,8 +153,8 @@ def test_word_budget_matches_measured_voice_speed():
     # measured renders: 79 words -> 22 s, 66 -> 18.2 s; a 24-36 s part needs ~84-126 words
     least, aim, most = creative.target_words(24, 36)
     assert 80 <= least <= 90 and 100 <= aim <= 110 and most >= 120
-    prompt = creative.branch_plan_prompt({**normalise_brief("template_series")}, {}, True, False)
-    assert f"NHẮM KHOẢNG {creative.target_words(20, 35)[1]} TỪ" in prompt
+    prompt = creative.branch_plan_prompt({**normalise_brief("viral_creator")}, {}, True, False)
+    assert f"NHẮM KHOẢNG {creative.target_words(15, 30)[1]} TỪ" in prompt
 
     def plan(words):
         text = " ".join(["vì nên rễ cây"] * (words // 4))

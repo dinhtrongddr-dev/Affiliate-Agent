@@ -17,6 +17,7 @@ class Creation(BaseModel):
     fast_mode: bool = False
     duration_seconds: int = Field(default=0, ge=0, le=180)
     ideas: list[str] = Field(default_factory=list, max_length=10)   # series: one episode per idea
+    voice_mode: str = Field(default='', max_length=20)   # series: '' = template's, dialogue | narration
 
 
 def product_offer(settings, product):
@@ -90,6 +91,8 @@ def install_routes(app, settings, render):
                 options['template'] = creative_series.get_template(s, body.template_id)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from None
+            if body.voice_mode in ('dialogue', 'narration'):   # this run only; the template is unchanged
+                options['template']['voice_mode'] = body.voice_mode
         elif body.creation_branch != 'viral_creator':
             raise HTTPException(400, 'Nhánh sáng tạo không hợp lệ.')
         ideas = [i.strip() for i in body.ideas if i and i.strip()]

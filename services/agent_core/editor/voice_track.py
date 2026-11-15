@@ -32,7 +32,12 @@ class VoicePart:
 @dataclass
 class SceneVoice:
     parts: list[VoicePart] = field(default_factory=list)
-    revoice: str = ""      # "" | "fitted" | "unfitted" | "no_speech_found"
+    revoice: str = ""      # "" | "fitted" | "unfitted" | "no_speech_found" | "native"
+
+    @property
+    def native(self) -> bool:
+        """The clip's own (Muse) speech is used; parts carry timing only, no audio file."""
+        return self.revoice == "native"
 
     @property
     def end(self) -> float:
@@ -183,6 +188,36 @@ def fit_lines(durations: list[float], windows: list[tuple[float, float]]) -> dic
     return out
 
 
+def native_parts(ffmpeg: str, scene: dict, lines: list[dict],
+                 clip_window: tuple[Path, float, float] | None) -> list[VoicePart]:
+    """Dialogue series: keep what the characters say in the generated clip itself.
+
+    Only when every line is spoken by someone on screen and speech is actually heard in the
+    clip; otherwise [] and the scene falls back to VieNeu re-voicing. The parts carry the timing
+    (for subtitles and the edit), the sound stays in the clip.
+    """
+    if not (scene.get("native_voice") and clip_window and scene.get("talking")):
+        return []
+    on_screen = set(scene.get("cast") or [])
+    if not lines or any(ln.get("speaker") not in on_screen for ln in lines):
+        return []
+    clip, start, length = clip_window
+    windows = speech_windows(ffmpeg, clip, start, length)
+    if not windows:
+        return []
+    begin, end = windows[0][0], windows[-1][1]
+    if end - begin < 0.6:
+        return []
+    counts = [max(1, len(str(ln["text"]).split())) for ln in lines]
+    span, total, at, parts = end - begin, sum(counts), begin, []
+    for ln, n in zip(lines, counts):
+        dur = span * n / total
+        parts.append(VoicePart(None, round(at, 3), round(dur, 3),
+                               evenly_timed_words(ln["text"], 0.0, dur), ln.get("speaker") or "narrator"))
+        at += dur
+    return parts
+
+
 def scene_voice(settings, scene: dict, cast: dict, work_dir: Path, index: int,
                 clip_window: tuple[Path, float, float] | None = None) -> SceneVoice:
     """Synthesize every line of a scene with its speaker's voice.
@@ -196,6 +231,10 @@ def scene_voice(settings, scene: dict, cast: dict, work_dir: Path, index: int,
     if not lines:
         return result
     ffmpeg = getattr(settings, "ffmpeg_path", "ffmpeg")
+    native = native_parts(ffmpeg, scene, lines, clip_window)
+    if native:
+        result.parts, result.revoice = native, "native"
+        return result
     raw: list[tuple[dict, Speech, float]] = []
     from .lexicon import load, spoken
     lexicon = load(getattr(settings, "project_root", None))

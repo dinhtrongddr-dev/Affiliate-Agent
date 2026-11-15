@@ -59,7 +59,24 @@ SURI_FAMILY = {
     ],
     "rules": "Exactly father, mother and four-year-old daughter Suri. Age-appropriate daily family comedy; "
              "stable cast appearances and wardrobe, no dangerous child activities or humiliation.",
+    "voice_mode": "dialogue",
 }
+
+# How a series speaks: "dialogue" = the characters talk to each other on screen with the voices
+# Muse generates; "narration" = a VieNeu narrator / first-person voice-over (knowledge, niche,
+# review-style series). Review and trend videos always use VieNeu.
+VOICE_MODES = {"dialogue": "Hội thoại giữa nhân vật (giọng Muse)",
+               "narration": "Thuyết minh / ngôi thứ nhất (giọng VieNeu)"}
+
+
+def voice_source(brief: dict) -> str:
+    """'native' when the characters' own generated voices are kept, else 'tts' (VieNeu)."""
+    if (brief or {}).get("creation_branch") != "template_series":
+        return "tts"
+    tpl = brief.get("template") or {}
+    mode = (brief.get("voice_mode") or tpl.get("voice_mode")
+            or ("dialogue" if tpl.get("id") == "suri-family" else ""))
+    return "native" if mode == "dialogue" else "tts"
 
 
 def _context(value, depth=0):
@@ -110,5 +127,8 @@ def normalise_brief(branch, *, experience=None, template=None, product_context=N
             "continuity_rules": _context(raw.get("continuity_rules", "")),
             "episode_idea": bounded_text(raw.get("episode_idea"), 3000),
             "characters": normalise_characters(raw.get("characters")),
+            # the built-in family sitcom talks; a custom template narrates unless it says otherwise
+            "voice_mode": raw.get("voice_mode") if raw.get("voice_mode") in VOICE_MODES else
+                          ("dialogue" if template is None or raw.get("id") == "suri-family" else "narration"),
         }
     return result
