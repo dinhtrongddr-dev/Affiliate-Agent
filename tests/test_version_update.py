@@ -79,3 +79,26 @@ def test_version_api_and_sidebar(tmp_path, monkeypatch):
         with patch.object(vc, "start_update", return_value={"started": True, "log": "x"}):
             r = c.post("/api/version/update", headers={"X-Requested-With": "affiliate-agent"})
         assert r.json()["started"]
+
+
+def test_check_compares_with_the_running_version_not_the_folder():
+    """The folder can hold newer code than the app runs (pulled, not restarted): the button must show."""
+    seen = {}
+
+    def fake_git(root, *args, timeout=30):
+        return {"ls-remote": "c" * 40 + "\trefs/heads/main", "rev-parse": "c" * 40,    # folder = GitHub
+                "config": "https://github.com/o/r.git"}.get(args[0], "")
+
+    def fake_get(url, **kw):
+        seen["url"] = url
+        r = MagicMock(status_code=200)
+        r.json.return_value = {"ahead_by": 1, "commits": [
+            {"sha": "c" * 40, "commit": {"message": "fix: x", "committer": {"date": "2026-11-15T10:00:00Z"}}}]}
+        return r
+    vc._local[str(ROOT)] = {"build": 1, "hash": "aaaaaaa", "sha": "a" * 40, "date": "", "title": "", "branch": "main"}
+    try:
+        with patch.object(vc, "_git", side_effect=fake_git), patch.object(vc.httpx, "get", side_effect=fake_get):
+            st = vc.check(ROOT)
+    finally:
+        vc._local.clear()
+    assert st["behind"] == 1 and seen["url"].endswith("/compare/" + "a" * 40 + "..." + "c" * 40)
