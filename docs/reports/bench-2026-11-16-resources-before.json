@@ -1,0 +1,44 @@
+{
+ "at": "2026-11-16T16:39:02",
+ "label": "idle, dashboard+jobs pages open",
+ "seconds": 60,
+ "samples": 6,
+ "roles": {
+  "app": {
+   "procs": 2,
+   "ram_mb_avg": 405,
+   "ram_mb_max": 405,
+   "cpu_pct_avg": 1.7
+  },
+  "chatgpt2api": {
+   "procs": 2,
+   "ram_mb_avg": 39,
+   "ram_mb_max": 48,
+   "cpu_pct_avg": 3.7
+  },
+  "muse_chrome": {
+   "procs": 8,
+   "ram_mb_avg": 53,
+   "ram_mb_max": 53,
+   "cpu_pct_avg": 0.0
+  },
+  "muse_gateway": {
+   "procs": 2,
+   "ram_mb_avg": 11,
+   "ram_mb_max": 12,
+   "cpu_pct_avg": 0.0
+  },
+  "user_chrome": {
+   "procs": 27,
+   "ram_mb_avg": 1521,
+   "ram_mb_max": 1559,
+   "cpu_pct_avg": 26.0
+  },
+  "webview2": {
+   "procs": 12,
+   "ram_mb_avg": 156,
+   "ram_mb_max": 156,
+   "cpu_pct_avg": 0.0
+  }
+ }
+}
