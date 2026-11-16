@@ -158,7 +158,8 @@ def text_layers(ass_path: Path | None) -> int:
         return 0
     styles = set(re.findall(r"^Dialogue: \d+,[^,]+,[^,]+,(\w+),", Path(ass_path).read_text(
         encoding="utf-8-sig"), flags=re.M))
-    return len(styles)
+    from .editor.subtitles import DECOR_STYLES
+    return len(styles - set(DECOR_STYLES))   # the CTA sticker / AI tag are decor, not reading text
 
 
 COVERAGE_MIN, MAX_GAP, SEAM_MIN = 0.85, 0.8, 0.5
@@ -238,6 +239,10 @@ def score_video(timeline: dict, scene_report: list[dict], duration: float, music
     if not music:
         issues.append("Không có nhạc nền")
     facts += 3 if tech_passed else 0
+    pacing = pacing_report(branch, timeline, scene_report)
+    if pacing["over"]:
+        issues.append(f"Nhịp chậm: {len(pacing['over'])} cảnh dài hơn {pacing['limit']:.0f}s "
+                      f"(dài nhất {pacing['longest']:.1f}s); cắt ngắn hoặc thêm góc máy")
     parts = {"facts": (facts, 30.0)}
 
     # flow (S5): narration coverage, silences, seams inside sequences, comprehension
@@ -309,4 +314,89 @@ def score_video(timeline: dict, scene_report: list[dict], duration: float, music
             "breakdown": {k: round(v, 1) for k, (v, _) in parts.items()},
             "voice_coverage": vf["coverage"], "max_silence": vf["max_gap"], "seam_ssim": seam_ssim or [],
             "visual": visual, "gates": gates, "improvements": issues, "strengths": [],
-            "subtitle_overlaps": overlaps, "text_layers": layers}
+            "subtitle_overlaps": overlaps, "text_layers": layers, "pacing": pacing}
+
+
+# Longest shot without a cut, per branch (UGC research: cuts <= 3 s keep viewers; a dialogue
+# series needs a little longer for one spoken line). A reuse cut counts as its own shot.
+SHOT_LIMITS = {"product_review": 3.5, "viral_creator": 3.5, "template_series": 4.5}
+
+
+def pacing_report(branch: str, timeline: dict, scene_report: list[dict]) -> dict:
+    limit = SHOT_LIMITS.get(branch, 4.0)
+    if branch == "template_series" and not timeline.get("dialogue"):
+        limit = 4.0
+    shots = [(i, float(s.get("rendered_duration") or 0)) for i, s in enumerate(scene_report)]
+    over = [i for i, d in shots if d > limit + 0.25 and not scene_report[i].get("pause")]
+    longest = max((d for _, d in shots), default=0.0)
+    avg = sum(d for _, d in shots) / len(shots) if shots else 0.0
+    return {"limit": limit, "longest": round(longest, 2), "average": round(avg, 2), "over": over}
+
+
+# ---------------------------------------------------------------- per-clip checklist (UGC item 2)
+CLIP_CHECKS = {
+    "action": "đúng MỘT hành động như mô tả",
+    "identity": "nhân vật đúng người trong ảnh tham chiếu (mặt, tóc, trang phục)",
+    "anatomy": "không tay/ngón/mặt biến dạng",
+    "clean": "không chữ rác, logo lạ, bảng hiệu giả",
+    "frame": "đầy khung dọc 9:16, không viền đen, chủ thể không bị cắt",
+    "motion": "có chuyển động thật (không đứng hình, không trôi lơ lửng)",
+    "style": "đúng phong cách hình yêu cầu",
+}
+
+
+def clip_prompt(shot_prompt: str, n_frames: int, n_refs: int) -> str:
+    checks = "\n".join(f"- {k}: {v}" for k, v in CLIP_CHECKS.items())
+    refs = (f"Ảnh {n_frames + 1}-{n_frames + n_refs} là ảnh tham chiếu nhân vật/sản phẩm."
+            if n_refs else "Không có ảnh tham chiếu: identity = null nếu không xác định được.")
+    return f"""Bạn là QA clip video AI. Ảnh 1-{n_frames} là các khung của MỘT clip theo thứ tự thời gian. {refs}
+Yêu cầu của clip (prompt đã gửi): {shot_prompt[:1200]}
+Chấm từng mục true (đạt) / false (lỗi rõ ràng) / null (không áp dụng):
+{checks}
+Chỉ đánh false khi lỗi thấy rõ và làm hỏng cảnh; lỗi nhỏ vẫn là true.
+Trả DUY NHẤT JSON: {{"action":true,"identity":null,"anatomy":true,"clean":true,"frame":true,"motion":true,
+"style":true,"issues":["lỗi cụ thể bằng tiếng Anh ngắn, để đưa vào lần tạo lại"]}}"""
+
+
+def clip_frames(settings, clip: Path, out_dir: Path, points=(0.2, 0.5, 0.85)) -> list[Path]:
+    from .editor.ffmpeg import probe, run_ffmpeg
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        length = float(probe(settings.ffprobe_path, clip)["duration_sec"]) or 10.0
+    except Exception:  # noqa: BLE001
+        length = 10.0
+    frames = []
+    for k, frac in enumerate(points):
+        target = out_dir / f"{clip.stem}_c{k}.jpg"
+        try:
+            run_ffmpeg(settings.ffmpeg_path, ["-ss", f"{length * frac:.2f}", "-i", str(clip), "-frames:v", "1",
+                                              "-vf", "scale=360:-2", "-q:v", "4", str(target)])
+            if target.is_file():
+                frames.append(target)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("clip frame failed: %s", exc)
+    return frames
+
+
+def clip_check(settings, clip: Path, shot_prompt: str, refs: list[Path] | None = None, ask=None) -> dict | None:
+    """7-point check of one Muse clip. None when it could not run (the clip is then kept)."""
+    frames = clip_frames(settings, Path(clip), Path(clip).parent / "clip_qa")
+    if len(frames) < 2:
+        return None
+    images = frames + [Path(r) for r in (refs or [])[:3] if Path(r).is_file()
+                       and Path(r).suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")]
+    prompt = clip_prompt(shot_prompt, len(frames), len(images) - len(frames))
+    try:
+        if ask is None:
+            from .workflow import _ask_json, _client
+            raw = _ask_json(_client(settings), settings, prompt, images, temperature=0.1, max_tokens=500)
+        else:
+            raw = ask(prompt, images)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("clip QA skipped: %s", exc)
+        return None
+    checks = {k: raw.get(k) if raw.get(k) in (True, False) else None for k in CLIP_CHECKS}
+    failed = [k for k, v in checks.items() if v is False]
+    return {"ok": not failed, "checks": checks, "failed": failed,
+            "issues": [str(i)[:160] for i in (raw.get("issues") or [])[:4]] or
+                      [CLIP_CHECKS[k] for k in failed]}

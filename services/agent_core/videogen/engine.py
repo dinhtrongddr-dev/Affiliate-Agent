@@ -11,6 +11,7 @@ States: PENDING -> SUBMITTING -> SUBMITTED -> DOWNLOADED (QC passed) | FAILED | 
 """
 import hashlib
 import json
+import threading
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,7 +21,7 @@ from . import providers
 
 log = logging.getLogger("affiliate_agent.videogen")
 
-ACTIVE = ("PENDING", "SUBMITTING", "SUBMITTED")
+ACTIVE = ("PENDING", "SUBMITTING", "SUBMITTED", "CHECKING")   # CHECKING = clip under AI review
 WAIT_STATUS = "WAITING_FOR_GENERATION"
 MAX_ATTEMPTS = 3  # first try + two retries (Muse sometimes answers with text only)
 SUBMIT_ERRORS_BEFORE_FAIL = 3
@@ -438,12 +439,12 @@ def _older_than(ts: str | None, minutes: float) -> bool:
     return datetime.now(timezone.utc) - at > timedelta(minutes=minutes)
 
 
-def _retry_or_fail(settings, t: dict, error: str, qc: dict | None = None) -> None:
+def _retry_or_fail(settings, t: dict, error: str, qc: dict | None = None, fix: list[str] | None = None) -> None:
     db = settings.database_path
     _update(db, t["id"], status="FAILED", error=error[:500], qc_json=qc)
     if t["kind"] in ("video", "image") and t["attempt"] < MAX_ATTEMPTS:
         _insert(db, job_id=t["job_id"], scene_index=t["scene_index"], kind=t["kind"],
-                provider=t["provider"], prompt=t["prompt"], refs=t["refs"],
+                provider=t["provider"], prompt=_with_fix(t["prompt"], fix), refs=t["refs"],
                 duration=t["duration"], depends_on=t["depends_on"], attempt=t["attempt"] + 1)
         log.info("gen task %s failed (%s); retry scheduled", t["id"], error)
 
@@ -482,7 +483,9 @@ def _submit(settings, provider, t: dict) -> None:
                     "Continue character motion, posture, wardrobe and lighting seamlessly from this exact frame."
                 )
                 if continuity_hint not in t["prompt"]:
-                    t["prompt"] = f"{t['prompt']}\n{continuity_hint}"
+                    # the frame goes first, so every number the shot prompt computed moves up by one
+                    t["prompt"] = f"{_shift_attachments(t['prompt'], 1)}\n{continuity_hint}"
+                    t["_offset"] = 1
             elif (dep["result_path"] and Path(dep["result_path"]).is_file()
                   and Path(dep["result_path"]) not in refs
                   and not any(str(r).startswith(CHARREF) for r in t["refs"])):
@@ -496,6 +499,9 @@ def _submit(settings, provider, t: dict) -> None:
     try:
         from ..muse_prompt import strip_internal
         prompt = strip_internal(t["prompt"])
+        notes = _sheet_notes(t, t.get("_offset", 0))
+        if notes and notes not in prompt:
+            prompt = f"{prompt}\n{notes}"
         if t["kind"] == "image":
             remote = provider.submit_image(prompt, refs, t["id"])
         else:
@@ -535,7 +541,22 @@ def _resolve_refs(db, t: dict) -> list[Path] | None:
             return None
         if latest["status"] == "DOWNLOADED" and latest["result_path"] and Path(latest["result_path"]).is_file():
             refs.append(Path(latest["result_path"]))
+            t.setdefault("_sheets", []).append((len(refs), cid))   # 1-based attachment number
     return refs
+
+
+def _shift_attachments(prompt: str, by: int) -> str:
+    """Renumber "attachment N" / "Attachments: N = ..." after files were put in front."""
+    import re
+    prompt = re.sub(r"\b(attachment )(\d+)", lambda m: f"{m.group(1)}{int(m.group(2)) + by}", prompt)
+    return re.sub(r"(Attachments: |; )(\d+)( = )",
+                  lambda m: f"{m.group(1)}{int(m.group(2)) + by}{m.group(3)}", prompt)
+
+
+def _sheet_notes(t: dict, offset: int) -> str:
+    """Character photos made by the app are attached last; tell Muse which one is whom."""
+    return " ".join(f"Attachment {n + offset} is the reference photo of {cid}: that person looks exactly like it."
+                    for n, cid in t.get("_sheets") or [])
 
 
 def _check(settings, provider, t: dict) -> None:
@@ -580,6 +601,11 @@ def _check(settings, provider, t: dict) -> None:
             )
         except Exception as exc:
             log.debug("extract_continuity_frame failed for %s: %s", t["id"], exc)
+        if getattr(settings, "clip_qa", False) and t["scene_index"] >= 0:
+            # 7-point AI check runs off the poll thread; the job keeps waiting (CHECKING is active)
+            _update(db, t["id"], status="CHECKING", result_path=str(out), qc_json=qc, error=None)
+            _start_clip_review(settings, {**t, "result_path": str(out), "qc": qc})
+            return
         _update(db, t["id"], status="DOWNLOADED", result_path=str(out), qc_json=qc, error=None)
         _add_to_clip_library(settings, t, out)
     else:
@@ -587,6 +613,48 @@ def _check(settings, provider, t: dict) -> None:
         if t["kind"] == "image":
             from ..shared_cast import save_to_series
             save_to_series(settings, t["job_id"], t, out)
+
+
+_reviewing: set[str] = set()
+_review_lock = threading.Lock()
+_review_pool = None
+
+
+def _start_clip_review(settings, t: dict) -> None:
+    """Run the 7-point clip check in a small pool so slow vision calls never stall the poll."""
+    global _review_pool
+    with _review_lock:
+        if t["id"] in _reviewing:
+            return
+        _reviewing.add(t["id"])
+        if _review_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            _review_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="clip-qa")
+    _review_pool.submit(_clip_review, settings, t)
+
+
+def _clip_review(settings, t: dict) -> None:
+    db = settings.database_path
+    out = Path(t["result_path"])
+    qc = t.get("qc") or {}
+    try:
+        from ..muse_prompt import strip_internal
+        from ..qa_video import clip_check
+        refs = [Path(r) for r in t.get("refs") or [] if not str(r).startswith(CHARREF)]
+        verdict = clip_check(settings, out, strip_internal(t["prompt"]), refs)
+        if verdict is not None and not verdict["ok"] and t["attempt"] < MAX_ATTEMPTS:
+            _retry_or_fail(settings, t, "Clip QA: " + "; ".join(verdict["issues"])[:400],
+                           {**qc, "clip_qa": verdict}, fix=verdict["issues"])
+            return
+        # passed, could not run, or out of attempts: keep it (the video QA still looks at it)
+        _update(db, t["id"], status="DOWNLOADED", qc_json={**qc, "clip_qa": verdict}, error=None)
+        _add_to_clip_library(settings, t, out)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("clip review failed for %s: %s", t["id"], exc)
+        _update(db, t["id"], status="DOWNLOADED", error=None)
+    finally:
+        with _review_lock:
+            _reviewing.discard(t["id"])
 
 
 def _add_to_clip_library(settings, t: dict, path: Path) -> None:
@@ -642,6 +710,10 @@ def poll(settings, provider=None) -> dict:
     for t in rows:
         touched.add(t["job_id"])
         try:
+            if t["status"] == "CHECKING":
+                if t["id"] not in _reviewing:      # review lost (restart): run it again
+                    _start_clip_review(settings, t)
+                continue
             if t["status"] in ("PENDING", "SUBMITTING") or not t["remote_id"]:
                 if t["status"] == "PENDING" and in_flight >= cap:
                     continue
@@ -673,19 +745,40 @@ def retry_task(settings, tid: str) -> str | None:
     return new
 
 
-def regenerate_scenes(settings, job_id: str, scene_indexes: list[int]) -> int:
-    """Quality gate: make the clip of each listed scene again (new attempt, same prompt/refs).
-    Scenes that reuse another scene's clip regenerate that source clip instead."""
+FIX_PREFIX = "\nFix from the previous take (must not happen again): "
+
+
+def _with_fix(prompt: str, issues: list[str] | None) -> str:
+    """Replace any earlier fix note with the new QA findings, keeping internal lines last."""
+    if not issues:
+        return prompt
+    from ..muse_prompt import INTERNAL
+    kept = [ln for ln in prompt.splitlines() if not ln.startswith(FIX_PREFIX.strip())]
+    body = [ln for ln in kept if not ln.startswith(INTERNAL)]
+    internal = [ln for ln in kept if ln.startswith(INTERNAL)]
+    fix = (FIX_PREFIX + "; ".join(str(i)[:160] for i in issues[:4])
+           + ". No deformed hands or faces, no identity change, no warped objects.")
+    return "\n".join(body) + fix + "".join("\n" + ln for ln in internal)
+
+
+def regenerate_scenes(settings, job_id: str, scene_indexes: list[int], issues: list[str] | None = None,
+                      reuse_of: dict[int, int] | None = None) -> int:
+    """Quality gate: make the clip of each listed scene again (new attempt, same refs).
+    The QA findings are added to the prompt so the new take avoids them. Scenes that reuse
+    another scene's clip (``reuse_of``: scene -> source scene) regenerate that source clip."""
     db = settings.database_path
     tasks = [t for t in list_tasks(db, job_id, 10000) if t["kind"] == "video"]
+    reuse_of = reuse_of or {}
+    targets = sorted({reuse_of.get(i, i) for i in scene_indexes})
     made = 0
-    for index in sorted(set(scene_indexes)):
+    for index in targets:
         mine = sorted((t for t in tasks if t["scene_index"] == index), key=lambda t: t["attempt"])
         if not mine or mine[-1]["status"] in ACTIVE:
             continue
         last = mine[-1]
+        prompt = _with_fix(last["prompt"], issues)
         _insert(db, job_id=job_id, scene_index=index, kind="video", provider=last["provider"],
-                prompt=last["prompt"], refs=last["refs"], duration=last["duration"], depends_on=None,
+                prompt=prompt, refs=last["refs"], duration=last["duration"], depends_on=None,
                 attempt=last["attempt"] + 1)
         made += 1
     if made:

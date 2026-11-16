@@ -94,10 +94,13 @@ def attach_references(plan, brief, manifest) -> dict:
     cast = [c["reference_id"] for c in plan.get("characters", [])
             if c.get("reference_id") in allowed]
     defaults = list(dict.fromkeys(cast + [item["id"] for item in manifest]))[:6]
+    product_ids = {item["id"] for item in manifest if item.get("role") == "product"}
     for scene in plan.get("scenes", []):
         refs = scene.get("reference_ids")
         if refs is None or refs == []:
-            refs = defaults.copy()
+            # A scene without the product must not get the product photo: the gateway tells Muse
+            # to start from the first attachment, so it would open on the packshot.
+            refs = [r for r in defaults if scene.get("product_visible", True) or r not in product_ids]
         if (not isinstance(refs, list) or len(refs) > 6
                 or any(not isinstance(rid, str) or rid not in allowed for rid in refs)
                 or len(refs) != len(set(refs))):

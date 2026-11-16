@@ -30,7 +30,7 @@ def test_reuse_of_points_to_an_earlier_generated_clip():
 def test_storyboard_issues_are_checked_in_code():
     line = "Vì mẹ đi làm về muộn nên cả nhà quyết định nấu cơm thật ngon tặng mẹ"   # 16 words
     good = {"creation_branch": "viral_creator", "takeaway": "Cả nhà nấu cơm tặng mẹ",
-            "scenes": [{"lines": [{"text": line}]} for _ in range(3)]}
+            "scenes": [{"lines": [{"text": line}], "mission": "story"} for _ in range(3)]}
     assert creative.storyboard_issues(good) == []
     long = {"creation_branch": "viral_creator", "takeaway": "x",
             "scenes": [{"lines": [{"text": " ".join(["chữ"] * 12)}]} for _ in range(25)]}

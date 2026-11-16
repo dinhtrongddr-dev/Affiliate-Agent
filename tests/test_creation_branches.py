@@ -88,17 +88,17 @@ def test_legacy_plan_keeps_existing_shape_and_defaults():
 @pytest.mark.parametrize("branch", BRANCHES)
 def test_prompts_keep_branch_honesty_budget_and_storyboard_contract(branch):
     brief = normalise_brief(branch)
-    idea = creative.branch_ideation_prompt(brief)
     plan = creative.branch_plan_prompt(brief, {}, True, False, gen_limit=2)
     review = creative.branch_review_prompt({}, {}, 7, brief)
-    assert branch in idea and branch in plan and branch in review
+    assert branch in plan and branch in review
     assert "Tối đa 2 cảnh generate" in plan
     assert "từ/giây" in plan and "NHẮM KHOẢNG" in plan and "NHỊP" in plan   # length now follows the voice
     assert "reference_ids" in plan and '"group"' in plan and '"lines"' in plan and '"talking"' in plan
-    assert "không nói đã dùng" in plan.lower()
-    assert "không có CTA bán hàng" in review
-    if branch != "product_review":
-        assert "không ép" in idea.lower()
+    assert '"mission"' in plan and "ĐÚNG MỘT chuyển động máy" in plan
+    if branch == "product_review":
+        assert "không nói đã dùng" in plan.lower() and "product_truth" in plan
+    else:
+        assert "không có CTA bán hàng" in review and "không ép" in plan.lower()
 
 
 def test_disabled_generation_prompt_never_offers_positive_budget():
@@ -115,8 +115,7 @@ def test_template_snapshot_schema_and_attachment_paths_stay_out_of_prompts():
     assert brief["template"]["characters"][0]["description"] == "four-year-old girl"
     brief["reference_assets"] = [{"path": "C:/private/family.png"}]
     plan = {"reference_manifest": [{"path": "C:/private/family.png"}]}
-    for prompt in (creative.branch_ideation_prompt(brief),
-                   creative.branch_plan_prompt(brief, {}, True, False),
+    for prompt in (creative.branch_plan_prompt(brief, {}, True, False),
                    creative.branch_review_prompt(plan, {}, 7, brief)):
         assert "C:/private" not in prompt
 
@@ -177,11 +176,11 @@ def test_legacy_tolerant_scene_and_reference_cleanup_remains():
 def test_custom_series_snapshot_is_authoritative_not_forced_suri_cast():
     brief = normalise_brief("template_series", template={"id": "grandma-kitchen", "version": 2,
         "characters": [{"id": "grandma", "name": "Bà", "age": 70}], "style": "stop motion"})
-    for prompt in (creative.branch_ideation_prompt(brief), creative.branch_plan_prompt(brief, {}, True, False),
+    for prompt in (creative.branch_plan_prompt(brief, {}, True, False),
                    creative.branch_review_prompt({}, {}, 7, brief)):
         assert "template snapshot là nguồn quyết định cast" in prompt
-        assert "Chỉ khi chọn preset suri-family" in prompt
         assert "grandma-kitchen" in prompt
+        assert "Suri" not in prompt and "hài gia đình" not in prompt      # no built-in sitcom leaks in
 
 
 @pytest.mark.parametrize("version", [True, 3, "1"])

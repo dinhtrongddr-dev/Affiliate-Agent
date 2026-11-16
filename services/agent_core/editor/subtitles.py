@@ -76,6 +76,9 @@ def build_ass(
     cta_start: float,
     total: float,
     single_layer: bool = False,
+    sticker: str = "",
+    sticker_start: float = 0.0,
+    ai_label: bool = False,
 ) -> Path:
     """Build SSA/ASS subtitle script with safe-zone bounds for Facebook Reels and Shopee Video.
 
@@ -107,6 +110,8 @@ Style: Hook,{font},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00141414,&H00000000,-1,0,0,
 Style: Label,{font},{fs_label},&H00FFFFFF,&H00FFFFFF,&H00000000,&H50000000,-1,0,0,0,100,100,0,0,1,{int(5*scale)},{int(2*scale)},8,{margin_lr},{margin_lr},{margin_label_v},1
 Style: HookLite,{font},{int(84*scale)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,{int(7*scale)},{int(3*scale)},8,{margin_lr},{margin_lr},{int(150*scale)},1
 Style: CTA,{font},{fs_cta},&H00141414,&H00141414,&H0000D7FF,&H00000000,-1,0,0,0,100,100,0,0,3,{int(22*scale)},0,5,{margin_lr},{margin_lr},0,1
+Style: Sticker,{font},{int(62*scale)},&H00141414,&H00141414,&H0000D7FF,&H00000000,-1,0,0,0,100,100,0,-4,3,{int(20*scale)},0,2,{margin_lr},{margin_lr},{int(760*scale)},1
+Style: AiTag,{font},{int(34*scale)},&H40FFFFFF,&H40FFFFFF,&H60000000,&H00000000,0,0,0,0,100,100,0,0,1,{int(2*scale)},0,9,{int(40*scale)},{int(40*scale)},{int(70*scale)},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -115,7 +120,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     pop = r"{\fad(80,120)\fscx70\fscy70\t(0,160,\fscx100\fscy100)}"
 
     if single_layer:
-        return _single_layer(path, header, captions, hook, hook_end, cta, total)
+        return _single_layer(path, header, captions, hook, hook_end, cta, total,
+                             decor=_decor(sticker, sticker_start, ai_label, total, pop))
 
     # 1) Hook text in top safe-zone
     clean_hook = _clean(hook)
@@ -174,10 +180,29 @@ def phrase_events(captions: list[tuple[float, list[Word]]], total: float,
     return [(round(max(0.0, s), 3), round(min(e, total), 3), t) for s, e, t in events if e - s > 0.12]
 
 
-def _single_layer(path, header, captions, hook, hook_end, cta, total) -> Path:
+# Decorative layers (not text the viewer must read): QA does not count them as extra text layers.
+DECOR_STYLES = ("Sticker", "AiTag")
+
+
+def _decor(sticker: str, start: float, ai_label: bool, total: float, pop: str) -> list[str]:
+    """Review CTA sticker (e.g. "Link ở giỏ hàng") near the end, and a small "Nội dung AI" tag."""
+    out = []
+    text = _plain(sticker)
+    if text and start < total - 0.8:
+        wobble = r"{\fad(80,120)\fscx60\fscy60\t(0,180,\fscx108\fscy108)\t(180,300,\fscx100\fscy100)}"
+        out.append(f"Dialogue: 4,{_ts(max(0.0, start))},{_ts(total)},Sticker,,0,0,0,,{wobble}{text}")
+    if ai_label:
+        out.append(f"Dialogue: 0,{_ts(0)},{_ts(total)},AiTag,,0,0,0,,Nội dung AI")
+    return out
+
+
+def _single_layer(path, header, captions, hook, hook_end, cta, total, decor=None) -> Path:
     """Hook (0-2 s, sentence case, no emoji), then phrase subtitles only. The optional CTA is
-    one last subtitle line, not a card."""
-    lines = []
+    one last subtitle line, not a card (a branch with a CTA sticker shows the sticker instead)."""
+    decor = decor or []
+    if any(",Sticker," in d for d in decor):
+        cta = ""
+    lines = list(decor)
     clean_hook = _plain(hook)
     if clean_hook:
         lines.append(f"Dialogue: 3,{_ts(0)},{_ts(hook_end)},HookLite,,0,0,0,,"

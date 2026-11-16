@@ -54,10 +54,23 @@ def test_tray_child_environment_and_single_instance():
     assert env["PYTHONPATH"].endswith("services") and env["PYTHONUTF8"] == "1"
     assert env["PLAYWRIGHT_BROWSERS_PATH"].endswith("playwright")
     with patch.object(tray, "app_running", return_value=True), \
-            patch.object(tray.webbrowser, "open") as browser, patch.object(tray.subprocess, "Popen") as popen:
+            patch.object(tray, "open_window") as window, patch.object(tray.subprocess, "Popen") as popen:
         assert tray.main() == 0
-    browser.assert_called_once_with(tray.URL)     # second click: only show the open app
+    window.assert_called_once_with()               # second click: only show the open app window
     popen.assert_not_called()
+
+
+def test_open_window_focuses_or_starts_the_desktop_window():
+    from agent_core import desktop
+    with patch.object(desktop, "focus_existing", return_value=True), \
+            patch.object(tray.subprocess, "Popen") as popen:
+        tray.open_window()
+    popen.assert_not_called()                      # already open: brought to the front
+    with patch.object(desktop, "focus_existing", return_value=False), \
+            patch.object(tray.subprocess, "Popen") as popen:
+        tray.open_window()
+    args = popen.call_args[0][0]
+    assert args[-3:] == ["-m", "agent_core.desktop", tray.URL]
 
 
 def test_tray_reports_an_unexpected_stop():

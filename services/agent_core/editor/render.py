@@ -318,9 +318,18 @@ def render_timeline(settings, timeline: dict, work_dir: Path, output: Path,
                    durations[0] if len(durations) == 1 else starts[1] + 0.3)
     if timeline.get("no_hook"):
         timeline = {**timeline, "hook": ""}
+    # Branch decor (UGC research): review gets a "giỏ hàng" sticker under its spoken CTA; any video
+    # with AI clips gets a small "Nội dung AI" tag instead of saying so in the voice.
+    sticker, sticker_start = "", total
+    if timeline.get("creation_branch") == "product_review":
+        sticker = "Link ở giỏ hàng"
+        last_spoken = max((i for i, sc in enumerate(scenes) if sc.get("lines")), default=len(scenes) - 1)
+        sticker_start = max(hook_end + 1.0, starts[last_spoken] if starts else total - 6.0, total - 7.0)
+    ai_label = any(sc.get("generated") for sc in scenes)
     subs = build_ass(work_dir / "subs.ass", settings.render_width, settings.render_height,
                      settings.font_name, captions, timeline.get("hook") or "", hook_end,
-                     labels, cta, cta_start, total, single_layer=single_layer)
+                     labels, cta, cta_start, total, single_layer=single_layer,
+                     sticker=sticker, sticker_start=sticker_start, ai_label=ai_label)
 
     # 5) Audio mix + Subtitle burn
     inputs: list[str] = []

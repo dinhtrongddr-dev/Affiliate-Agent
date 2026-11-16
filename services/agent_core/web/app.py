@@ -116,6 +116,7 @@ EDITABLE_SETTINGS = [
     ("AA_AUTOPILOT_MIN_SCORE", "Điểm ý tưởng tối thiểu để tự sản xuất (0-100)", "text", "Trend Trung Quốc"),
     ("AA_AUTOPILOT_GOAL_MIX", "Tỉ lệ mục tiêu (vd fb_growth:70,affiliate:30)", "text", "Trend Trung Quốc"),
     ("AA_QA_AUTOFIX", "Cổng chất lượng tự tạo lại cảnh lỗi (1 lần)", "bool", "Dựng video"),
+    ("AA_CLIP_QA", "AI kiểm 7 điểm từng clip Muse ngay khi về (lỗi thì tạo lại)", "bool", "Dựng video"),
     ("AA_YOUTUBE_API_KEY", "YouTube Data API key (miễn phí, Google Cloud)", "secret", "Trend"),
     ("AA_YOUTUBE_DAILY_UNITS", "Quota YouTube dùng tối đa / ngày (mỗi lần tìm = 101)", "text", "Trend"),
     ("AA_TRENDSMCP_API_KEY", "Trends MCP API key (trendsmcp.ai, gói Free 100 request/tháng)", "secret", "Trend"),

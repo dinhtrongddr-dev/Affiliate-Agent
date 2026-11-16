@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     lipsync_provider: str = "none"            # none | (future) sync.so / fal LatentSync for talking shots
     visual_qa: bool = True                    # one AI vision pass over the rendered frames
     qa_autofix: bool = True                   # quality gate regenerates flagged scenes once
+    clip_qa: bool = True                      # 7-point AI check of each Muse clip; failures are remade
     cn_trends_enabled: bool = True            # China hot lists (public, no login)
     cn_trend_sources: str = ""                # empty = every supported source
     cn_auto_ideas: int = 3                    # topics per run that get ideas automatically

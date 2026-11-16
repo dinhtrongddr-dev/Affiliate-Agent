@@ -47,6 +47,7 @@ def settings_for(root: Path):
     s.facebook_min_width, s.facebook_min_height = 360, 640
     s.music_dir = root / "no-music"
     s.qa_autofix = False   # the quality gate has its own tests; these check the Muse flow
+    s.clip_qa = False      # per-clip AI review has its own tests (test_clip_qa.py)
     return s
 
 

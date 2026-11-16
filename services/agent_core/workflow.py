@@ -504,11 +504,8 @@ def _process(settings, job: dict) -> dict:
                 analysis = {"topic": brief.get("topic") or name, "product_category": name,
                             "product_search_keywords": [name], "visual_summary": name,
                             "angle": brief.get("notes", "")}
-            else:
-                analysis = _ask_json(client, settings, creative.ideation_prompt(brief),
-                                     temperature=0.3, max_tokens=900)
-                if brief.get("keywords"):
-                    analysis["product_search_keywords"] = brief["keywords"]
+            else:   # unreachable: every trend job is given a creation branch above
+                raise WorkflowError("Job trend không có nhánh sáng tạo")
         except AIClientError as exc:
             _stop(settings, job_id, _ai_status(exc), exc, keyframes=[str(p) for p in frame_paths])
         except Exception as exc:  # noqa: BLE001
@@ -711,8 +708,10 @@ def _cast_plan_voices(settings, plan: dict, brief: dict) -> None:
     pinned = {c["id"]: c["voice"] for c in (brief.get("template") or {}).get("characters") or []
               if isinstance(c, dict) and c.get("voice")}
     chars = [c for c in plan.get("characters") or [] if isinstance(c, dict) and c.get("id")]
-    dialogue = plan.get("creation_branch") == "template_series" or (
-        plan.get("creation_branch") == "viral_creator" and plan.get("format") in (None, "", "story"))
+    from .prompts import multi_voice
+    # Same definition as the storyboard prompt: a dialogue series, or a viral story format.
+    dialogue = multi_voice({**brief, "creation_branch": plan.get("creation_branch"),
+                            "format": plan.get("format") or brief.get("format")})
     if not dialogue:
         # S1.4: explainers, documentaries, process and product videos have ONE narrator voice:
         # the on-screen creator if there is one, otherwise the narrator.
@@ -904,45 +903,21 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                     raise
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Storyboard fix skipped: %s", exc)
-        elif settings.viral_review:
+        elif settings.viral_review:   # base mode (re-edit of an uploaded video) only
             try:
-                review_prompt = (creative.branch_review_prompt(
-                    plan, product, settings.viral_min_score, prompt_brief) if branch else
-                    creative.review_prompt(plan, product, settings.viral_min_score))
-                review = _ask_json(client, settings, review_prompt, temperature=0.3,
-                                   max_tokens=7000 if branch else 2400)
+                review = _ask_json(client, settings,
+                                   creative.review_prompt(plan, product, settings.viral_min_score),
+                                   temperature=0.3, max_tokens=2400)
                 score = float(review.get("score")) if review.get("score") is not None else None
                 if review.get("revised") and (score is None or score < settings.viral_min_score):
-                    revised = review["revised"]
-                    if branch:
-                        revised = {**revised, "creation_branch": branch, "storyboard_version": 1}
-                    plan = creative.normalise_plan(revised, mode, segments, n_clips)
+                    plan = creative.normalise_plan(review["revised"], mode, segments, n_clips)
                     plan["revised_after_review"] = review.get("issues") or True
                     try:  # score the rewrite so the UI shows the final script's score
-                        again_prompt = (creative.branch_review_prompt(plan, product, 0, prompt_brief)
-                                        if branch else creative.review_prompt(plan, product, 0))
-                        again = _ask_json(client, settings, again_prompt, temperature=0.2,
-                                          max_tokens=1500)
+                        again = _ask_json(client, settings, creative.review_prompt(plan, product, 0),
+                                          temperature=0.2, max_tokens=1500)
                         score = float(again.get("score", score))
                     except Exception:  # noqa: BLE001
                         pass
-                hits = creative.meta_word_lines(plan) if branch else []
-                if hits:  # sounds like a report: one forced rewrite of the spoken lines
-                    fix_prompt = creative.branch_review_prompt(plan, product, 10, prompt_brief) + (
-                        "\nBẮT BUỘC viết lại (revised): các câu sau nghe như báo cáo, cấm từ hệ thống "
-                        + json.dumps(list(creative.META_WORDS), ensure_ascii=False)
-                        + "; lời rào đón (" + json.dumps(list(creative.HEDGE_WORDS), ensure_ascii=False)
-                        + ") tối đa MỘT câu cả video; thay bằng tình huống dùng và cách dùng: "
-                        + json.dumps(hits[:8], ensure_ascii=False))
-                    fixed = _ask_json(client, settings, fix_prompt, temperature=0.4, max_tokens=7000)
-                    if isinstance(fixed.get("revised"), dict):
-                        candidate = creative.normalise_plan(
-                            {**fixed["revised"], "creation_branch": branch,
-                             "storyboard_version": plan.get("storyboard_version", 2)},
-                            mode, segments, n_clips)
-                        if len(creative.meta_word_lines(candidate)) < len(hits):
-                            plan = candidate
-                            plan["revised_after_review"] = ["lời như báo cáo"]
             except AIClientError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -1299,7 +1274,11 @@ def _quality_gate(settings, job_id: str, manifest: dict, status: str) -> str | N
     if decision == "FIX":
         brief["qa_fix_attempts"] = int(brief.get("qa_fix_attempts") or 0) + 1
         update_job(settings.database_path, job_id, brief_json=json.dumps(brief, ensure_ascii=False))
-        made = gen_engine.regenerate_scenes(settings, job_id, scenes)
+        timeline = json.loads((job or {}).get("script_json") or "{}")
+        reuse = {i: int(sc["reuse_of"]) for i, sc in enumerate(timeline.get("scenes") or [])
+                 if isinstance(sc, dict) and isinstance(sc.get("reuse_of"), int)}
+        made = gen_engine.regenerate_scenes(settings, job_id, scenes,
+                                            issues=(qa.get("visual") or {}).get("issues"), reuse_of=reuse)
         if made:
             log.info("quality gate: regenerating %s scene(s) of %s", made, job_id)
             update_job(settings.database_path, job_id, last_error="QA: " + reason)

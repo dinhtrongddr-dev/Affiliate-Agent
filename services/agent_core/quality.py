@@ -164,8 +164,10 @@ def check_generated_clip(settings, path) -> dict:
 # ---------------------------------------------------------------------------
 
 # Target lengths per branch (seconds). Outside these a video cannot be "priority publish".
-DURATION_TARGETS = {"viral_creator": (15.0, 30.0), "product_review": (20.0, 40.0),
-                    "template_series": (20.0, 35.0), "": (12.0, 45.0)}
+# One source: creation_branches.DURATION_TARGETS; "" covers videos without a branch.
+from .creation_branches import DURATION_TARGETS as _BRANCH_TARGETS  # noqa: E402
+
+DURATION_TARGETS = {**_BRANCH_TARGETS, "": (12.0, 45.0)}
 
 
 def evaluate_creative_quality(timeline: dict, content: dict | None = None,
@@ -458,7 +460,7 @@ def inspect_rendered_video(video_path: Path, settings, timeline: dict | None = N
             ass_content = subtitles_path.read_text(encoding="utf-8-sig", errors="replace")
             sub_events = re.findall(r"Dialogue:\s*1,([^,]+),([^,]+),Sub", ass_content)
             hook_events = re.findall(r"Dialogue:\s*3,([^,]+),([^,]+),Hook", ass_content)
-            cta_events = re.findall(r"Dialogue:\s*4,([^,]+),([^,]+),CTA", ass_content)
+            cta_events = re.findall(r"Dialogue:\s*4,([^,]+),([^,]+),(?:CTA|Sticker)", ass_content)
 
             subtitle_metrics.update(
                 total_subtitles=len(sub_events),
