@@ -194,7 +194,7 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
     )
     if keep_audio:
         graph += (f";[0:a]aresample=44100,aformat=channel_layouts=stereo,"
-                  f"volume={settings.source_audio_volume},apad,"
+                  f"volume={1.0 if scene.get('native_voice') else settings.source_audio_volume},apad,"
                   f"atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[a]")
         audio_map = ["-map", "[a]"]
     else:
@@ -538,8 +538,10 @@ def _voice_led_edit(settings, scenes, cast, work_dir) -> dict:
     for i, scene in enumerate(scenes):
         clip_window = None
         alone = len(member_of.get(i, [i])) == 1 and not scene.get("chain_in") and not scene.get("chain_out")
-        if scene.get("generated") and scene.get("talking") and alone and src_len(scene["source"]):
-            found = speech_windows(ffmpeg, Path(scene["source"]), 0.0, src_len(scene["source"]))
+        native = scene.get("native_voice")
+        if scene.get("generated") and scene.get("talking") and (alone or native) and src_len(scene["source"]):
+            found = ([(float(native["start"]), float(native["end"]))] if native else
+                     speech_windows(ffmpeg, Path(scene["source"]), 0.0, src_len(scene["source"])))
             if found and found[0][0] > 0.4:
                 scene["start"] = round(found[0][0] - edit_plan.LEAD, 3)
             scene["fixed_start"] = True

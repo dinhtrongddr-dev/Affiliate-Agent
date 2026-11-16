@@ -195,6 +195,18 @@ def scene_voice(settings, scene: dict, cast: dict, work_dir: Path, index: int,
     result = SceneVoice()
     if not lines:
         return result
+    native = scene.get("native_voice")
+    if native and clip_window:
+        # Muse already said this line in the clip (checked by speech_check): no TTS; the
+        # subtitles follow the speech the check found. The clip's own audio is kept by render.
+        _clip, start, _length = clip_window
+        begin = max(0.0, float(native["start"]) - start)
+        dur = max(0.3, float(native["end"]) - float(native["start"]))
+        text = " ".join(ln["text"] for ln in lines)
+        result.parts.append(VoicePart(None, round(begin, 3), round(dur, 3),
+                                      evenly_timed_words(text, 0.0, dur), lines[0].get("speaker") or "narrator"))
+        result.revoice = "native"
+        return result
     ffmpeg = getattr(settings, "ffmpeg_path", "ffmpeg")
     raw: list[tuple[dict, Speech, float]] = []
     from .lexicon import load, spoken

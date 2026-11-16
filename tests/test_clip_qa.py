@@ -102,3 +102,30 @@ def test_review_sticker_and_ai_tag_are_decor_layers(tmp_path):
     assert ",Sticker,,0,0,0,," in text and "Nội dung AI" in text
     assert "link mình để dưới" not in text            # the sticker replaces the CTA subtitle line
     assert qa_video.text_layers(ass) == 2              # HookLite + Sub; decor is not counted
+
+
+def test_series_take_that_says_the_wrong_words_is_remade(tmp_path, monkeypatch):
+    from agent_core.editor import speech_check
+    s = _settings(tmp_path)
+    s.clip_qa = False
+    s.series_speech_max_wer = 0.3
+    db.init_db(s.database_path)
+    engine.ensure_schema(s.database_path)
+    clip = _clip(tmp_path / "c.mp4")
+    prompt = 'Spoken line (Vietnamese): "Mẹ ơi sao mặt trăng đi theo con"\nSuri says exactly this line once.'
+    tid = engine._insert(s.database_path, job_id="j", scene_index=2, kind="video", provider="muse2api",
+                         prompt=prompt, refs=[], duration=10)
+    monkeypatch.setattr(speech_check, "check_line", lambda *a, **k: {
+        "heard": "chào các bạn hôm nay", "wer": 1.0, "extra_words": 0, "speech_start": 1.0, "speech_end": 2.0})
+    engine._clip_review(s, {**engine.get_task(s.database_path, tid), "result_path": str(clip)})
+    rows = {r["attempt"]: r for r in engine.list_tasks(s.database_path, "j")}
+    assert rows[1]["status"] == "FAILED" and "sai kịch bản" in rows[1]["error"]
+    assert 'must say exactly "Mẹ ơi sao mặt trăng đi theo con"' in rows[2]["prompt"]
+    # the remake says it right: kept, and its speech window is what the render will use
+    monkeypatch.setattr(speech_check, "check_line", lambda *a, **k: {
+        "heard": "mẹ ơi sao mặt trăng đi theo con", "wer": 0.0, "extra_words": 0,
+        "speech_start": 2.1, "speech_end": 4.3})
+    monkeypatch.setattr(engine, "_add_to_clip_library", lambda *a: None)
+    engine._clip_review(s, {**rows[2], "result_path": str(clip)})
+    speech = engine.speech_results(s.database_path, "j")
+    assert speech[2]["ok"] is True and speech[2]["speech_start"] == 2.1

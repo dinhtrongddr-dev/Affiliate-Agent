@@ -10,9 +10,25 @@ Package: `services/agent_core/videogen/`. Page: **🎞 Video AI** (`/generation`
 2. `engine.plan_job` creates one row per clip in `gen_tasks`. When the script defines a character, it first adds a **character reference image** row; every clip then gets that image plus the product photo as references.
 3. The worker advances active rows about every 20 s (`engine.poll`). Rendering does not block the worker, and the job waits in `WAITING_FOR_GENERATION`.
 4. A downloaded clip must pass QC: it has a video stream, lasts at least 1.5 s, is not mostly black and is not frozen.
-   - A failed or rejected clip is retried once.
-   - If the retry also fails, that scene falls back to the user's clips, then stock footage, then the product image.
-5. When no clip is still pending, the job switches to `GENERATION_DONE` and the `render_generated` task builds the timeline with the AI clips. The render then works as before (voice, subtitles, music, transitions, loudness). Muse audio is muted.
+   - A failed or rejected clip is retried (up to 3 takes).
+   - If every take fails, that scene falls back to the user's clips, then stock footage, then the product image.
+   - **Clip QA** (`AA_CLIP_QA`, on by default): an AI vision pass checks 7 points on three frames of each clip:
+     - the action matches the prompt
+     - the character matches the reference photo
+     - hands and faces are not deformed
+     - no junk text or logos
+     - the clip fills the 9:16 frame
+     - there is real motion
+     - the style is right
+
+     It runs off the poll thread while the clip is `CHECKING`. A clip that fails is remade, and the findings are added to its prompt ("Fix from the previous take: ...").
+   - **Series line check** (dialogue series with `AA_SERIES_NATIVE_VOICE`): the take's speech is transcribed (PhoWhisper-small via faster-whisper, CPU) and compared with the scripted line. A take is remade with "must say exactly ..." when either is true:
+     - more than 30% of the words are wrong (`AA_SERIES_SPEECH_MAX_WER`);
+     - more than two extra words are spoken.
+5. When no clip is still pending, the job switches to `GENERATION_DONE` and the `render_generated` task builds the timeline with the AI clips. The render then works as before (voice, subtitles, music, transitions, loudness).
+   - A Muse clip's own sound is never mixed under the voice-over.
+   - Exception: in a dialogue series, a take that passed the line check keeps Muse's own voice at full volume, and its subtitles follow the detected speech.
+   - If a line never passes in 3 takes, it is voiced by VieNeu (`AA_SERIES_VIENEU_FALLBACK`).
 6. Each clip that passes QC is also added to the job's **Clip & hình** library, tagged AI.
 
 ## Restart safety and no duplicates
@@ -40,6 +56,12 @@ The muse2api gateway is **bundled in the app** (`services/muse_gateway`, MIT, se
 - On first start the app creates the gateway's API key and stores it in `.env`.
 - The gateway runs its own headless Chrome profile in `state/muse2api/profiles`.
 - The gateway keeps its account file, tasks and media in `state/muse2api`, which is git-ignored. That account file holds the session in plain text.
+- The embedded gateway makes one clip at a time (`MUSE2API_CONCURRENCY=1`). A clip takes about 2 minutes, measured on 2026-11-16.
+- `tasks.json` is written on status changes or at most every 5 s. Finished tasks older than 7 days are dropped, and at most 300 tasks are kept.
+- Local patches to the bundled gateway (marked "Patched (AffiliateAgent)"):
+  - `POST /v1/videos` accepts `thread_url` (continue an existing Muse chat), `account_id` (stay on one account) and `wrapper: "minimal"` (send the caller's prompt without the upstream "ignore earlier history" wrapper).
+  - The result carries the chat's `thread_url`.
+  - When continuing a chat, only attachments that appear after the ones already in that chat count as the result.
 - In **Video AI → Profile · proxy · tài khoản Muse**, each profile shows the `hatch_sess` expiry and remaining time, the last Muse session check, and proxy connectivity/exit IP. **Test phiên Muse** opens the saved session through that profile's proxy; **Test proxy** checks its exit and Muse HTTP session. Neither generates content. Expired or rejected cookies appear red with a cookie update form. Replacing cookies preserves the profile's proxy credentials, clears old check results and synchronizes the new session. Network failures alone do not mark cookies dead; unknown expiry is shown explicitly.
 
 Steps:

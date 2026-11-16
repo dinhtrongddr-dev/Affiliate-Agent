@@ -506,6 +506,11 @@ class VideoRequest(BaseModel):
     files: list | None = None
     image_url: Any = None
     reference_image: str | None = None
+    # Patched (AffiliateAgent): series episodes continue one Muse chat on one account, and a
+    # "minimal" wrapper sends the caller's prompt without the "ignore history" instruction.
+    thread_url: str | None = None
+    account_id: str | None = None
+    wrapper: str | None = None
 
 
 class ChatMessage(BaseModel):
@@ -969,6 +974,11 @@ def parse_tool_calls(text: str) -> tuple[list[dict] | None, str]:
 
 def build_video_prompt(r: VideoRequest, kinds: list[str] | None = None) -> str:
     user_prompt = r.prompt.strip()
+    if getattr(r, "wrapper", None) == "minimal" or getattr(r, "thread_url", None):
+        dur = r.duration or 6
+        refs = _video_references(r)
+        note = (" Use the attached files exactly as the text describes; only these attachments." if refs else "")
+        return f"Create one vertical 9:16 video (720x1280, full-screen portrait), {dur} seconds.{note} {user_prompt}"
     ar = (r.aspect_ratio or "").strip().lower()
     sz = (r.size or "").strip().lower()
     dur = r.duration or 6
@@ -1124,7 +1134,7 @@ def _run_generation(prompt: str, kind: str, timeout: int,
                     account_id: str | None = None, on_progress=None,
                     reference_image: str | None = None,
                     reference_images: list[str] | None = None,
-                    on_acquired=None) -> tuple[dict, str | None]:
+                    on_acquired=None, thread_url: str | None = None) -> tuple[dict, str | None]:
     # Browser ownership covers account selection, retry and cleanup, not just generate().
     deadline = time.monotonic() + max(1, timeout)
     if not GEN_LOCK.acquire(timeout=max(1, timeout)):
@@ -1137,7 +1147,7 @@ def _run_generation(prompt: str, kind: str, timeout: int,
                 pass
         return _run_generation_locked(prompt, kind, timeout, account_id,
                                       on_progress, reference_image, reference_images,
-                                      deadline=deadline)
+                                      deadline=deadline, thread_url=thread_url)
     finally:
         GEN_LOCK.release()
 
@@ -1146,11 +1156,11 @@ def _run_generation_locked(prompt: str, kind: str, timeout: int,
                     account_id: str | None = None, on_progress=None,
                     reference_image: str | None = None,
                     reference_images: list[str] | None = None,
-                    deadline=None) -> tuple[dict, str | None]:
+                    deadline=None, thread_url: str | None = None) -> tuple[dict, str | None]:
     remaining_wait = int(deadline - time.monotonic()) if deadline is not None else timeout
     acc = ACCOUNT_POOL.acquire(account_id=account_id,
                                preferred_id=None,
-                               rotate=True,
+                               rotate=not account_id,
                                timeout=max(1, remaining_wait))
     cur_acc = acc
     last_exc = None
@@ -1159,7 +1169,8 @@ def _run_generation_locked(prompt: str, kind: str, timeout: int,
             if deadline is not None and time.monotonic() >= deadline:
                 raise MuseGenerationError("任务总等待时限已到，停止重试")
             if attempt > 0:
-                if isinstance(last_exc, MuseModelRefusalError):
+                # a fixed account / existing chat must not move to another account
+                if isinstance(last_exc, MuseModelRefusalError) or thread_url or account_id:
                     break
                 old_id = cur_acc["id"] if cur_acc else None
                 if old_id:
@@ -1193,7 +1204,8 @@ def _run_generation_locked(prompt: str, kind: str, timeout: int,
                 res = engine.generate(cur_acc["cookies"], prompt, expect=kind,
                                       timeout=remaining, expires=cur_acc.get("cookies_exp"),
                                       account_id=cur_acc["id"], on_progress=on_progress,
-                                      reference_image=reference_image, **engine_kwargs)
+                                      reference_image=reference_image, thread_url=thread_url,
+                                      **engine_kwargs)
                 store.mark(cur_acc["id"], True, "")
                 _sync_cookies(cur_acc["id"])
                 return res, cur_acc["id"]
@@ -1499,9 +1511,11 @@ async def create_video(req: VideoRequest, _=Depends(auth)):
             def prog_cb(p):
                 store.update_task(task["id"], progress=p)
             res, acc_id = _run_generation(prompt, "video", timeout, on_progress=prog_cb,
-                                          reference_images=ref_images, on_acquired=_on_acquired)
+                                          reference_images=ref_images, on_acquired=_on_acquired,
+                                          account_id=req.account_id, thread_url=req.thread_url)
             vurl = media_url(res["filename"])
             store.update_task(task["id"], status="completed", progress=100, account=acc_id,
+                              thread_url=res.get("thread_url"),
                               elapsed=round(time.time() - timing["t0"], 1),
                               url=vurl,
                               video={"url": vurl},

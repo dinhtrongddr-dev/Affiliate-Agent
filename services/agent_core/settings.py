@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     visual_qa: bool = True                    # one AI vision pass over the rendered frames
     qa_autofix: bool = True                   # quality gate regenerates flagged scenes once
     clip_qa: bool = True                      # 7-point AI check of each Muse clip; failures are remade
+    series_native_voice: bool = True          # dialogue series: keep Muse's own Vietnamese speech when it says the line
+    series_vieneu_fallback: bool = True       # a line Muse never says right (3 takes) is voiced by VieNeu
+    series_speech_max_wer: float = 0.3        # words wrong / words in the line a take may have
+    series_voice_min_sim: float = 0.0         # min speaker similarity to the character voice sample (0 = off)
     cn_trends_enabled: bool = True            # China hot lists (public, no login)
     cn_trend_sources: str = ""                # empty = every supported source
     cn_auto_ideas: int = 3                    # topics per run that get ideas automatically

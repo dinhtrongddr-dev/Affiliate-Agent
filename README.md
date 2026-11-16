@@ -11,11 +11,16 @@ Local-first app that turns videos into affiliate shorts for Shopee Video, Facebo
 
 ## Start
 
+Use the **Affiliate Agent** desktop shortcut. It starts the app in the tray and opens the app in its own window (Edge WebView2 via pywebview, `agent_core.desktop`), not a Chrome tab. A second click brings that window to the front. Closing the window leaves the app running in the tray. Without pywebview or WebView2, the app opens in the default browser.
+
+For troubleshooting with a console:
+
 ```bash
 scripts\start-app.cmd
 ```
 
-This opens http://127.0.0.1:8765. The UI runs the background worker and the inbox watcher in the same process.
+This serves http://127.0.0.1:8765. The UI runs the background worker and the inbox watcher in the same process.
+Pages update through small JSON polls that pause while the window is hidden. Each job shows a timeline with steps, overall %, and elapsed and remaining time.
 Without the UI, run `scripts\start-media-watcher.cmd` (worker only).
 
 First-time setup is done in the **Cài đặt** page:

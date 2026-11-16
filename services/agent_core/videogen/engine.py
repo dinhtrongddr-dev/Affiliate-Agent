@@ -11,6 +11,7 @@ States: PENDING -> SUBMITTING -> SUBMITTED -> DOWNLOADED (QC passed) | FAILED | 
 """
 import hashlib
 import json
+import re
 import threading
 import logging
 from datetime import datetime, timedelta, timezone
@@ -601,7 +602,7 @@ def _check(settings, provider, t: dict) -> None:
             )
         except Exception as exc:
             log.debug("extract_continuity_frame failed for %s: %s", t["id"], exc)
-        if getattr(settings, "clip_qa", False) and t["scene_index"] >= 0:
+        if t["scene_index"] >= 0 and (getattr(settings, "clip_qa", False) or spoken_line(t["prompt"])):
             # 7-point AI check runs off the poll thread; the job keeps waiting (CHECKING is active)
             _update(db, t["id"], status="CHECKING", result_path=str(out), qc_json=qc, error=None)
             _start_clip_review(settings, {**t, "result_path": str(out), "qc": qc})
@@ -633,6 +634,39 @@ def _start_clip_review(settings, t: dict) -> None:
     _review_pool.submit(_clip_review, settings, t)
 
 
+MAX_EXTRA_WORDS = 2   # words heard outside the line (a ghost word in room tone is fine, an outro is not)
+SPOKEN_LINE = re.compile(r'Spoken line \(Vietnamese\): "([^"]+)"')
+
+
+def spoken_line(prompt: str) -> str:
+    """The exact line a native-voice series take must say ("" for other clips)."""
+    m = SPOKEN_LINE.search(prompt or "")
+    return m.group(1).strip() if m else ""
+
+
+def _speech_review(settings, t: dict, out: Path) -> dict | None:
+    """Did the take say the scripted line (and in the character's voice)? None = not a talking take."""
+    line = spoken_line(t["prompt"])
+    if not line:
+        return None
+    from ..editor import speech_check as sc
+    ffmpeg = getattr(settings, "ffmpeg_path", "ffmpeg")
+    sample = next((Path(r) for r in t.get("refs") or [] if str(r).lower().endswith((".wav", ".mp3"))
+                   and Path(r).is_file()), None)
+    try:
+        ref = sc.voice_embedding(sample, ffmpeg) if sample else None
+        res = sc.check_line(out, line, ref, ffmpeg)
+    except sc.SpeechCheckUnavailable as exc:
+        return {"line": line, "ok": None, "error": str(exc)}
+    max_wer = float(getattr(settings, "series_speech_max_wer", 0.3))
+    min_sim = float(getattr(settings, "series_voice_min_sim", 0.0) or 0.0)
+    res["line"] = line
+    res["ok"] = (res["wer"] <= max_wer and res.get("extra_words", 0) <= MAX_EXTRA_WORDS
+                 and res.get("speech_start") is not None
+                 and (not min_sim or res.get("voice_sim") is None or res["voice_sim"] >= min_sim))
+    return res
+
+
 def _clip_review(settings, t: dict) -> None:
     db = settings.database_path
     out = Path(t["result_path"])
@@ -640,14 +674,26 @@ def _clip_review(settings, t: dict) -> None:
     try:
         from ..muse_prompt import strip_internal
         from ..qa_video import clip_check
-        refs = [Path(r) for r in t.get("refs") or [] if not str(r).startswith(CHARREF)]
-        verdict = clip_check(settings, out, strip_internal(t["prompt"]), refs)
-        if verdict is not None and not verdict["ok"] and t["attempt"] < MAX_ATTEMPTS:
-            _retry_or_fail(settings, t, "Clip QA: " + "; ".join(verdict["issues"])[:400],
-                           {**qc, "clip_qa": verdict}, fix=verdict["issues"])
+        fixes, notes = [], []
+        verdict = None
+        if getattr(settings, "clip_qa", False):
+            refs = [Path(r) for r in t.get("refs") or [] if not str(r).startswith(CHARREF)]
+            verdict = clip_check(settings, out, strip_internal(t["prompt"]), refs)
+            if verdict is not None and not verdict["ok"]:
+                fixes += verdict["issues"]
+                notes.append("Clip QA: " + "; ".join(verdict["issues"]))
+        speech = _speech_review(settings, t, out)
+        if speech and speech.get("ok") is False:
+            fixes.append(f'The character must say exactly "{speech["line"]}" once; the last take said '
+                         f'"{(speech.get("heard") or "nothing")[:120]}"')
+            notes.append(f"Lời sai kịch bản (WER {speech['wer']:.2f}): nghe được \"{(speech.get('heard') or '')[:80]}\"")
+        report = {**qc, "clip_qa": verdict, "speech": speech}
+        if fixes and t["attempt"] < MAX_ATTEMPTS:
+            _retry_or_fail(settings, t, "; ".join(notes)[:480], report, fix=fixes)
             return
-        # passed, could not run, or out of attempts: keep it (the video QA still looks at it)
-        _update(db, t["id"], status="DOWNLOADED", qc_json={**qc, "clip_qa": verdict}, error=None)
+        # passed, could not run, or out of attempts: keep it (the video QA still looks at it;
+        # a series line that never matched is voiced by VieNeu at render time)
+        _update(db, t["id"], status="DOWNLOADED", qc_json=report, error=None)
         _add_to_clip_library(settings, t, out)
     except Exception as exc:  # noqa: BLE001
         log.warning("clip review failed for %s: %s", t["id"], exc)
@@ -655,6 +701,15 @@ def _clip_review(settings, t: dict) -> None:
     finally:
         with _review_lock:
             _reviewing.discard(t["id"])
+
+
+def speech_results(db_path, job_id: str) -> dict[int, dict]:
+    """scene index -> speech check of the clip that will be used (latest downloaded attempt)."""
+    out: dict[int, dict] = {}
+    for t in sorted(list_tasks(db_path, job_id, 500), key=lambda t: t["attempt"]):
+        if t["kind"] == "video" and t["status"] == "DOWNLOADED" and isinstance(t.get("qc"), dict)                 and isinstance(t["qc"].get("speech"), dict):
+            out[t["scene_index"]] = t["qc"]["speech"]
+    return out
 
 
 def _add_to_clip_library(settings, t: dict, path: Path) -> None:

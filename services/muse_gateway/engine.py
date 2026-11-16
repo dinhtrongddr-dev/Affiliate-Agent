@@ -701,6 +701,34 @@ class MuseEngine:
             time.sleep(0.1)
         return False
 
+    def _open_thread(self, thread_url: str) -> None:
+        """Patched (AffiliateAgent): open an earlier Muse chat and wait until it can take a turn."""
+        if not re.fullmatch(r"https://muse\.ai/thread/[A-Za-z0-9_-]+", thread_url or ""):
+            raise MuseGenerationError("thread_url không hợp lệ")
+        self.page.send("Page.navigate", {"url": thread_url})
+        t_end = time.time() + 20.0
+        while time.time() < t_end:
+            time.sleep(0.25)
+            ready = self.page.js("""(function(){
+                return document.readyState === 'complete' && !!document.querySelector('textarea')
+                    && !document.querySelector('[data-testid="hatch-composer-stop-button"]');
+            })()""")
+            if ready:
+                break
+        else:
+            raise MuseGenerationError("Không mở được thread Muse cũ (hết thời gian chờ)")
+        # Earlier videos mount lazily after a reload; wait until their count stops changing so
+        # they are all in the baseline (else an old clip is taken as the new result).
+        last, stable_since, t_end = -1, time.time(), time.time() + 20.0
+        while time.time() < t_end:
+            self._scroll_bottom()
+            n = len(self.attachments())
+            if n != last:
+                last, stable_since = n, time.time()
+            elif time.time() - stable_since >= 3.0:
+                break
+            time.sleep(0.5)
+
     def reset_thread(self, for_chat: bool = False):
         """关闭残留弹窗并确保处于干净会话且 WebSocket 已就绪。
         对于纯文本对话（for_chat=True），若当前热页面无附件、无卡死且气泡数较少，直接复用现有热连接以实现 2s 级秒回。"""
@@ -1207,6 +1235,9 @@ class MuseEngine:
             full_scan = loops % 4 == 1
             self._scroll_bottom()
             atts = self.attachments()
+            if getattr(self, "_thread_mode", False):
+                # continuing an old chat: only attachments after the ones already there are new
+                atts = atts[base_att_cnt:]
             # 严格按期望类型挑选附件，绝不接受跨模态兜底（如将视频请求降级为图片封面）
             matching_atts = []
             for a in atts:
@@ -1855,18 +1886,31 @@ class MuseEngine:
                  timeout: int = 240, expires: dict | None = None, account_id: str | None = None,
                  on_progress=None, reference_image: str | None = None,
                  reference_images: list[str] | None = None,
-                 stop_event=None) -> dict:
+                 stop_event=None, thread_url: str | None = None) -> dict:
         deadline = time.monotonic() + timeout
         self.ensure_page(cookies, expires, account_id=account_id)
-        self.reset_thread(for_chat=False)
+        self._thread_mode = bool(thread_url)
+        if thread_url:
+            # Patched (AffiliateAgent): continue an existing Muse chat (series episodes) instead
+            # of /thread/new, so earlier turns stay in the conversation.
+            self._open_thread(thread_url)
+        else:
+            self.reset_thread(for_chat=False)
         self._scroll_bottom()
         refs = list(reference_images or ([] if not reference_image else [reference_image]))
         upload = self._attach_images(refs) if refs else None
         if not refs:
             self._clear_attachments()
         try:
-            return self._generate_attached(prompt, expect, deadline, on_progress,
-                                           stop_event, (upload or {}).get("hashes") or set())
+            res = self._generate_attached(prompt, expect, deadline, on_progress,
+                                          stop_event, (upload or {}).get("hashes") or set())
+            try:
+                href = self.page.js("location.href") or ""
+                if re.fullmatch(r"https://muse\.ai/thread/[A-Za-z0-9_-]+", href):
+                    res["thread_url"] = href
+            except Exception:  # noqa: BLE001
+                pass
+            return res
         finally:
             if upload:
                 shutil.rmtree(upload["dir"], ignore_errors=True)

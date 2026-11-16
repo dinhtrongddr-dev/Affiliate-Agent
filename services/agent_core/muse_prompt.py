@@ -50,6 +50,25 @@ def _person(c: dict) -> str:
     return _clip(f"{c.get('name') or c['id']}" + (f" ({head})" if head else "") + (f": {look}" if look else ""), 230)
 
 
+def voice_description(c: dict) -> str:
+    """The same words for one character in every clip and episode, so Muse keeps one voice."""
+    if c.get("voice_description"):
+        return _clip(c["voice_description"], 160)
+    try:
+        age = int(str(c.get("age") or "").strip().split()[0])
+    except (ValueError, IndexError):
+        age = 30
+    female = str(c.get("gender") or "").lower().startswith(("f", "nữ", "nu"))
+    if age <= 12:
+        who = f"a {age}-year-old Vietnamese {'girl' if female else 'boy'}, high bright child voice"
+    elif age >= 60:
+        who = f"an elderly Vietnamese {'woman' if female else 'man'}, slow warm voice"
+    else:
+        who = (f"a Vietnamese woman about {age}, soft warm voice" if female
+               else f"a Vietnamese man about {age}, warm medium-low voice")
+    return who
+
+
 def compile_shot(scene: dict, plan: dict, references: list[dict] | None = None,
                  duration: int = 10, override_style: str | None = None) -> str:
     references = references or []
@@ -97,7 +116,16 @@ def compile_shot(scene: dict, plan: dict, references: list[dict] | None = None,
     lines = [ln for ln in scene.get("lines") or [] if ln.get("text")]
     names = {c["id"]: c.get("name") or c["id"] for c in cast}
     on_camera = [ln for ln in lines if ln.get("speaker") in names]
-    if scene.get("talking") and on_camera and plan.get("dialogue"):
+    if scene.get("talking") and on_camera and plan.get("dialogue") and plan.get("native_voice"):
+        # dialogue series with Muse's own voice: the exact line goes FIRST, one speaker, said once;
+        # the clip is then checked (speech_check) and remade until it says the words.
+        ln = on_camera[0]
+        who = next(c for c in cast if c["id"] == ln["speaker"])
+        parts.insert(0, f'Spoken line (Vietnamese): "{_clip(ln["text"], 120)}"\n'
+                        f"{names[ln['speaker']]} says exactly this line once, word for word, in clear natural "
+                        "Vietnamese, then stops talking. Nobody else speaks. No other words, no narration, "
+                        f"no background music. Voice: {voice_description(who)}. Natural lip-sync for the line.")
+    elif scene.get("talking") and on_camera and plan.get("dialogue"):
         # dialogue series: the characters face each other; the voice is dubbed later (VieNeu),
         # so only a short, clear mouth movement for exactly this line is wanted
         said = "; ".join(f'{names[ln["speaker"]]} says: "{_clip(ln["text"], 90)}"' for ln in on_camera[:2])

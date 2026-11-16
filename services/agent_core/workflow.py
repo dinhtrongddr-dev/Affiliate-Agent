@@ -651,7 +651,7 @@ def _viewer_test(client, settings, plan: dict) -> dict:
             "unclear_lines": [str(x)[:160] for x in (raw.get("unclear_lines") or [])[:5]], "flow": flow}
 
 
-def _brief_plan_fields(brief: dict) -> dict:
+def _brief_plan_fields(brief: dict, settings=None) -> dict:
     """Content Director choices that travel from the brief into the storyboard and QA."""
     out = {k: brief[k] for k in ("format", "niche", "goal", "duration_range") if brief.get(k)}
     if brief.get("fixed_characters"):
@@ -662,8 +662,10 @@ def _brief_plan_fields(brief: dict) -> dict:
     if brief.get("fixed_music_mood"):
         out["music_mood"] = brief["fixed_music_mood"]
     from .creation_branches import is_dialogue
-    if is_dialogue(brief):   # series written as character dialogue (VieNeu voice per character)
+    if is_dialogue(brief):   # series written as character dialogue
         out["dialogue"] = True
+        if getattr(settings, "series_native_voice", False):
+            out["native_voice"] = True   # Muse speaks the lines itself; each take is checked
     source = brief.get("trend_source") or {}
     texts = [source.get("title_vi"), source.get("summary_vi"), source.get("title_zh")]
     if any(texts):
@@ -848,7 +850,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                             [Path(r["path"]) for r in references] or None,
                             temperature=0.7, max_tokens=5000)
             plan = creative.normalise_plan({**raw, "creation_branch": branch,
-                                            "storyboard_version": 1, **_brief_plan_fields(brief)},
+                                            "storyboard_version": 1, **_brief_plan_fields(brief, settings)},
                                            "trend", None, n_clips)
             if brief.get("no_hook"):          # part 2+ of a long video: no new opening hook
                 plan["hook"], plan["hook_variants"] = "", []
@@ -889,7 +891,7 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
                         candidate = creative.normalise_plan(
                             {**fixed["revised"], "creation_branch": branch,
                              "storyboard_version": plan.get("storyboard_version", 2),
-                             **_brief_plan_fields(brief)},
+                             **_brief_plan_fields(brief, settings)},
                             mode, segments, n_clips)
                         creative.fix_visual_sources(candidate, bool(settings.pexels_api_key.get_secret_value()),
                                                     bool(gen_limit), bool(product_img))
@@ -1221,6 +1223,16 @@ def build_timeline(settings, job: dict, plan: dict, product_img: Path | None,
             item.update(kind=kind, source=str(path), start=0.0, visual=visual,
                         generated=kind == "video" and visual == "generate")
         scenes.append(item)
+    if plan.get("native_voice"):
+        # Series dialogue: a take that said its scripted line keeps Muse's own voice; one that never
+        # did gets VieNeu (fallback on) or keeps Muse's take as it is (fallback off).
+        speech = gen_engine.speech_results(settings.database_path, job["id"])
+        fallback = getattr(settings, "series_vieneu_fallback", True)
+        for sc in scenes:
+            check = speech.get(sc.get("beat")) if sc.get("generated") else None
+            if check and check.get("speech_start") is not None and (check.get("ok") or not fallback):
+                sc["native_voice"] = {"start": check["speech_start"], "end": check["speech_end"],
+                                      "wer": check.get("wer")}
     if strict:   # which takes continue from the previous take's last frame (S3)
         links = gen_engine.chain_map(plan["scenes"], settings)
         by_beat = {sc.get("beat"): sc for sc in scenes}

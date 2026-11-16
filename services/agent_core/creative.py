@@ -273,6 +273,8 @@ def normalise_plan(plan: dict, mode: str, segments: list[dict] | None = None,
             result[key] = _text(plan[key], 40)
     if plan.get("dialogue"):
         result["dialogue"] = True
+        if plan.get("native_voice"):
+            result["native_voice"] = True
     if isinstance(plan.get("duration_range"), (list, tuple)) and len(plan["duration_range"]) == 2:
         result["duration_range"] = [float(plan["duration_range"][0]), float(plan["duration_range"][1])]
     if isinstance(plan.get("source_texts"), list):
