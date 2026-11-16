@@ -108,7 +108,14 @@ Clear-GitLock
 
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
 $f = Invoke-Git @('fetch', '--quiet', 'origin', $branch)
-if ($f.Code -ne 0 -and $f.Out -match '\.lock') { Clear-GitLock; $f = Invoke-Git @('fetch', '--quiet', 'origin', $branch) }
+# A ref that is briefly locked (antivirus scan, another git) fails with ".lock" or
+# "couldn't set 'refs/remotes/...'": clear stale locks and retry a few times.
+for ($try = 1; $try -le 3 -and $f.Code -ne 0 -and $f.Out -match "\.lock|couldn't set|cannot lock ref"; $try++) {
+    Write-Host "Git dang ban, thu lai lan $try..." -ForegroundColor Yellow
+    Start-Sleep 3
+    Clear-GitLock
+    $f = Invoke-Git @('fetch', '--quiet', 'origin', $branch)
+}
 if ($f.Code -ne 0) {
     Write-Host $f.Out.Trim() -ForegroundColor Red
     throw 'Khong tai duoc ban moi tu GitHub (xem dong loi phia tren). Kiem tra mang roi chay lai.'
