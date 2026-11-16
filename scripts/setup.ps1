@@ -160,6 +160,12 @@ $env:PYTHONPATH = Join-Path $Root 'services'
 & $venvPy -c "import fastapi, uvicorn, httpx, watchdog, rapidfuzz, pydantic_settings, playwright, jinja2, soundfile, vieneu, requests, websocket, pystray, PIL; import agent_core.web.app, agent_core.tray; print('import OK')"
 if ($LASTEXITCODE -ne 0) { throw 'Thu vien chua dung: xem loi o tren.' }
 $ok.Add('Thu vien Python: OK')
+# App window (pywebview on Edge WebView2). Not fatal: without it the app opens in the browser.
+& $venvPy -c "import webview" 2>$null
+$wv2 = (Test-Path 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') -or
+       (Test-Path 'HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}')
+if ($LASTEXITCODE -eq 0 -and $wv2) { $ok.Add('Cua so app (WebView2): OK') }
+else { Write-Host 'Chua co WebView2 Runtime: app se mo bang trinh duyet. Cai tai https://go.microsoft.com/fwlink/p/?LinkId=2124703' -ForegroundColor Yellow }
 
 # Playwright browser (Shopee Creator login)
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $Root 'cache\playwright'   # same place start-app.cmd uses

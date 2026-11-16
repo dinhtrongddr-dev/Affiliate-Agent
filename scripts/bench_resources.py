@@ -37,7 +37,7 @@ def role(name: str, cmd: str) -> str | None:
     if name == "chrome.exe":
         return "muse_chrome" if "muse2api" in cmd else "user_chrome"
     if name == "msedgewebview2.exe":
-        return "webview2"
+        return "app_window_webview2" if "cache\\webview" in cmd else "webview2_other"
     if name == "ffmpeg.exe":
         return "ffmpeg"
     return None

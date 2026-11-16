@@ -1,10 +1,11 @@
 """Run Affiliate Agent in the background with an icon in the Windows tray (no console window).
 
 Started by the Desktop shortcut with pythonw.exe:  pythonw -m agent_core.tray  (cwd = services)
-- starts the app (web UI + worker) as a hidden child process and opens the browser when ready;
+- starts the app (web UI + worker) as a hidden child process and opens its window when ready
+  (agent_core.desktop: own WebView2 window, not a Chrome tab; browser only as a fallback);
 - tray menu: open the app, video folder, log, restart, quit;
 - if the app stops by itself, the icon says so (with the log) and offers a restart;
-- a second click on the shortcut only opens the browser (one app at a time).
+- a second click on the shortcut only brings the window to the front (one app at a time).
 scripts\\start-app.cmd still runs the app in a console window, for troubleshooting.
 """
 import os
@@ -41,6 +42,22 @@ def _env() -> dict:
     env.update(PYTHONPATH=str(SERVICES), PYTHONUTF8="1", TEMP=str(tmp), TMP=str(tmp),
                PLAYWRIGHT_BROWSERS_PATH=str(ROOT / "cache" / "playwright"))
     return env
+
+
+def open_window() -> None:
+    """Show the app window: focus the open one, else start agent_core.desktop."""
+    try:
+        from agent_core import desktop
+        if desktop.focus_existing():
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    pythonw = Path(_python()).with_name("pythonw.exe")
+    try:
+        subprocess.Popen([str(pythonw if pythonw.is_file() else _python()), "-m", "agent_core.desktop", URL],
+                         cwd=str(ROOT), env=_env(), creationflags=NO_WINDOW)
+    except OSError:
+        webbrowser.open(URL)
 
 
 def app_running(timeout: float = 2) -> bool:
@@ -127,7 +144,7 @@ class App:
             if app_running(1):
                 self._set_state("Đang chạy")
                 if open_browser:
-                    webbrowser.open(URL)
+                    open_window()
                 return
             time.sleep(0.5)
         self._set_state("Khởi động chậm, xem nhật ký")
@@ -202,7 +219,7 @@ class App:
             print("ChatGPT2API start failed:", exc)
             c2a = chatgpt2api_url(chatgpt2api_dir()) if chatgpt2api_dir() else ""
         items = [
-            pystray.MenuItem("Mở Affiliate Agent", lambda *_: webbrowser.open(URL), default=True),
+            pystray.MenuItem("Mở Affiliate Agent", lambda *_: open_window(), default=True),
             pystray.MenuItem(lambda _: f"Trạng thái: {self.state}", None, enabled=False),
             pystray.Menu.SEPARATOR,
         ]
@@ -238,7 +255,7 @@ def main() -> int:
                 error=True)
         return 1
     if app_running():               # already open (tray or console): just show it
-        webbrowser.open(URL)
+        open_window()
         return 0
     check = subprocess.run([_python(), "-c", "import agent_core.web.app"], cwd=str(ROOT), env=_env(),
                            capture_output=True, text=True, encoding="utf-8", errors="replace",

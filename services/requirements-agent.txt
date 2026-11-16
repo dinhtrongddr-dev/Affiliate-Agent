@@ -11,4 +11,5 @@ vieneu>=3.8
 py-cpuinfo>=9.0
 soundfile>=0.12
 pystray>=0.19
+pywebview>=5.3
 pillow>=10
