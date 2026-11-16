@@ -145,18 +145,23 @@ def create_app(start_worker: bool = True) -> FastAPI:
             state["worker"] = worker
             from .. import version_check
             version_check.start_background(settings.project_root)
-        if settings.tts_enabled:
-            import threading
-            from ..editor.tts import warmup_engine
-            threading.Thread(target=warmup_engine, args=(getattr(settings, "tts_mode", "fast"),),
-                             daemon=True, name="tts-warmup").start()
+        # VieNeu is no longer preloaded here: it loads when a job first needs a voice (while
+        # Muse renders) and unloads after 10 idle minutes (editor/tts.py), keeping the app light.
         yield
         if state["worker"]:
             state["worker"].stop()
 
     app = FastAPI(title="Affiliate Agent", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.ctx = state
-    app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+    class VersionedStatic(StaticFiles):
+        """Files linked with ?v=<build> never change for that build: let the browser keep them."""
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            if b"v=" in (scope.get("query_string") or b"") and response.status_code == 200:
+                response.headers["Cache-Control"] = "public, max-age=604800, immutable"
+            return response
+
+    app.mount("/static", VersionedStatic(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(label=label, platform_labels=PLATFORM_LABELS)
     templates.env.filters["fromjson"] = lambda v: json.loads(v) if v else None
@@ -203,8 +208,21 @@ def create_app(start_worker: bool = True) -> FastAPI:
     from .china import install_routes as install_china_routes
     install_china_routes(app, S, render)
 
+    health_cache: dict = {}
+
     def health() -> list[dict]:
+        """Setup checklist; cached 60 s (and until .env changes) so reloads stay cheap."""
         s = S()
+        env = s.project_root / ".env"
+        key = env.stat().st_mtime if env.exists() else 0
+        hit = health_cache.get("v")
+        if hit and hit[0] == key and time.monotonic() - hit[1] < 60:
+            return hit[2]
+        rows = _health(s)
+        health_cache["v"] = (key, time.monotonic(), rows)
+        return rows
+
+    def _health(s) -> list[dict]:
         aff = ShopeeAffiliateClient(s).credentials_status()["sections"]["shopee_affiliate"]
         music = list_tracks(s.music)
         from .. import version_check
@@ -838,6 +856,17 @@ def create_app(start_worker: bool = True) -> FastAPI:
         return {"id": job_id, "status": job["status"], "label": label(job["status"])[0],
                 "busy": job["status"] in BUSY, "error": job.get("last_error"),
                 "updated_at": job["updated_at"]}
+
+    @app.get("/api/jobs-live")
+    def api_jobs_live(ids: str = ""):
+        """Status of the listed jobs only: what the list pages poll instead of reloading."""
+        rows = db.job_states(S().database_path, [i for i in ids.split(",") if i])
+        return {"jobs": [{"id": r["id"], "status": r["status"], "label": label(r["status"])[0],
+                          "busy": r["status"] in BUSY, "updated_at": r["updated_at"]} for r in rows]}
+
+    @app.get("/api/tasks-live")
+    def api_tasks_live():
+        return {"signature": db.tasks_signature(S().database_path)}
 
     @app.get("/api/version")
     def api_version():

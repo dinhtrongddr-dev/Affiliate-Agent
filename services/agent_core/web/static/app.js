@@ -49,13 +49,72 @@ function setupDrop(el) {
   }
 }
 
-function pollJob(jobId) {
-  const tick = async () => {
-    const r = await fetch("/api/jobs/" + jobId).then(r => r.json()).catch(() => null);
-    if (r && !r.busy && document.body.dataset.busy === "1") location.reload();
-    if (r) document.querySelectorAll("[data-live-status]").forEach(el => (el.textContent = r.label));
+// One poller for every live element. It pauses while the tab/window is hidden, backs off
+// from `min` to `max` while nothing changes, and returns to `min` as soon as something does.
+// `fn` returns true when it saw a change, or "stop" to end polling.
+function livePoll(fn, opts = {}) {
+  const min = opts.min || 4000, max = opts.max || 15000;
+  let delay = min, timer = null, running = false;
+  const run = async () => {
+    timer = null;
+    if (document.hidden) return;           // resumed by visibilitychange
+    running = true;
+    let res = false;
+    try { res = await fn(); } catch (e) { res = false; }
+    running = false;
+    if (res === "stop") return;
+    delay = res ? min : Math.min(max, Math.round(delay * 1.5));
+    timer = setTimeout(run, delay);
   };
-  setInterval(tick, 4000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !timer && !running) { delay = min; run(); }
+  });
+  if (opts.immediate) run(); else timer = setTimeout(run, delay);
+}
+
+async function getJSON(path) {
+  return fetch(path, {cache: "no-store"}).then(r => (r.ok ? r.json() : null)).catch(() => null);
+}
+
+function pollJob(jobId) {
+  let last = null;
+  livePoll(async () => {
+    const r = await getJSON("/api/jobs/" + jobId);
+    if (!r) return false;
+    if (!r.busy && document.body.dataset.busy === "1") { location.reload(); return "stop"; }
+    document.querySelectorAll("[data-live-status]").forEach(el => (el.textContent = r.label));
+    const changed = last !== null && last !== r.updated_at;
+    last = r.updated_at;
+    return changed;
+  });
+}
+
+// List pages: rows marked data-job/data-status. Reload once when a busy row changes state.
+function watchJobRows() {
+  const rows = [...document.querySelectorAll("[data-job][data-busy='1']")];
+  if (!rows.length) return;
+  const ids = rows.map(r => r.dataset.job);
+  livePoll(async () => {
+    const r = await getJSON("/api/jobs-live?ids=" + encodeURIComponent(ids.join(",")));
+    if (!r) return false;
+    const changed = r.jobs.some(j => {
+      const row = document.querySelector(`[data-job="${CSS.escape(j.id)}"]`);
+      return row && row.dataset.status !== j.status;
+    });
+    if (changed) { location.reload(); return "stop"; }
+    return false;
+  }, {min: 5000, max: 20000});
+}
+
+function watchTasks() {
+  let sig = null;
+  livePoll(async () => {
+    const r = await getJSON("/api/tasks-live");
+    if (!r) return false;
+    if (sig !== null && r.signature !== sig) { location.reload(); return "stop"; }
+    sig = r.signature;
+    return false;
+  }, {min: 5000, max: 30000, immediate: true});
 }
 
 function tabs(root) {
@@ -72,13 +131,18 @@ function tabs(root) {
 
 async function workerStatus() {
   const el = document.getElementById("worker");
-  if (!el) return;
-  const r = await fetch("/api/status").then(r => r.json()).catch(() => null);
-  if (!r) { el.textContent = "Mất kết nối"; return; }
-  el.textContent = !r.worker ? "Worker tắt" : r.task ? `⚙ ${r.task.kind} ${r.task.job_id || ""}` : "● Worker sẵn sàng";
+  if (!el) return "stop";
+  const r = await getJSON("/api/status");
+  const text = !r ? "Mất kết nối" : !r.worker ? "Worker tắt"
+    : r.task ? `⚙ ${r.task.kind} ${r.task.job_id || ""}` : "● Worker sẵn sàng";
+  const changed = el.textContent !== text;
+  el.textContent = text;
+  return changed;
 }
-setInterval(workerStatus, 4000);
-document.addEventListener("DOMContentLoaded", workerStatus);
+document.addEventListener("DOMContentLoaded", () => {
+  livePoll(workerStatus, {min: 5000, max: 30000, immediate: true});
+  watchJobRows();
+});
 
 // ---------------------------------------------------------------- version + in-app update
 let versionInfo = null;
@@ -205,5 +269,5 @@ document.addEventListener("DOMContentLoaded", () => {
   const el = document.getElementById("version");
   if (el) el.addEventListener("click", () => loadVersion(true));
   loadVersion(false);
-  setInterval(() => loadVersion(false), 10 * 60 * 1000);
+  livePoll(() => loadVersion(false).then(() => false), {min: 10 * 60 * 1000, max: 10 * 60 * 1000});
 });

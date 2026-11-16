@@ -123,9 +123,26 @@ def parse(text: str, *, profile_id: str = "", label: str = "", proxy=None) -> li
     return profiles
 
 
+_load_cache: dict = {}
+
+
 def load(settings) -> list[dict]:
+    """Decrypting the DPAPI store costs a system call per read; cache it per file version."""
+    import copy
+    path = secret_store._path(settings, NAME)
+    try:
+        st = path.stat()
+        key = (str(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    hit = _load_cache.get("v")
+    if key and hit and hit[0] == key:
+        return copy.deepcopy(hit[1])
     saved = secret_store.load(settings, NAME)
-    return saved.get("profiles", []) if saved else []
+    profiles = saved.get("profiles", []) if saved else []
+    if key:
+        _load_cache["v"] = (key, copy.deepcopy(profiles))
+    return profiles
 
 
 def summary(profile: dict) -> dict:

@@ -3,7 +3,7 @@
 {%- endmacro %}
 
 {% macro job_row(job) -%}
-<tr>
+<tr data-job="{{ job.id }}" data-status="{{ job.status }}" data-busy="{{ '1' if label(job.status)[1] == 'run' else '0' }}">
   <td><a href="/jobs/{{ job.id }}"><b>{{ job.product_name or job.file_name }}</b></a>
     <div class="small muted">{{ 'Từ trend' if job.mode == 'trend' else 'Video base' }} · {{ job.id }}</div></td>
   <td>{{ badge(job.status) }}{% if job.last_error and label(job.status)[1] in ('warn','err') %}

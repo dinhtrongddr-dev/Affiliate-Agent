@@ -75,5 +75,5 @@
       });
     });
   }
-  setInterval(() => refresh().catch(() => {}), 30000);
+  livePoll(() => refresh().then(() => false).catch(() => false), {min: 60000, max: 120000});
 })();

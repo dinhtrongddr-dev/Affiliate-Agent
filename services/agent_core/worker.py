@@ -117,6 +117,7 @@ LANES = {
                    "autopilot"),
 }
 GEN_POLL_SECONDS = 10
+LANE_IDLE_SECONDS = 15   # idle lane re-check for delayed retries (run_after in the future)
 
 
 class Worker:
@@ -150,6 +151,8 @@ class Worker:
 
     def stop(self) -> None:
         self.stop_event.set()
+        from .db import notify_task_added
+        notify_task_added()   # wake idle lanes so they see the stop
         from .videogen import gateway
         gateway.instance(self.settings).stop()
         if self.observer:
@@ -259,8 +262,10 @@ class Worker:
         log.info("Worker stopped")
 
     def run_lane(self, lane: str) -> None:
+        from .db import task_generation, wait_for_task
         kinds = LANES[lane]
         while not self.stop_event.is_set():
+            seen = task_generation()
             try:
                 task = claim_task(self.settings.database_path, kinds)
             except Exception:  # noqa: BLE001
@@ -268,7 +273,8 @@ class Worker:
                 self.stop_event.wait(self.settings.worker_poll_seconds)
                 continue
             if not task:
-                self.stop_event.wait(min(2, self.settings.worker_poll_seconds))
+                # Woken at once by enqueue_task; the timeout only catches delayed retries.
+                wait_for_task(seen, LANE_IDLE_SECONDS)
                 continue
             self.run_task(task)
 

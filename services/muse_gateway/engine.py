@@ -1196,10 +1196,15 @@ class MuseEngine:
         last_activity = t_start
         progress_sent = 0
         resent = False
+        loops = 0
         while time.time() < deadline:
             if stop_event is not None and stop_event.is_set():
                 raise MuseGenerationError("客户端已断开连接，终止生成任务")
-            time.sleep(0.6)
+            # Patched (AffiliateAgent): 1.5 s instead of 0.6 s, and the whole-page text scan
+            # below only every 4th pass; a clip takes minutes, so this only saves CPU.
+            time.sleep(1.5)
+            loops += 1
+            full_scan = loops % 4 == 1
             self._scroll_bottom()
             atts = self.attachments()
             # 严格按期望类型挑选附件，绝不接受跨模态兜底（如将视频请求降级为图片封面）
@@ -1252,14 +1257,14 @@ class MuseEngine:
             has_stop = False
             tail = ""
             try:
-                st_raw = self.page.js("""(function(){
+                st_raw = self.page.js(("var FULL=%s;" % ("true" if full_scan else "false")) + """(function(){
                     var bs=[].slice.call(document.querySelectorAll('div[class*="hatch-chat-groupable-bubble"]'))
                         .filter(function(b){return /hatch-agent-bubble-bg/.test(b.className||'');});
                     var lastTxt = bs.length ? (bs[bs.length-1].innerText||'').trim() : '';
                     var hasStop = !!(document.querySelector('[data-testid="hatch-composer-stop-button"]')
                         || document.querySelector('button[aria-label*="Stop" i]')
                         || document.querySelector('button[aria-label*="停止"]'));
-                    var tail = document.body ? (document.body.innerText||'').slice(-1200) : '';
+                    var tail = (FULL && document.body) ? (document.body.innerText||'').slice(-1200) : lastTxt.slice(-1200);
                     return JSON.stringify({cnt: bs.length, txt: lastTxt, stop: hasStop, tail: tail,
                         path: location.pathname || '', href: location.href || ''});
                 })()""")

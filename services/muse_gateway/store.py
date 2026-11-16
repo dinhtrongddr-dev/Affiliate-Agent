@@ -85,6 +85,11 @@ def _read(path: str, default):
         return default
 
 
+TASK_WRITE_EVERY = 5          # seconds between progress-only rewrites of tasks.json
+TASK_MAX_AGE = 7 * 86400      # finished tasks older than this are dropped
+TASK_KEEP = 300
+
+
 def _write(path: str, obj):
     d = os.path.dirname(path)
     os.makedirs(d, exist_ok=True)
@@ -107,6 +112,8 @@ class Store:
             if _is_pos(ce.get("hatch_vml")):
                 a["expires_at"] = int(ce["hatch_vml"])
         self.tasks: dict[str, dict] = _read(cfg.tasks_file, {})
+        self._tasks_written = 0.0
+        self._prune_tasks()
 
     # ---------- 账号 ----------
     def eligible_accounts(self) -> list[dict]:
@@ -353,7 +360,8 @@ class Store:
                  "status": "queued", "created_at": int(time.time()),
                  "updated_at": int(time.time()), "result": None, "error": None}
             self.tasks[tid] = t
-            _write(self.cfg.tasks_file, self.tasks)
+            self._prune_tasks()
+            self._write_tasks()
             return t
 
     def update_task(self, tid: str, **kw):
@@ -361,10 +369,32 @@ class Store:
             t = self.tasks.get(tid)
             if not t:
                 return None
+            status_changed = "status" in kw and kw["status"] != t.get("status")
             t.update(kw)
             t["updated_at"] = int(time.time())
-            _write(self.cfg.tasks_file, self.tasks)
+            # Patched (AffiliateAgent): progress ticks stay in memory (what GET /v1/videos reads);
+            # the file is rewritten on a status change or at most every 5 s.
+            if status_changed or "result" in kw or "error" in kw                     or time.time() - self._tasks_written >= TASK_WRITE_EVERY:
+                self._write_tasks()
             return t
+
+    def _write_tasks(self):
+        _write(self.cfg.tasks_file, self.tasks)
+        self._tasks_written = time.time()
+
+    def _prune_tasks(self):
+        """Drop finished tasks older than 7 days and keep at most TASK_KEEP entries."""
+        now = time.time()
+        done = ("completed", "failed", "cancelled")
+        self.tasks = {k: v for k, v in self.tasks.items()
+                      if not (v.get("status") in done
+                              and now - (v.get("updated_at") or v.get("created_at") or now) > TASK_MAX_AGE)}
+        if len(self.tasks) > TASK_KEEP:
+            items = sorted(self.tasks.values(), key=lambda t: t.get("created_at") or 0, reverse=True)
+            active = [t for t in items if t.get("status") not in done]
+            finished = [t for t in items if t.get("status") in done]
+            keep = active + finished[:max(0, TASK_KEEP - len(active))]
+            self.tasks = {t["id"]: t for t in keep}
 
     def get_task(self, tid: str) -> dict | None:
         return self.tasks.get(tid)

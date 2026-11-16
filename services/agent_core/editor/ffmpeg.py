@@ -10,12 +10,18 @@ class FFmpegError(RuntimeError):
     pass
 
 
+# Encodes run below normal priority so the UI and the rest of Windows stay responsive.
+BACKGROUND_FLAGS = (getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+                    | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
 def run_ffmpeg(ffmpeg: str, args: list[str], cwd: Path | None = None, timeout: int = 1800) -> None:
     command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *args]
     log.debug("ffmpeg %s", " ".join(map(str, args)))
     result = subprocess.run(
         command, cwd=str(cwd) if cwd else None, capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=timeout,
+        creationflags=BACKGROUND_FLAGS,
     )
     if result.returncode != 0:
         raise FFmpegError((result.stderr or result.stdout or "ffmpeg failed")[-2000:])

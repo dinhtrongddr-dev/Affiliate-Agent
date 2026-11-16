@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -130,6 +131,29 @@ JOB_FIELDS = {
 }
 
 _initialised: set[str] = set()
+
+
+# Bumped whenever a task is queued so idle worker lanes wake at once instead of polling SQLite.
+_task_cv = threading.Condition()
+_task_gen = 0
+
+
+def notify_task_added() -> None:
+    global _task_gen
+    with _task_cv:
+        _task_gen += 1
+        _task_cv.notify_all()
+
+
+def task_generation() -> int:
+    return _task_gen
+
+
+def wait_for_task(seen: int, timeout: float) -> int:
+    """Block until a task is queued after ``seen`` or ``timeout`` passes."""
+    with _task_cv:
+        _task_cv.wait_for(lambda: _task_gen != seen, timeout)
+        return _task_gen
 
 
 def now_iso() -> str:
@@ -278,6 +302,27 @@ def list_jobs(db_path: Path, limit: int = 50, status: str | None = None) -> list
         return [dict(row) for row in rows]
 
 
+def job_states(db_path: Path, ids: list[str]) -> list[dict[str, Any]]:
+    """Status columns only, for the live pollers (no large JSON columns)."""
+    ids = [str(i) for i in ids if i][:200]
+    if not ids:
+        return []
+    init_db(db_path)
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT id, status, updated_at, last_error FROM jobs WHERE id IN ({','.join('?' * len(ids))})",
+            ids).fetchall()
+        return [dict(row) for row in rows]
+
+
+def tasks_signature(db_path: Path) -> str:
+    """Changes whenever any task is added or changes state."""
+    init_db(db_path)
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT COUNT(*), IFNULL(MAX(updated_at),'') FROM tasks").fetchone()
+        return f"{row[0]}:{row[1]}"
+
+
 def list_jobs_by_status(
     db_path: Path, statuses: list[str], limit: int = 50
 ) -> list[dict[str, Any]]:
@@ -375,7 +420,9 @@ def enqueue_task(
             "run_after, created_at, updated_at) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?)",
             (kind, job_id, payload_json, max_attempts, run_after or stamp, stamp, stamp),
         )
-        return cur.lastrowid
+        task_id = cur.lastrowid
+    notify_task_added()
+    return task_id
 
 
 def claim_task(db_path: Path, kinds: tuple[str, ...] | None = None) -> dict[str, Any] | None:
@@ -384,6 +431,10 @@ def claim_task(db_path: Path, kinds: tuple[str, ...] | None = None) -> dict[str,
     stamp = now_iso()
     lane = f" AND kind IN ({','.join('?' * len(kinds))})" if kinds else ""
     with connect(db_path) as conn:
+        # Cheap read first: an idle lane must not take the write lock every few seconds.
+        if not conn.execute("SELECT 1 FROM tasks WHERE status='QUEUED' AND run_after<=?" + lane
+                            + " LIMIT 1", (stamp, *(kinds or ()))).fetchone():
+            return None
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT * FROM tasks WHERE status='QUEUED' AND run_after<=?" + lane + " "
@@ -460,6 +511,7 @@ def retry_task(db_path: Path, task_id: int) -> None:
             "WHERE id=? AND status='FAILED' AND kind!='publish'",
             (now_iso(), now_iso(), task_id),
         )
+    notify_task_added()
 
 
 # ---------------------------------------------------------------- trends

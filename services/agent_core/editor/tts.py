@@ -8,6 +8,7 @@ Supports:
 """
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -153,7 +154,45 @@ def get_engine(mode: str = "fast", precision: str = "auto") -> tuple[Any, str]:
                 _engines[cache_key] = Vieneu(mode="v3nano")
             else:
                 _engines[cache_key] = Vieneu(mode="v3turbo", precision=prec)
+        _last_used[cache_key] = time.monotonic()
+        _start_reaper()
         return _engines[cache_key], engine_mode
+
+
+IDLE_UNLOAD_SECONDS = 600   # free the model's RAM after 10 minutes without speech
+_last_used: dict[str, float] = {}
+_reaper: list[threading.Thread] = []
+
+
+def release_idle_engines(now: float | None = None) -> list[str]:
+    """Drop engines unused for IDLE_UNLOAD_SECONDS so an idle app does not hold ~300 MB."""
+    now = time.monotonic() if now is None else now
+    freed = []
+    with _engine_lock:
+        for key in list(_engines):
+            if now - _last_used.get(key, now) >= IDLE_UNLOAD_SECONDS:
+                _engines.pop(key, None)
+                _last_used.pop(key, None)
+                freed.append(key)
+    if freed:
+        import gc
+        gc.collect()
+        log.info("Unloaded idle VieNeu engine(s): %s", ", ".join(freed))
+    return freed
+
+
+def _start_reaper() -> None:
+    if _reaper and _reaper[0].is_alive():
+        return
+
+    def loop():
+        while _engines:
+            time.sleep(60)
+            release_idle_engines()
+
+    t = threading.Thread(target=loop, name="tts-reaper", daemon=True)
+    _reaper[:] = [t]
+    t.start()
 
 
 def warmup_engine(mode: str = "fast", precision: str = "auto") -> None:

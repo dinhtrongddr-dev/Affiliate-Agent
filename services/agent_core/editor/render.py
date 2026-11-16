@@ -172,7 +172,11 @@ def render_scene(settings, scene: dict, duration: float, out: Path, index: int) 
         pre = (f"[0:v]{retime}fps={fps},tpad=stop_mode=clone:stop_duration={duration + 0.5:.3f}"
                f"[src];")
         prescale = 1.0
-        keep_audio = settings.keep_source_audio and meta["has_audio"]
+        # "Keep source audio" is for the owner's base/own clips. An AI clip's own sound is
+        # Muse improvising words, so it is never mixed under the voice-over; the series branch
+        # opts in per scene with `native_voice` once that take passed the script check.
+        keep_audio = meta["has_audio"] and (
+            bool(scene.get("native_voice")) or (settings.keep_source_audio and not scene.get("generated")))
         if meta.get("width") and meta.get("height") and \
                 abs(meta["width"] / meta["height"] - w / h) < 0.02:
             prescale = 0.0   # already 9:16: plain scale, no blurred background pass
