@@ -634,7 +634,7 @@ def _start_clip_review(settings, t: dict) -> None:
     _review_pool.submit(_clip_review, settings, t)
 
 
-MAX_EXTRA_WORDS = 2   # words heard outside the line (a ghost word in room tone is fine, an outro is not)
+MAX_EXTRA_WORDS = 4   # words outside the line: Muse adds "thôi"/"he he" and ASR adds 1-2 ghosts (measured); an outro is far more
 SPOKEN_LINE = re.compile(r'Spoken line \(Vietnamese\): "([^"]+)"')
 
 

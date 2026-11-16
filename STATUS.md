@@ -1,5 +1,21 @@
 # Deployment status — 2026-11-12 (v0.3.0)
 
+## 2026-11-16: app nhẹ hơn, tiến độ, prompt theo nhánh, Series nói tiếng Việt bằng Muse
+
+Plan: `docs/reports/2026-11-16-standardize-plan.md`.
+
+| Phần | Trạng thái | Bằng chứng |
+|---|---|---|
+| Giảm tải | Đã test thật (đo) | App lúc rảnh, có mở dashboard: **405 MB → 19–85 MB**, CPU 1,7% → 0–0,4% (`bench-2026-11-16-resources-*.json`). Thay đổi: <br>• bỏ việc tự tải lại trang 8–10 s, chỉ poll JSON và dừng khi ẩn cửa sổ<br>• VieNeu nạp khi cần, nhả sau 10 phút<br>• worker được đánh thức khi có việc<br>• ffmpeg chạy ưu tiên thấp<br>• gateway poll 1,5 s, `tasks.json` ghi thưa và tự dọn |
+| Cửa sổ app riêng (WebView2) | Đã test thật | Mở/focus một cửa sổ, thử lại thì quay về trình duyệt; khoảng 200 MB, tách khỏi Chrome |
+| Timeline tiến độ, %, ETA | Đã test thật (API + giao diện với dữ liệu mô phỏng) | Thời gian dự kiến lấy trung vị 20 job gần nhất cùng nhánh; % từng clip Muse lấy từ gateway |
+| Prompt riêng cho từng nhánh | Đã code + test | `prompts/review|viral|series.py`; `tests/test_branch_prompts.py` |
+| UGC 1/2/4: sticker giỏ hàng, nhãn AI, QA 7 điểm từng clip, nhịp cắt | Đã code + test; QA clip chưa chạy trên job thật | `tests/test_clip_qa.py` |
+| Series: Muse tự nói tiếng Việt | **Đã test thật trên Muse** (16 clip) | V1–V3: **12/12** câu nói đúng (lần 15/11: 0/8). Chọn V1. `docs/reports/2026-11-16-series-muse-voice.md` |
+| Series: kiểm tra lời từng take, tạo lại khi sai, giữ giọng Muse khi dựng | Đã code + test; chưa dựng trọn một tập thật | `tests/test_clip_qa.py`, `tests/test_speech_check.py` |
+| Cùng một chat Muse để đồng nhất | Đã thử thật, **không dùng** | Gateway lấy nhầm video cũ ở lượt sau; lượt mới không có ảnh thì mất nhận diện nhân vật |
+| Bộ test | 538+ test qua, ruff sạch | |
+
 ## Upgrade tracker (P0–P7)
 
 States: **Có sẵn** (existed before), **Đã test thật** (ran against live services),

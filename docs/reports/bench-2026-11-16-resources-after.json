@@ -1,0 +1,38 @@
+{
+ "at": "2026-11-16T22:25:13",
+ "label": "idle after all changes, dashboard open",
+ "seconds": 60,
+ "samples": 10,
+ "roles": {
+  "app": {
+   "procs": 2,
+   "ram_mb_avg": 19,
+   "ram_mb_max": 19,
+   "cpu_pct_avg": 0.0
+  },
+  "chatgpt2api": {
+   "procs": 3,
+   "ram_mb_avg": 117,
+   "ram_mb_max": 117,
+   "cpu_pct_avg": 12.5
+  },
+  "muse_chrome": {
+   "procs": 8,
+   "ram_mb_avg": 44,
+   "ram_mb_max": 44,
+   "cpu_pct_avg": 0.0
+  },
+  "muse_gateway": {
+   "procs": 2,
+   "ram_mb_avg": 3,
+   "ram_mb_max": 3,
+   "cpu_pct_avg": 0.0
+  },
+  "webview2_other": {
+   "procs": 12,
+   "ram_mb_avg": 194,
+   "ram_mb_max": 194,
+   "cpu_pct_avg": 0.0
+  }
+ }
+}

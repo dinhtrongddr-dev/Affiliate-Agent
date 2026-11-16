@@ -24,7 +24,7 @@ Package: `services/agent_core/videogen/`. Page: **🎞 Video AI** (`/generation`
      It runs off the poll thread while the clip is `CHECKING`. A clip that fails is remade, and the findings are added to its prompt ("Fix from the previous take: ...").
    - **Series line check** (dialogue series with `AA_SERIES_NATIVE_VOICE`): the take's speech is transcribed (PhoWhisper-small via faster-whisper, CPU) and compared with the scripted line. A take is remade with "must say exactly ..." when either is true:
      - more than 30% of the words are wrong (`AA_SERIES_SPEECH_MAX_WER`);
-     - more than two extra words are spoken.
+     - more than four extra words are spoken (Muse adds a "thôi" or a laugh, and speech-to-text adds a ghost word or two).
 5. When no clip is still pending, the job switches to `GENERATION_DONE` and the `render_generated` task builds the timeline with the AI clips. The render then works as before (voice, subtitles, music, transitions, loudness).
    - A Muse clip's own sound is never mixed under the voice-over.
    - Exception: in a dialogue series, a take that passed the line check keeps Muse's own voice at full volume, and its subtitles follow the detected speech.
