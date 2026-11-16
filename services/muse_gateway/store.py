@@ -159,7 +159,8 @@ class Store:
                     proposed.append(existing)
                 if changed:
                     existing.update(changes)
-                    existing.update(ok=None, synced_at=0, proxy_status={}, expiry_anchor=now,
+                    existing.update(ok=None, note="", checked_at=0, last_keepalive=0,
+                                    synced_at=0, proxy_status={}, expiry_anchor=now,
                                     expires_at=account_expiry(changes["cookies_exp"], now))
                 result.append(existing)
             # Validate against all retained accounts, including legacy session identities.

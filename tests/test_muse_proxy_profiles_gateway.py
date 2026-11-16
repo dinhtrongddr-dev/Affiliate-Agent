@@ -97,7 +97,8 @@ class GatewayProfileTests(unittest.TestCase):
         original = profile() | {"revision": "revision-one"}
         aid = self.store.upsert_profiles([original])[0]["id"]
         self.store.update_account(aid, cookies={"hatch_sess": "FAKE-RENEWED"},
-                                  cookies_exp={"hatch_sess": 4102444800}, ok=True)
+                                  cookies_exp={"hatch_sess": 4102444800}, ok=True,
+                                  note="Old authentication failure", checked_at=123)
         self.store.upsert_profiles([original], {aid})
         account = self.store.get_account(aid)
         self.assertEqual(account["cookies"]["hatch_sess"], "FAKE-RENEWED")
@@ -106,6 +107,8 @@ class GatewayProfileTests(unittest.TestCase):
             self.store.upsert_profiles([original | {"label": "changed"}])
         self.store.upsert_profiles([original | {"revision": "revision-two"}])
         self.assertEqual(self.store.get_account(aid)["cookies"]["hatch_sess"], "FAKE-ONE")
+        self.assertEqual(self.store.get_account(aid)["note"], "")
+        self.assertEqual(self.store.get_account(aid)["checked_at"], 0)
 
     def test_actual_api_generation_and_browser_context_routing(self):
         # Subprocess keeps gateway's top-level module names/config out of core tests.
@@ -175,6 +178,46 @@ class GatewayProfileTests(unittest.TestCase):
                    MUSE2API_PROFILE_ROOT=str(Path(self.temp.name) / "browser"),
                    MUSE2API_KEY="", PYTHONDONTWRITEBYTECODE="1",
                    PYTHONPATH=str(GATEWAY))
+        completed = subprocess.run([sys.executable, "-B", "-c", script], env=env,
+                                   capture_output=True, text=True, timeout=30)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_health_probes_distinguish_auth_proxy_and_network_failures(self):
+        script = textwrap.dedent('''
+            from unittest.mock import patch, MagicMock
+            from fastapi.testclient import TestClient
+            import app as gateway
+            client = TestClient(gateway.app)
+            payload = {"profile_id": "one", "cookies": {"hatch_sess": "FAKE-ONE"},
+                       "proxy": {"server": "http://127.0.0.1:18081"}}
+            aid = client.post("/admin/accounts/profiles", json={"profiles": [payload]}).json()["profiles"][0]["id"]
+            for error, kind in [(gateway.MuseAuthError("synthetic auth"), "auth"),
+                                (gateway.MuseProxyError("synthetic proxy"), "proxy"),
+                                (RuntimeError("synthetic network"), "network")]:
+                with patch.object(gateway.engine, "start"), patch.object(gateway.engine, "refresh", side_effect=error), patch.object(gateway.engine, "close_current_page"):
+                    result = client.post(f"/admin/accounts/{aid}/test").json()
+                assert result["ok"] is False and result["failure_type"] == kind, result
+                assert result["session_ok"] is (False if kind == "auth" else None), result
+            with patch.object(gateway.engine, "start"), patch.object(gateway.engine, "refresh"), patch.object(gateway.engine, "close_current_page"), patch.object(gateway, "_sync_cookies"), patch.object(gateway.engine, "quota", side_effect=RuntimeError("quota unavailable")):
+                result = client.post(f"/admin/accounts/{aid}/test").json()
+            assert result["ok"] and result["session_ok"] and result["quota_error"], result
+            response = MagicMock(status_code=200)
+            response.json.return_value = {"ip": "203.0.113.1"}
+            session = MagicMock()
+            session.__enter__.return_value.get.return_value = response
+            for error, expected in [(gateway.MuseAuthError("synthetic auth"), False),
+                                    (gateway.MuseGenerationError("temporary upstream failure"), None)]:
+                with patch("requests.Session", return_value=session), patch.object(gateway.engine, "renew_session_http", side_effect=error), patch.object(gateway.engine, "close_current_page"):
+                    result = client.post(f"/admin/accounts/{aid}/proxy/test").json()
+                assert result["proxy_reachable"] and result["session_ok"] is expected, result
+                assert gateway.store.get_account(aid)["proxy_status"]["session_ok"] is expected
+            gateway.ACCOUNT_POOL.busy_accounts.add(aid)
+            assert client.post(f"/admin/accounts/{aid}/proxy/test").status_code == 409
+            print("Health probe classifications PASS; synthetic only, no external calls")
+        ''')
+        env = dict(os.environ, MUSE2API_HOME=self.temp.name,
+                   MUSE2API_PROFILE_ROOT=str(Path(self.temp.name) / "browser"),
+                   MUSE2API_KEY="", PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=str(GATEWAY))
         completed = subprocess.run([sys.executable, "-B", "-c", script], env=env,
                                    capture_output=True, text=True, timeout=30)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)

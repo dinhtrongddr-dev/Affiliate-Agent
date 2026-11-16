@@ -157,8 +157,9 @@ class StoredProfileTests(unittest.TestCase):
         response = httpx.Response(200, json={"accounts": [{"id": "a1", "profile_id": "muse-01",
             "proxy": {"server": "http://proxy.invalid:80", "username": "FAKE-USER-SECRET",
                       "password": "FAKE-PASSWORD", "has_password": True}}]})
-        with patch.object(gateway.httpx, "get", return_value=response):
+        with patch.object(gateway.httpx, "get", return_value=response) as get:
             result = gateway.account_status(self.settings)
+        self.assertEqual(get.call_args.args[0], "http://fake-gateway.invalid/admin/accounts")
         self.assertEqual(result["accounts"][0]["proxy_server"], "http://proxy.invalid:80")
         self.assertNotIn("FAKE-USER-SECRET", json.dumps(result))
         self.assertNotIn("FAKE-PASSWORD", json.dumps(result))
@@ -170,7 +171,7 @@ class ProfileWebTests(unittest.TestCase):
             settings = settings_for(Path(tmp))
             with patch("agent_core.web.app.get_settings", return_value=settings):
                 app = create_app(start_worker=False)
-            with patch("agent_core.web.app.setup_logging"), TestClient(app) as client:
+            with patch("agent_core.web.app.setup_logging"), patch.object(gateway, "account_status", return_value={}), TestClient(app) as client:
                 body = {"json": json.dumps(cookie_export()), "profile_id": "muse-01", "label": "Muse 01",
                         "proxy": entry()["proxy"]}
                 self.assertEqual(client.post("/api/muse/profiles", json=body).status_code, 403)

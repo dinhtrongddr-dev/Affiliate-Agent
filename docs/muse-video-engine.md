@@ -40,6 +40,7 @@ The muse2api gateway is **bundled in the app** (`services/muse_gateway`, MIT, se
 - On first start the app creates the gateway's API key and stores it in `.env`.
 - The gateway runs its own headless Chrome profile in `state/muse2api/profiles`.
 - The gateway keeps its account file, tasks and media in `state/muse2api`, which is git-ignored. That account file holds the session in plain text.
+- In **Video AI → Profile · proxy · tài khoản Muse**, each profile shows the `hatch_sess` expiry and remaining time, the last Muse session check, and proxy connectivity/exit IP. **Test phiên Muse** opens the saved session through that profile's proxy; **Test proxy** checks its exit and Muse HTTP session. Neither generates content. Expired or rejected cookies appear red with a cookie update form. Replacing cookies preserves the profile's proxy credentials, clears old check results and synchronizes the new session. Network failures alone do not mark cookies dead; unknown expiry is shown explicitly.
 
 Steps:
 1. Use your own muse.ai account. Do not use the Meta account that administers your Facebook Page.

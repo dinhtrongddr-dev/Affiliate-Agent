@@ -194,7 +194,8 @@ def sync_session(settings) -> dict | None:
 def account_status(settings) -> dict:
     """Safe account summary from the gateway (no cookie values)."""
     try:
-        resp = httpx.get(f"{base_url(settings)}/admin/accounts", timeout=10, headers={
+        url = settings.videogen_base_url.rstrip("/") or base_url(settings)
+        resp = httpx.get(f"{url}/admin/accounts", timeout=5, headers={
             "Authorization": f"Bearer {settings.videogen_api_key.get_secret_value()}"})
     except httpx.HTTPError as exc:
         return {"reachable": False, "error": str(exc)[:200]}
@@ -204,7 +205,8 @@ def account_status(settings) -> dict:
     accounts = []
     for account in body.get("accounts") or []:
         item = {k: account.get(k) for k in ("id", "label", "enabled", "status", "healthy", "error",
-                                           "last_error", "expires_at", "profile_id")}
+                                           "last_error", "expires_at", "profile_id", "profile_revision",
+                                           "ok", "note", "checked_at", "cookies_exp", "proxy_status")}
         route = account.get("proxy") or {}
         item["proxy_server"] = route.get("server")
         item["proxy_authenticated"] = bool(route.get("username") or route.get("has_password"))

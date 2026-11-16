@@ -2004,11 +2004,11 @@ def test_account_proxy(aid: str, req: ProxyTestRequest | None = None, _=Depends(
             result.update(ok=True, session_ok=True, workspace_status=checked.get("status"),
                           message="代理出口与 Muse 会话检查通过；生成能力请使用账号测试和实际任务验证")
         except MuseAuthError:
-            result.update(session_ok=False, message="代理可连接，但 Muse 会话认证失败，请重新导入 Cookie")
+            result.update(session_ok=False, failure_type="auth", message="代理可连接，但 Muse 会话认证失败，请重新导入 Cookie")
         except MuseProxyError as exc:
             result["message"] = str(exc)
         except MuseGenerationError as exc:
-            result.update(session_ok=False, message=str(exc))
+            result.update(session_ok=None, failure_type="network", message=str(exc))
         except (requests.RequestException, ValueError, KeyError, TypeError):
             result["message"] = "代理出口检测失败，请检查代理地址、认证和网络"
         recorded = {**result, "checked_at": int(time.time())}
@@ -2065,15 +2065,19 @@ async def test_account(aid: str, _=Depends(auth)):
                 except Exception as exc:  # noqa: BLE001
                     quota_error = f"{type(exc).__name__}；额度缓存未更新"
                 store.mark(aid, True, "会话有效" + ("；额度读取失败" if quota_error else ""))
-                return {"ok": True, "message": "会话有效，可正常生成",
+                return {"ok": True, "session_ok": True, "message": "会话有效，可正常生成",
                         "synced": synced, "quota": quota,
                         "quota_error": quota_error}
             except MuseAuthError as exc:
                 store.mark(aid, False, str(exc)[:200])
-                return {"ok": False, "message": str(exc)[:200]}
+                return {"ok": False, "session_ok": False, "failure_type": "auth", "message": str(exc)[:200]}
+            except MuseProxyError:
+                store.touch_keepalive(aid, None, "Proxy test failed; session not confirmed")
+                return {"ok": False, "session_ok": None, "failure_type": "proxy",
+                        "message": "Proxy connection failed; session not confirmed"}
             except Exception as exc:  # noqa: BLE001
                 store.touch_keepalive(aid, None, f"测试未确认（保留账号状态）: {str(exc)[:200]}")
-                return {"ok": False, "message": str(exc)[:200]}
+                return {"ok": False, "session_ok": None, "failure_type": "network", "message": str(exc)[:200]}
 
     res = await asyncio.to_thread(_probe)
     if not res["ok"]:

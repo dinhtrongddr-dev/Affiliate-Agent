@@ -50,6 +50,17 @@ input,select,textarea{width:100%;font:inherit;padding:8px 10px;border:1px solid 
 textarea{min-height:70px;resize:vertical}
 label{font-weight:600;font-size:13px;display:block;margin:10px 0 4px}
 .muted{color:var(--muted)}.small{font-size:13px}.err-text{color:var(--err)}
+.muse-profile-table{overflow-x:auto;margin-bottom:16px}
+.muse-profile-table table{min-width:900px}
+.muse-profile td{vertical-align:top}
+.muse-profile.cookie-dead>tr:first-child{background:#fff4f3}
+.muse-profile.cookie-dead [data-health="cookie"]{font-weight:700}
+.muse-profile-actions{min-width:145px}
+.muse-profile-actions .btn{display:block;margin-bottom:8px}
+.muse-profile-editor details{padding:0 0 12px}
+.muse-profile-editor summary{cursor:pointer;font-weight:600}
+.muse-profile-editor textarea{max-width:900px;font-family:monospace}
+.muse-profile-editor [data-health="feedback"]:empty{display:none}
 .drop{border:2px dashed #c9ced6;border-radius:var(--radius);padding:28px;text-align:center;background:#fff;cursor:pointer;transition:.15s}
 .drop.over{border-color:var(--brand);background:#fff4f1}
 .health li{list-style:none;display:flex;flex-wrap:wrap;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}

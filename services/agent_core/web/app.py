@@ -321,11 +321,12 @@ def create_app(start_worker: bool = True) -> FastAPI:
     def generation_page(request: Request, job: str = ""):
         s = S()
         provider = get_provider(s)
+        gateway_info = _gateway_info(s)
         return render(request, "generation.html", tasks=gen_engine.list_tasks(s.database_path, job or None, 300),
                       provider=provider.name if provider else "", base_url=s.videogen_base_url,
                       remaining=gen_engine.remaining_today(s), daily=s.videogen_daily_limit,
                       job_filter=job, active="generation", session=_muse_summary(s),
-                      gateway=_gateway_info(s), muse_profiles=_muse_profile_summaries(s))
+                      gateway=gateway_info, muse_profiles=_muse_profile_summaries(s, gateway_info))
 
     def _gateway_info(s):
         from ..videogen import gateway
@@ -345,13 +346,54 @@ def create_app(start_worker: bool = True) -> FastAPI:
         except Exception:  # noqa: BLE001 - unreadable store: show as not imported
             return None
 
-    def _muse_profile_summaries(s):
+    def _muse_profile_summaries(s, gateway_info=None):
+        from ..videogen import gateway, muse_profiles
+        from ..secret_store import SecretStoreError
+        try:
+            if not muse_profiles.load(s):
+                return []
+            info = gateway_info if gateway_info is not None else gateway.account_status(s)
+            return muse_profiles.summaries(s, info.get("accounts"))
+        except (SecretStoreError, ValueError):
+            return []
+
+    @app.get("/api/muse/profiles")
+    def api_muse_profile_status():
+        return {"profiles": _muse_profile_summaries(S())}
+
+    @app.post("/api/muse/profiles/{profile_id}/check/{kind}")
+    def api_muse_profile_check(profile_id: str, kind: str):
+        from ..videogen import muse_health, muse_profiles
+        from ..secret_store import SecretStoreError
+        try:
+            return muse_health.check(S(), profile_id, kind)
+        except muse_profiles.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except SecretStoreError as exc:
+            raise HTTPException(400, "Không đọc được kho profile mã hoá Windows") from exc
+
+    @app.post("/api/muse/profiles/{profile_id}/cookies")
+    async def api_muse_profile_cookies(profile_id: str, request: Request):
         from ..videogen import muse_profiles
         from ..secret_store import SecretStoreError
         try:
-            return muse_profiles.summaries(s)
-        except (SecretStoreError, ValueError):
-            return []
+            body = await request.json()
+        except ValueError as exc:
+            raise HTTPException(400, "Không đọc được JSON") from exc
+        text = body.get("json") if isinstance(body, dict) else None
+        if not isinstance(text, str) or not text.strip() or len(text) > 2_000_000:
+            raise HTTPException(400, "Cần JSON cookie Muse hợp lệ, tối đa 2 MB")
+        try:
+            info = await run_in_threadpool(muse_profiles.update_cookies, S(), profile_id, text)
+            try:
+                info["pushed"] = await run_in_threadpool(muse_profiles.push_to_gateway, S())
+            except muse_profiles.ProfileError as exc:
+                info["push_error"] = str(exc)
+            return info
+        except muse_profiles.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except SecretStoreError as exc:
+            raise HTTPException(400, "Không lưu được kho profile mã hoá Windows") from exc
 
     @app.post("/api/muse/profiles")
     async def api_muse_profiles(request: Request):

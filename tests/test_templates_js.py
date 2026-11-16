@@ -10,7 +10,7 @@ def test_no_line_break_inside_js_strings():
     for path in TEMPLATES.glob("*.html"):
         text = path.read_text(encoding="utf-8")
         for script in re.findall(r"<script[^>]*>(.*?)</script>", text, flags=re.S):
-            for n, line in enumerate(script.splitlines(), 1):
+            for line in script.splitlines():
                 # string opened with ' or " right before the line ends, e.g. .split('
                 if re.search(r"[(,=:]\s*['\"]$", line.rstrip()):
                     bad.append(f"{path.name}: {line.strip()[:80]}")

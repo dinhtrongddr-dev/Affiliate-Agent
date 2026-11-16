@@ -44,14 +44,39 @@
   </div>
   <p class="small muted">Mỗi profile gắn một tài khoản Muse và một proxy riêng. Khi tạo video, Muse chạy trong phiên trình duyệt tách biệt qua proxy của profile đó. Nếu proxy lỗi, phiên đó dừng, không chuyển sang kết nối trực tiếp.</p>
   {% if muse_profiles %}
-  <div style="overflow-x:auto;margin-bottom:16px">
-    <table class="small"><tr><th>Profile / account</th><th>Proxy</th><th>Cookie</th><th>Đồng bộ</th></tr>
+  <p class="small muted">Hạn cookie lấy từ <code>hatch_sess</code>. Còn hạn chưa đảm bảo đăng nhập được. Bấm test để kiểm tra thực tế, không tạo ảnh/video.</p>
+  <div class="muse-profile-table">
+    <table class="small"><thead><tr><th>Profile / account</th><th>Cookie</th><th>Phiên Muse</th><th>Proxy</th><th>Kiểm tra</th></tr></thead>
       {% for p in muse_profiles %}
+      {% set h = p.health %}
+      <tbody class="muse-profile {{ 'cookie-dead' if h.cookie_tone == 'err' else '' }}" data-profile-id="{{ p.profile_id }}">
       <tr><td><b>{{ p.label }}</b><div class="muted">{{ p.profile_id }}{% if not p.enabled %} · đã tắt{% endif %}</div>
-          {% if p.account_id %}<div class="muted">Account: {{ p.account_id }}</div>{% endif %}</td>
-        <td><code>{{ p.proxy_server }}</code><div class="muted">{{ 'Có xác thực' if p.proxy_authenticated else 'Không cần xác thực' }}</div></td>
-        <td>{{ p.cookie_count }} cookie{% if p.session_expires %}<div class="muted">Hết hạn: {{ p.session_expires }}</div>{% endif %}</td>
-        <td>{% if p.pushed_at %}<span class="badge ok">Đã đồng bộ</span><div class="muted">{{ p.pushed_at | localtime('%d/%m/%Y %H:%M:%S') }}</div>{% else %}<span class="badge warn">Chờ đồng bộ</span>{% endif %}</td></tr>
+          {% if p.account_id %}<div class="muted">Account: {{ p.account_id }}</div>{% endif %}
+          <div data-health="sync" class="small muted">{{ 'Đã đồng bộ' if p.pushed_at else 'Chờ đồng bộ' }}</div></td>
+        <td><span data-health="cookie" class="badge {{ h.cookie_tone }}">{{ h.cookie_label }}</span>
+          <div data-health="expiry" class="muted">{{ ('Hết hạn: ' ~ (h.expires_at | localtime('%d/%m/%Y %H:%M'))) if h.expires_at else 'Cookie không có ngày hết hạn' }}</div>
+          <div data-health="remaining">{{ h.remaining or '' }}</div><div class="muted" data-health="count">{{ p.cookie_count }} cookie</div></td>
+        <td><span data-health="session" class="badge {{ 'ok' if h.session_state == 'ok' else 'err' if h.session_state == 'error' else 'warn' }}">{{ h.session_label }}</span>
+          <div data-health="session-time" class="muted">{% if h.session_checked_at %}Test: {{ h.session_checked_at | localtime }}{% endif %}</div></td>
+        <td><code>{{ p.proxy_server }}</code><div class="muted">{{ 'Có xác thực' if p.proxy_authenticated else 'Không cần xác thực' }}</div>
+          <span data-health="proxy" class="badge {{ 'ok' if h.proxy_state == 'ok' else 'err' if h.proxy_state == 'error' else 'warn' }}">{{ h.proxy_label }}</span>
+          <div data-health="exit-ip" class="muted">{% if h.exit_ip %}IP ra: {{ h.exit_ip }}{% endif %}</div>
+          <div data-health="proxy-time" class="muted">{% if h.proxy_checked_at %}Test: {{ h.proxy_checked_at | localtime }}{% endif %}</div></td>
+        <td class="muse-profile-actions"><button class="btn sm" data-check="session" {% if not h.can_test %}disabled{% endif %}>Test phiên Muse</button>
+          <button class="btn sm" data-check="proxy" {% if not h.can_test %}disabled{% endif %}>Test proxy</button>
+          <div class="small muted" data-health="test-hint">{% if not h.can_test %}Cần đồng bộ với gateway{% endif %}</div></td></tr>
+      <tr><td colspan="5" class="muse-profile-editor">
+        <p class="small" role="status" data-health="feedback" aria-live="polite"></p>
+        <details {% if h.cookie_tone == 'err' %}open{% endif %}>
+          <summary>Cập nhật cookie mới · {{ p.label }}</summary>
+          <p class="small muted">Dán JSON cookie export từ muse.ai. Proxy và tài khoản của profile được giữ lại.</p>
+          <label for="mp-cookie-{{ p.profile_id }}">Cookie mới cho {{ p.label }}</label>
+          <textarea id="mp-cookie-{{ p.profile_id }}" data-cookie-json rows="3" autocomplete="off" spellcheck="false" placeholder="Dán mảng JSON cookie từ Cookie-Editor"></textarea>
+          <div class="row" style="margin-top:8px"><button class="btn primary sm" data-save-cookie>Lưu cookie & đồng bộ</button>
+            <span class="small muted">Sau khi lưu, bấm Test phiên Muse để xác nhận.</span></div>
+        </details>
+      </td></tr>
+      </tbody>
       {% endfor %}
     </table>
   </div>
@@ -126,7 +151,7 @@
   {% else %}<p class="muted">Chưa có clip AI nào.</p>{% endif %}
 </div>
 {% endblock %}
-{% block scripts %}<script>
+{% block scripts %}<script src="/static/muse_profiles.js?v={{ asset_v }}"></script><script>
 async function readProfileFile(input){
   const file=input.files[0];
   if(!file) return;

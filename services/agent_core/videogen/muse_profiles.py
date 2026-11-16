@@ -139,8 +139,26 @@ def summary(profile: dict) -> dict:
             "account_id": profile.get("account_id")}
 
 
-def summaries(settings) -> list[dict]:
-    return [summary(p) for p in load(settings)]
+def summaries(settings, accounts=None) -> list[dict]:
+    from .muse_health import describe
+    by_id = {a["id"]: a for a in accounts or []}
+    return [summary(p) | {"health": describe(p, by_id.get(p.get("account_id")))}
+            for p in load(settings)]
+
+
+def update_cookies(settings, profile_id: str, text: str) -> dict:
+    """Replace only this profile's session; preserve its encrypted proxy credentials."""
+    with _LOCK:
+        profile = next((p for p in load(settings) if p["profile_id"] == profile_id), None)
+        if profile is None:
+            raise ProfileError("Không tìm thấy profile Muse")
+        # Accept a cookie export, never a profile import that could replace its route.
+        try:
+            session = muse_session.parse(text)
+        except (muse_session.SessionError, ValueError, TypeError, AttributeError, OverflowError):
+            raise ProfileError("Cookie Muse thiếu, sai định dạng hoặc đã hết hạn; hãy export lại cookie") from None
+        return save(settings, json.dumps({"profile_id": profile_id, "label": profile["label"],
+                    "proxy": profile["proxy"], "enabled": profile.get("enabled", True), **session}))
 
 
 def save(settings, text: str, **fields) -> dict:
