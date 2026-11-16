@@ -60,6 +60,9 @@ def ensure_schema(db_path) -> None:
     init_db(db_path)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(gen_tasks)")}
+        if "progress" not in cols:   # additive migration: % reported by the gateway
+            conn.execute("ALTER TABLE gen_tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0")
     _ready.add(key)
 
 
@@ -549,7 +552,7 @@ def _check(settings, provider, t: dict) -> None:
         _retry_or_fail(settings, t, st.error or "Muse báo lỗi")
         return
     if st.state != "succeeded":
-        _update(db, t["id"], error=None)
+        _update(db, t["id"], error=None, progress=_pct(st.progress))
         return
     if not st.url:
         _retry_or_fail(settings, t, "Xong nhưng không có link file")
@@ -703,3 +706,11 @@ def cancel_task(settings, tid: str) -> bool:
     _update(settings.database_path, tid, status="CANCELLED", error="Người dùng huỷ")
     _finish_jobs(settings, {t["job_id"]})
     return True
+
+
+def _pct(value) -> int:
+    """Gateway progress (0-100, may be a string) clamped below 100 until the clip is checked."""
+    try:
+        return max(0, min(99, int(float(value or 0))))
+    except (TypeError, ValueError):
+        return 0

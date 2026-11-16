@@ -89,3 +89,21 @@ pre.log{background:#0f141b;color:#cbd5e1;padding:16px;border-radius:10px;overflo
 .split{grid-template-columns:360px 1fr;align-items:start}
 .split2{grid-template-columns:1fr 2fr;align-items:start}
 @media (max-width:1100px){.hero,.split,.split2{grid-template-columns:1fr}}
+
+/* job progress timeline */
+.timeline{margin:12px 0;text-align:left;color:#eee;font-size:13px}
+.tl-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.tl-head b{font-size:20px}
+.tl-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden;margin-bottom:10px}
+.tl-bar i{display:block;height:100%;background:#4ade80;transition:width .6s}
+.tl-steps{list-style:none;margin:0;padding:0}
+.tl-steps li{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 0}
+.tl-dot{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.3)}
+.tl-done .tl-dot{background:#4ade80}
+.tl-running .tl-dot{background:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.3)}
+.tl-pending{opacity:.6}
+.tl-info{color:#bbb}
+.tl-clips{grid-column:2/4;display:flex;flex-wrap:wrap;gap:4px}
+.tl-clip{font-size:11px;padding:1px 6px;border-radius:8px;background:rgba(255,255,255,.12)}
+.tl-clip.ok{background:rgba(74,222,128,.25)}
+.tl-clip.err{background:rgba(248,113,113,.3)}

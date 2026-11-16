@@ -76,17 +76,56 @@ async function getJSON(path) {
   return fetch(path, {cache: "no-store"}).then(r => (r.ok ? r.json() : null)).catch(() => null);
 }
 
+function fmtDur(sec) {
+  if (sec == null) return "";
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h} giờ ${m} phút` : m ? `${m} phút${m < 10 && s ? " " + s + " giây" : ""}` : `${s} giây`;
+}
+
+function renderTimeline(box, p) {
+  if (!box) return;
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const head = el("div", "tl-head");
+  head.append(el("b", null, p.pct != null ? p.pct + "%" : ""),
+    el("span", "small", [p.elapsed_sec != null ? "đã chạy " + fmtDur(p.elapsed_sec) : "",
+                          p.eta_sec ? "còn khoảng " + fmtDur(p.eta_sec) : ""].filter(Boolean).join(" · ")));
+  const bar = el("div", "tl-bar"); const fill = el("i"); fill.style.width = (p.pct || 0) + "%"; bar.append(fill);
+  const list = el("ol", "tl-steps");
+  (p.steps || []).forEach(st => {
+    const li = el("li", "tl-" + st.state);
+    li.append(el("span", "tl-dot"), el("span", "tl-label", st.label));
+    const info = st.state === "done" ? fmtDur(st.elapsed_sec)
+      : st.state === "running" ? `${st.pct}% · ${fmtDur(st.elapsed_sec)}` : "~" + fmtDur(st.expected_sec);
+    li.append(el("span", "tl-info small", info));
+    if (st.key === "muse" && (p.clips || []).length && st.state !== "pending") {
+      const clips = el("div", "tl-clips");
+      p.clips.forEach(c => {
+        const chip = el("span", "tl-clip " + (c.status === "DONE" ? "ok" : c.status === "FAILED" ? "err" : ""),
+          `${c.kind === "image" ? "Ảnh NV" : "Cảnh " + (c.scene + 1)} ${c.pct}%${c.attempt > 1 ? " (lần " + c.attempt + ")" : ""}`);
+        clips.append(chip);
+      });
+      li.append(clips);
+    }
+    list.append(li);
+  });
+  box.replaceChildren(head, bar, list);
+}
+
 function pollJob(jobId) {
   let last = null;
+  const box = document.querySelector("[data-job-progress]");
   livePoll(async () => {
-    const r = await getJSON("/api/jobs/" + jobId);
+    const r = await getJSON("/api/jobs/" + jobId + "/progress");
     if (!r) return false;
     if (!r.busy && document.body.dataset.busy === "1") { location.reload(); return "stop"; }
     document.querySelectorAll("[data-live-status]").forEach(el => (el.textContent = r.label));
-    const changed = last !== null && last !== r.updated_at;
-    last = r.updated_at;
+    if (r.busy) renderTimeline(box, r);
+    const sig = r.updated_at + ":" + r.pct;
+    const changed = last !== null && last !== sig;
+    last = sig;
     return changed;
-  });
+  }, {immediate: true});
 }
 
 // List pages: rows marked data-job/data-status. Reload once when a busy row changes state.
@@ -97,13 +136,17 @@ function watchJobRows() {
   livePoll(async () => {
     const r = await getJSON("/api/jobs-live?ids=" + encodeURIComponent(ids.join(",")));
     if (!r) return false;
-    const changed = r.jobs.some(j => {
+    let changed = false;
+    r.jobs.forEach(j => {
       const row = document.querySelector(`[data-job="${CSS.escape(j.id)}"]`);
-      return row && row.dataset.status !== j.status;
+      if (!row) return;
+      if (row.dataset.status !== j.status) changed = true;
+      const cell = row.querySelector("[data-job-pct]");
+      if (cell && j.pct != null) cell.textContent = `${j.pct}%` + (j.eta_sec ? ` · còn ~${fmtDur(j.eta_sec)}` : "");
     });
     if (changed) { location.reload(); return "stop"; }
     return false;
-  }, {min: 5000, max: 20000});
+  }, {min: 5000, max: 20000, immediate: true});
 }
 
 function watchTasks() {

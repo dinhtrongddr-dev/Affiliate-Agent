@@ -89,7 +89,8 @@
              src="/files/{{ job.id }}/{{ job.id }}.mp4?v={{ job.updated_at }}"></video>
       {% elif busy %}
       <div style="aspect-ratio:9/16;display:grid;place-items:center;color:#fff;text-align:center;padding:20px">
-        <div><div class="badge run">{{ label(job.status)[0] }}</div>
+        <div style="width:100%"><div class="badge run" data-live-status>{{ label(job.status)[0] }}</div>
+        <div class="timeline" data-job-progress></div>
         <p class="small" style="color:#aaa">Trang tự cập nhật khi xong.</p></div></div>
       {% else %}
       <div style="aspect-ratio:9/16;display:grid;place-items:center;color:#888">Chưa có video</div>

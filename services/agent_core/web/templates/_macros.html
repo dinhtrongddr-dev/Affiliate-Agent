@@ -6,7 +6,7 @@
 <tr data-job="{{ job.id }}" data-status="{{ job.status }}" data-busy="{{ '1' if label(job.status)[1] == 'run' else '0' }}">
   <td><a href="/jobs/{{ job.id }}"><b>{{ job.product_name or job.file_name }}</b></a>
     <div class="small muted">{{ 'Từ trend' if job.mode == 'trend' else 'Video base' }} · {{ job.id }}</div></td>
-  <td>{{ badge(job.status) }}{% if job.last_error and label(job.status)[1] in ('warn','err') %}
+  <td>{{ badge(job.status) }}{% if label(job.status)[1] == 'run' %}<div class="small muted" data-job-pct></div>{% endif %}{% if job.last_error and label(job.status)[1] in ('warn','err') %}
     <div class="small err-text">{{ job.last_error[:120] }}</div>{% endif %}</td>
   <td class="small">{% if job.viral_score %}<span title="Điểm biên tập AI /10">⭐ {{ '%.1f' % job.viral_score }}</span>{% endif %}
     {% if job.qa_score %}<span title="Điểm QA video /100"> · QA {{ '%.0f' % job.qa_score }}</span>{% endif %}

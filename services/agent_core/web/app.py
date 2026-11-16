@@ -860,9 +860,25 @@ def create_app(start_worker: bool = True) -> FastAPI:
     @app.get("/api/jobs-live")
     def api_jobs_live(ids: str = ""):
         """Status of the listed jobs only: what the list pages poll instead of reloading."""
-        rows = db.job_states(S().database_path, [i for i in ids.split(",") if i])
-        return {"jobs": [{"id": r["id"], "status": r["status"], "label": label(r["status"])[0],
-                          "busy": r["status"] in BUSY, "updated_at": r["updated_at"]} for r in rows]}
+        from .. import progress
+        s = S()
+        out = []
+        for r in db.job_states(s.database_path, [i for i in ids.split(",") if i]):
+            item = {"id": r["id"], "status": r["status"], "label": label(r["status"])[0],
+                    "busy": r["status"] in BUSY, "updated_at": r["updated_at"]}
+            if item["busy"]:
+                job = db.get_job(s.database_path, r["id"])
+                pr = progress.job_progress(s, job) if job else {}
+                item.update(pct=pr.get("pct"), eta_sec=pr.get("eta_sec"))
+            out.append(item)
+        return {"jobs": out}
+
+    @app.get("/api/jobs/{job_id}/progress")
+    def api_job_progress(job_id: str):
+        from .. import progress
+        job = job_or_404(job_id)
+        return {"id": job_id, "label": label(job["status"])[0], "updated_at": job["updated_at"],
+                **progress.job_progress(S(), job)}
 
     @app.get("/api/tasks-live")
     def api_tasks_live():
