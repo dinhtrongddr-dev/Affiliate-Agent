@@ -172,14 +172,20 @@ function tabs(root) {
   if (b) b.click();
 }
 
+function iconSvg(name) {
+  return `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+}
+
 async function workerStatus() {
   const el = document.getElementById("worker");
   if (!el) return "stop";
   const r = await getJSON("/api/status");
-  const text = !r ? "Mất kết nối" : !r.worker ? "Worker tắt"
-    : r.task ? `⚙ ${r.task.kind} ${r.task.job_id || ""}` : "● Worker sẵn sàng";
-  const changed = el.textContent !== text;
-  el.textContent = text;
+  const [text, cls] = !r ? ["Mất kết nối", "err"] : !r.worker ? ["Worker tắt", "err"]
+    : r.task ? [`Đang chạy: ${r.task.kind} ${r.task.job_id || ""}`, "run"] : ["Worker sẵn sàng", "ok"];
+  const label = el.querySelector(".worker-text") || el, dot = el.querySelector(".dot");
+  const changed = label.textContent !== text;
+  label.textContent = text;
+  if (dot) dot.className = "dot " + cls;
   return changed;
 }
 document.addEventListener("DOMContentLoaded", () => {
@@ -234,7 +240,7 @@ async function loadVersion(recheck) {
   if (note) { el.append(document.createElement("br"), note); }
   el.title = (loc.title ? "Thay đổi gần nhất: " + loc.title + "\n" : "") + "Bấm để kiểm tra bản mới";
   btn.hidden = !rem.behind;
-  btn.textContent = `⬆ Cập nhật (${rem.behind} bản mới)`;
+  btn.innerHTML = `${iconSvg("update")} Cập nhật (${rem.behind} bản mới)`;
   // result of an update that just finished (shown once per update)
   const last = v.last_update;
   let seen = null;

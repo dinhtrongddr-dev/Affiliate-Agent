@@ -6,7 +6,7 @@
 <div class="row space"><div><h1>Trend</h1>
   <p class="sub">Chọn trend để sáng tạo câu chuyện gốc trước, gắn affiliate phù hợp sau. Trend an toàn vẫn dùng được khi chưa có sản phẩm khớp. Chỉ lấy tín hiệu, không tải video của người khác.</p></div>
   <div class="row">
-    <button class="btn primary" onclick="api('/api/trends/fetch',undefined,{ok:'Đang thu thập & phân tích trend… (vài phút)',reload:true,delay:6000})">⟳ Thu thập &amp; phân tích</button>
+    <button class="btn primary" onclick="api('/api/trends/fetch',undefined,{ok:'Đang thu thập & phân tích trend… (vài phút)',reload:true,delay:6000})">{{ icon('refresh') }} Thu thập &amp; phân tích</button>
     <button class="btn" onclick="api('/api/intel/analyse',undefined,{ok:'Đang phân tích lại…',reload:true,delay:5000})">Phân tích lại</button>
   </div>
 </div>
@@ -47,7 +47,7 @@
   {% set sc = t.scores or {} %}
   <tr>
     <td style="max-width:300px"><b>{{ t.keyword }}</b>
-      {% if t.intent and t.intent.angle %}<div class="small">💡 {{ t.intent.angle }}</div>{% endif %}
+      {% if t.intent and t.intent.angle %}<div class="small">{{ icon('bulb-idea') }} {{ t.intent.angle }}</div>{% endif %}
       {% if t.notes %}<div class="small muted">{{ t.notes[:140] }}</div>{% endif %}
       {% if t.safety == 'BLOCKED' %}<div class="small"><span class="badge err">Nhạy cảm</span> {{ t.safety_reason }}</div>
       {% elif t.status == 'NOT_COMMERCIAL' %}<div class="small"><span class="badge">Chưa có affiliate tự nhiên</span> {{ (t.intent or {}).reason }}</div>
@@ -77,7 +77,7 @@
       <div style="margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:4px">
         <b>{{ m.product.name[:70] }}</b>
         <div class="muted">{{ m.product.price_text or m.product.price or '' }} · HH {{ '%g'|format(m.product.commission_rate) if m.product.commission_rate is not none else '?' }}% · phù hợp {{ '%.0f'|format(m.score) }}{% if m.reason %} · {{ m.reason[:120] }}{% endif %}</div>
-        <button class="btn sm primary" onclick="makeJob('{{ t.key }}','{{ m.product_id }}')">🎬 Làm video</button>
+        <button class="btn sm primary" onclick="makeJob('{{ t.key }}','{{ m.product_id }}')">{{ icon('play') }} Làm video</button>
       </div>
       {% else %}
         {% if t.status == 'NO_MATCH' %}<span class="muted">Kho chưa có sản phẩm khớp{% if t.intent and t.intent.product_keywords %}: thử nhập CSV cho "{{ t.intent.product_keywords|join('", "') }}"{% endif %}</span>
@@ -90,7 +90,7 @@
       {% if t.status in ('IGNORED','NOT_COMMERCIAL') or t.safety == 'BLOCKED' %}
         <button class="btn sm" onclick="topic('{{ t.key }}','restore')">Mở lại</button>
       {% else %}<button class="btn sm" onclick="topic('{{ t.key }}','ignore')">Bỏ qua</button>{% endif %}
-      <button class="btn sm danger" onclick="topic('{{ t.key }}','delete')">✕</button></td>
+      <button class="btn sm danger" onclick="topic('{{ t.key }}','delete')" aria-label="Xoá" title="Xoá">{{ icon('x') }}</button></td>
   </tr>
   {% endfor %}
 </table></div>
@@ -122,8 +122,8 @@
       <td class="small">{{ t.source }}</td>
       <td style="white-space:nowrap">
         {% if t.job_id %}<a class="btn sm" href="/jobs/{{ t.job_id }}">Xem video</a>{% endif %}
-        <button class="btn sm primary" onclick="api('/api/trends/{{ t.id }}/create-job',undefined,{ok:'AI đang làm video…',go:d=>'/jobs/'+d.job_id})">🎬 Làm video</button>
-        <button class="btn sm danger" onclick="api('/api/trends/{{ t.id }}/delete',undefined,{reload:true})">✕</button></td></tr>
+        <button class="btn sm primary" onclick="api('/api/trends/{{ t.id }}/create-job',undefined,{ok:'AI đang làm video…',go:d=>'/jobs/'+d.job_id})">{{ icon('play') }} Làm video</button>
+        <button class="btn sm danger" onclick="api('/api/trends/{{ t.id }}/delete',undefined,{reload:true})" aria-label="Xoá" title="Xoá">{{ icon('x') }}</button></td></tr>
     {% endfor %}</table>
     {% else %}<p class="muted">Chưa có trend thêm tay.</p>{% endif %}
   </div>

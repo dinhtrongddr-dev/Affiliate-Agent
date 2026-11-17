@@ -3,7 +3,7 @@
 {% block content %}
 <div class="row space"><div><h1>Doanh thu & đăng</h1>
   <p class="sub">Đơn hàng Shopee Affiliate được gắn về từng video qua sub_id = mã job.</p></div>
-  <button class="btn" onclick="api('/api/analytics/sync',undefined,{ok:'Đang đồng bộ báo cáo…',reload:true,delay:5000})">⟳ Đồng bộ báo cáo 30 ngày</button></div>
+  <button class="btn" onclick="api('/api/analytics/sync',undefined,{ok:'Đang đồng bộ báo cáo…',reload:true,delay:5000})">{{ icon('refresh') }} Đồng bộ báo cáo 30 ngày</button></div>
 <div class="grid g2" style="align-items:start">
   <div class="card"><h2>Hoa hồng theo video</h2>
     {% if summary %}<table><tr><th>Video</th><th>Đơn</th><th>Hoa hồng</th></tr>

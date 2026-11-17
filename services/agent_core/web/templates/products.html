@@ -21,7 +21,7 @@
     <div class="name" title="{{ o.productName }}">{{ o.productName }}</div>
     <div class="small muted">Giá từ {{ o.priceMin }} · HH {{ o.commissionRate }}{% if o.sales %} · đã bán {{ o.sales }}{% endif %}</div>
     <p></p>
-    <button class="btn sm primary" onclick='makeVideo({{ o | tojson }})'>🎬 Làm video</button>
+    <button class="btn sm primary" onclick='makeVideo({{ o | tojson }})'>{{ icon('play') }} Làm video</button>
     {% if o.offerLink %}<a class="btn sm" href="{{ o.offerLink }}" target="_blank" rel="noopener">Xem</a>{% endif %}
   </div>
 {% else %}

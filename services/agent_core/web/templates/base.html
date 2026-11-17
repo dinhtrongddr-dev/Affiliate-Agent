@@ -6,33 +6,36 @@
 <title>{% block title %}Affiliate Agent{% endblock %}</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
-<script src="/static/app.js?v={{ asset_v }}"></script>
 </head>
 <body data-busy="{{ '1' if busy else '0' }}">
+{% include "_icons.html" %}
 <div class="layout">
-  <nav class="side">
-    <div class="logo"><span>▶</span> Affiliate Agent</div>
-    <a href="/" class="{{ 'active' if active == 'dashboard' }}">🏠 Tổng quan</a>
-    <a href="/create" class="{{ 'active' if active == 'create' }}">✦ Sáng tạo mới</a>
-    <a href="/jobs" class="{{ 'active' if active in ('jobs', 'job') }}">🎬 Video</a>
-    <a href="/trends" class="{{ 'active' if active == 'trends' }}">🔥 Trend</a>
-    <a href="/china" class="{{ 'active' if active == 'china' }}">🇨🇳 Trend Trung Quốc</a>
-    <a href="/catalog" class="{{ 'active' if active == 'catalog' }}">📦 Sản phẩm Shopee</a>
-    <a href="/generation" class="{{ 'active' if active == 'generation' }}">🎞 Video AI</a>
-    <a href="/analytics" class="{{ 'active' if active == 'analytics' }}">📈 Doanh thu & đăng</a>
-    <a href="/performance" class="{{ 'active' if active == 'performance' }}">🧠 Hiệu quả & bài học</a>
-    <a href="/tasks" class="{{ 'active' if active == 'tasks' }}">⏱ Hàng đợi</a>
-    <a href="/settings" class="{{ 'active' if active == 'settings' }}">⚙️ Cài đặt</a>
-    <a href="/logs" class="{{ 'active' if active == 'logs' }}">📄 Nhật ký</a>
+  <nav class="side" aria-label="Điều hướng chính">
+    <div class="logo">{{ icon('play') }} Affiliate Agent</div>
+    <div class="side-links">
+      <a href="/" class="{{ 'active' if active == 'dashboard' }}">{{ icon('home') }} Tổng quan</a>
+      <a href="/create" class="{{ 'active' if active == 'create' }}">{{ icon('sparkles') }} Sáng tạo mới</a>
+      <a href="/jobs" class="{{ 'active' if active in ('jobs', 'job') }}">{{ icon('film') }} Video</a>
+      <a href="/trends" class="{{ 'active' if active == 'trends' }}">{{ icon('flame') }} Trend</a>
+      <a href="/china" class="{{ 'active' if active == 'china' }}">{{ icon('globe') }} Trend Trung Quốc</a>
+      <a href="/catalog" class="{{ 'active' if active == 'catalog' }}">{{ icon('package') }} Sản phẩm Shopee</a>
+      <a href="/generation" class="{{ 'active' if active == 'generation' }}">{{ icon('clapper') }} Clip AI (Muse)</a>
+      <a href="/analytics" class="{{ 'active' if active == 'analytics' }}">{{ icon('chart') }} Doanh thu &amp; đăng</a>
+      <a href="/performance" class="{{ 'active' if active == 'performance' }}">{{ icon('bulb') }} Hiệu quả &amp; bài học</a>
+      <a href="/tasks" class="{{ 'active' if active == 'tasks' }}">{{ icon('list') }} Hàng đợi</a>
+      <a href="/settings" class="{{ 'active' if active == 'settings' }}">{{ icon('settings') }} Cài đặt</a>
+      <a href="/logs" class="{{ 'active' if active == 'logs' }}">{{ icon('file') }} Nhật ký</a>
+    </div>
     <div class="side-foot">
       <div class="version" id="version" title="Phiên bản app">…</div>
-      <button type="button" class="btn update-btn" id="update-btn" hidden>⬆ Cập nhật</button>
-      <div class="worker" id="worker">…</div>
+      <button type="button" class="btn update-btn" id="update-btn" hidden>{{ icon('update') }} Cập nhật</button>
+      <div class="worker" id="worker"><span class="dot"></span><span class="worker-text">…</span></div>
     </div>
   </nav>
   <main>{% block content %}{% endblock %}</main>
 </div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js?v={{ asset_v }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

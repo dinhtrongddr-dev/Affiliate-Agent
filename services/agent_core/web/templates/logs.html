@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="row space"><h1>Nhật ký</h1><button class="btn" onclick="location.reload()">⟳ Làm mới</button></div>
+<div class="row space"><h1>Nhật ký</h1><button class="btn" onclick="location.reload()">{{ icon('refresh') }} Làm mới</button></div>
 <p class="sub">400 dòng cuối của logs/agent.log</p>
 <pre class="log" id="log">{{ log or 'Chưa có log.' }}</pre>
 {% endblock %}

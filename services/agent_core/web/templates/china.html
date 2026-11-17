@@ -7,17 +7,17 @@
 <div class="row space"><div><h1>Trend Trung Quốc</h1>
   <p class="sub">Phát hiện xu hướng trên Douyin, Bilibili, Weibo, Toutiao trước khi nóng ở Việt Nam, rút ra <b>công thức viral</b> rồi sáng tác nội dung mới cho người Việt. Chỉ đọc danh sách hot công khai (không đăng nhập), không tải video gốc, không đăng lại nội dung của người khác.</p></div>
   <div class="row">
-    <button class="btn primary" onclick="api('/api/china/fetch',undefined,{ok:'Đang thu thập, dịch và chấm điểm… (vài phút)',reload:true,delay:8000})">⟳ Thu thập ngay</button>
+    <button class="btn primary" onclick="api('/api/china/fetch',undefined,{ok:'Đang thu thập, dịch và chấm điểm… (vài phút)',reload:true,delay:8000})">{{ icon('refresh') }} Thu thập ngay</button>
     <button class="btn" onclick="api('/api/china/rescore',undefined,{ok:'Đang chấm lại…',reload:true,delay:5000})">Chấm lại</button>
   </div>
 </div>
 
 <div class="card" id="tabs-root">
   <div class="tabs">
-    <button data-tab="t-radar" class="{{ 'active' if tab=='radar' }}">📡 Trend Radar ({{ topics|length }})</button>
-    <button data-tab="t-niches" class="{{ 'active' if tab=='niches' }}">🧭 Ngách</button>
-    <button data-tab="t-ideas" class="{{ 'active' if tab=='ideas' }}">💡 Ý tưởng ({{ ideas|selectattr('status','equalto','NEW')|list|length }} mới)</button>
-    <button data-tab="t-sources" class="{{ 'active' if tab=='sources' }}">🔌 Nguồn & tự động</button>
+    <button data-tab="t-radar" class="{{ 'active' if tab=='radar' }}">{{ icon('radar') }} Trend Radar ({{ totals.topics }})</button>
+    <button data-tab="t-niches" class="{{ 'active' if tab=='niches' }}">{{ icon('compass') }} Ngách</button>
+    <button data-tab="t-ideas" class="{{ 'active' if tab=='ideas' }}">{{ icon('bulb-idea') }} Ý tưởng ({{ totals.ideas_new }} mới)</button>
+    <button data-tab="t-sources" class="{{ 'active' if tab=='sources' }}">{{ icon('plug') }} Nguồn & tự động</button>
   </div>
 
   <div class="tab {{ 'active' if tab=='radar' }}" id="t-radar">
@@ -49,7 +49,7 @@
           {% if t.scores and t.scores.facts and t.scores.facts.why %}<div class="muted">{{ t.scores.facts.why }}</div>{% endif %}</td>
         <td class="muted">{{ t.first_seen | localtime }}</td>
         <td>{% if t.status != 'BLOCKED' %}
-          <button class="btn sm primary" onclick="api('/api/china/topics/{{ t.key }}/ideas',undefined,{ok:'AI đang phân tích công thức & viết ý tưởng…',reload:true,delay:6000})">💡 Ý tưởng</button>
+          <button class="btn sm primary" onclick="api('/api/china/topics/{{ t.key }}/ideas',undefined,{ok:'AI đang phân tích công thức & viết ý tưởng…',reload:true,delay:6000})">{{ icon('bulb-idea') }} Ý tưởng</button>
           <button class="btn sm" onclick="api('/api/china/topics/{{ t.key }}/status',{status:'{{ 'NEW' if t.status=='IGNORED' else 'IGNORED' }}'},{reload:true})">{{ 'Mở lại' if t.status=='IGNORED' else 'Bỏ qua' }}</button>{% endif %}</td>
       </tr>{% endfor %}
     </table>
@@ -83,11 +83,11 @@
       <td><b>{{ i.est_score }}</b></td>
       <td>{{ {'NEW':'Mới','QUEUED':'Đang sản xuất','REJECTED':'Đã bỏ','FAILED':'Lỗi'}.get(i.status, i.status) }}
         {% if i.job_id %}<div><a href="/jobs/{{ i.job_id }}">mở video</a></div>{% endif %}</td>
-      <td>{% if i.status=='NEW' %}<button class="btn sm primary" onclick="api('/api/china/ideas/{{ i.id }}/produce',undefined,{ok:'Đã đưa vào sản xuất',reload:true,delay:2500})">🎬 Sản xuất</button>
+      <td>{% if i.status=='NEW' %}<button class="btn sm primary" onclick="api('/api/china/ideas/{{ i.id }}/produce',undefined,{ok:'Đã đưa vào sản xuất',reload:true,delay:2500})">{{ icon('play') }} Sản xuất</button>
         <button class="btn sm" onclick="api('/api/china/ideas/{{ i.id }}/reject',undefined,{reload:true})">Bỏ</button>{% endif %}</td>
     </tr>{% endfor %}</table>
     {% if tab == 'ideas' %}{{ pagination(pager, query) }}{% endif %}
-    {% else %}<p class="muted">Chưa có ý tưởng. Mở tab Trend Radar, bấm <b>💡 Ý tưởng</b> ở một trend (hoặc chờ lượt tự động: 3 trend điểm cao nhất mỗi lần thu thập).</p>{% endif %}
+    {% else %}<p class="muted">Chưa có ý tưởng. Mở tab Trend Radar, bấm <b>{{ icon('bulb-idea') }} Ý tưởng</b> ở một trend (hoặc chờ lượt tự động: 3 trend điểm cao nhất mỗi lần thu thập).</p>{% endif %}
   </div>
 
   <div class="tab {{ 'active' if tab=='sources' }}" id="t-sources">

@@ -62,7 +62,7 @@
 
 {% if gen_tasks %}
 <div class="card" style="margin-bottom:16px">
-  <div class="row space"><b>🎞 Clip AI (Muse) cho video này</b><a class="btn sm" href="/generation?job={{ job.id }}">Xem hàng đợi</a></div>
+  <div class="row space"><b>{{ icon('clapper') }} Clip AI (Muse) cho video này</b><a class="btn sm" href="/generation?job={{ job.id }}">Xem hàng đợi</a></div>
   <table class="small">{% for t in gen_tasks %}
     <tr><td>{{ 'Ảnh nhân vật' if t.scene_index < 0 else 'Cảnh %d'|format(t.scene_index + 1) }}{% if t.attempt > 1 %} · lần {{ t.attempt }}{% endif %}</td>
       <td><span class="badge {{ {'DOWNLOADED':'ok','FAILED':'err','CANCELLED':'','SUBMITTED':'run','SUBMITTING':'run','PENDING':'info'}.get(t.status,'') }}">{{ {'DOWNLOADED':'Xong','FAILED':'Lỗi','CANCELLED':'Đã huỷ','SUBMITTED':'Đang tạo','SUBMITTING':'Đang gửi','PENDING':'Chờ'}.get(t.status, t.status) }}</span></td>
@@ -76,7 +76,7 @@
   <b>Cần chú ý:</b> {{ job.last_error }}
   <div class="row" style="margin-top:8px">
     {% if job.status.startswith('WAITING') %}<a class="btn sm" href="/settings">Mở cài đặt</a>{% endif %}
-    <button class="btn sm" onclick="api('/api/jobs/{{ job.id }}/process?force=true',undefined,{ok:'Đã đưa vào hàng đợi',reload:true})">↻ Chạy lại</button>
+    <button class="btn sm" onclick="api('/api/jobs/{{ job.id }}/process?force=true',undefined,{ok:'Đã đưa vào hàng đợi',reload:true})">{{ icon('refresh') }} Chạy lại</button>
   </div>
 </div>
 {% endif %}
@@ -100,19 +100,19 @@
     {% if frames %}<p class="small muted" style="margin:12px 0 4px">Khung hình video gốc</p>
     <div class="thumbs">{% for f in frames %}<img loading="lazy" src="/keyframe/{{ job.id }}/{{ loop.index0 }}">{% endfor %}</div>{% endif %}
     <div class="row" style="margin-top:14px">
-      {% if job.output_path %}<a class="btn sm" href="/files/{{ job.id }}/{{ job.id }}.mp4" download>⬇ Tải video</a>{% endif %}
+      {% if job.output_path %}<a class="btn sm" href="/files/{{ job.id }}/{{ job.id }}.mp4" download>{{ icon('download') }} Tải video</a>{% endif %}
       <button class="btn sm danger" onclick="if(confirm('Xoá job này khỏi danh sách? File video không bị xoá.'))api('/api/jobs/{{ job.id }}/delete',undefined,{go:()=>'/jobs'})">Xoá</button>
     </div>
   </div>
 
   <div class="card" id="tabs-root">
     <div class="tabs">
-      <button data-tab="t-publish" class="active">✅ Duyệt & đăng</button>
-      <button data-tab="t-script">🎬 Kịch bản</button>
-      <button data-tab="t-clips">📁 Clip & hình ({{ clips|length }})</button>
-      <button data-tab="t-caption">✍️ Caption</button>
-      <button data-tab="t-product">🛒 Sản phẩm</button>
-      <button data-tab="t-info">ℹ️ Phân tích</button>
+      <button data-tab="t-publish" class="active">{{ icon('check') }} Duyệt & đăng</button>
+      <button data-tab="t-script">{{ icon('file') }} Kịch bản</button>
+      <button data-tab="t-clips">{{ icon('folder') }} Clip & hình ({{ clips|length }})</button>
+      <button data-tab="t-caption">{{ icon('edit') }} Caption</button>
+      <button data-tab="t-product">{{ icon('package') }} Sản phẩm</button>
+      <button data-tab="t-info">{{ icon('info') }} Phân tích</button>
     </div>
 
     <!-- Publish -->
@@ -141,7 +141,7 @@
       </div>
       {% endif %}
       {% for b in link_info.blockers %}<div class="small err-text">⛔ {{ b }}</div>{% endfor %}
-      {% for n in link_info.notes %}<div class="small muted">ℹ️ {{ n }}</div>{% endfor %}
+      {% for n in link_info.notes %}<div class="small muted">{{ icon('info') }} {{ n }}</div>{% endfor %}
       {% for p, name in platform_labels.items() %}
       <div class="scene">
         <label class="check"><input type="checkbox" name="pf" value="{{ p }}" {{ 'disabled' if blockers[p] }}
@@ -157,7 +157,7 @@
       <label>Lên lịch (để trống = đăng ngay)</label>
       <input type="datetime-local" id="schedule" style="max-width:260px">
       <p></p>
-      <button class="btn primary" onclick="approve()">✅ Duyệt & đăng</button>
+      <button class="btn primary" onclick="approve()">{{ icon('check') }} Duyệt & đăng</button>
       {% else %}
       <p class="muted">Video chưa ở trạng thái chờ duyệt.</p>
       {% endif %}
@@ -187,7 +187,7 @@
         {% for key, (label, kind) in perf_fields.items() %}
         <div><label>{{ label }}</label><input data-k="{{ key }}" inputmode="decimal"></div>{% endfor %}
       </div>
-      <button class="btn" type="button" onclick="savePerf()">💾 Lưu số liệu</button>
+      <button class="btn" type="button" onclick="savePerf()">{{ icon('save') }} Lưu số liệu</button>
       </div>
     {% endif %}
     </div>
@@ -222,8 +222,8 @@
       <h3 style="margin-top:16px">Cảnh ({{ script.scenes|length }})</h3>
       <div id="scenes"></div>
       <div class="row">
-        <button class="btn primary" onclick="saveRender()" {{ 'disabled' if busy }}>💾 Lưu & dựng lại</button>
-        <button class="btn" onclick="if(confirm('AI viết kịch bản mới và dựng lại?'))api('/api/jobs/{{ job.id }}/regenerate',undefined,{ok:'AI đang viết lại',reload:true})" {{ 'disabled' if busy }}>✨ AI viết lại kịch bản</button>
+        <button class="btn primary" onclick="saveRender()" {{ 'disabled' if busy }}>{{ icon('save') }} Lưu & dựng lại</button>
+        <button class="btn" onclick="if(confirm('AI viết kịch bản mới và dựng lại?'))api('/api/jobs/{{ job.id }}/regenerate',undefined,{ok:'AI đang viết lại',reload:true})" {{ 'disabled' if busy }}>{{ icon('wand') }} AI viết lại kịch bản</button>
       </div>
       {% if script.render %}<p class="small muted">Lần dựng gần nhất: {{ script.render.duration }}s ·
         {{ 'có giọng đọc' if script.render.voice else 'không có giọng' }} ·
@@ -238,7 +238,7 @@
         AI sẽ ưu tiên dùng chúng khi viết kịch bản; bạn cũng có thể gán clip cho từng cảnh ở tab Kịch bản.
         Chỉ dùng nội dung bạn sở hữu hoặc có quyền.</p>
       <div class="drop" id="clip-drop"><input type="file" accept="video/*,image/*" multiple hidden>
-        <div style="font-size:26px">⬆</div><b>Kéo thả clip / ảnh vào đây</b> hoặc bấm để chọn
+        <div style="font-size:26px">{{ icon('upload') }}</div><b>Kéo thả clip / ảnh vào đây</b> hoặc bấm để chọn
         <div class="small muted">mp4, mov, webm, jpg, png, webp · tối đa 40 file</div></div>
       <div class="row" style="margin:10px 0">
         <label class="check"><input type="checkbox" id="clip-ai"> Clip do AI tạo (gắn nhãn nội dung AI khi đăng)</label>
@@ -260,7 +260,7 @@
           </div>
         </div>{% endfor %}
       </div>
-      <p></p><button class="btn primary" {{ 'disabled' if busy }} onclick="if(confirm('AI viết kịch bản mới quanh các clip này và dựng lại video?'))api('/api/jobs/{{ job.id }}/regenerate',undefined,{ok:'AI đang viết kịch bản với clip của bạn…',reload:true})">✨ AI dựng video với các clip này</button>
+      <p></p><button class="btn primary" {{ 'disabled' if busy }} onclick="if(confirm('AI viết kịch bản mới quanh các clip này và dựng lại video?'))api('/api/jobs/{{ job.id }}/regenerate',undefined,{ok:'AI đang viết kịch bản với clip của bạn…',reload:true})">{{ icon('wand') }} AI dựng video với các clip này</button>
       {% else %}<p class="muted">Chưa có clip nào.</p>{% endif %}
     </div>
 
@@ -272,7 +272,7 @@
       <label>Mô tả Facebook (đăng kèm link Shopee)</label><textarea id="c-fb" rows="3">{{ content.facebook_description }}</textarea>
       <label>Link sản phẩm TikTok Shop (gắn giỏ hàng khi hoàn tất bài trong app TikTok)</label>
       <input id="c-tt" value="{{ content.tiktok_link or '' }}" placeholder="https://www.tiktok.com/... hoặc https://vt.tiktok.com/...">
-      <p></p><button class="btn primary" onclick="saveCaption()">💾 Lưu caption</button>
+      <p></p><button class="btn primary" onclick="saveCaption()">{{ icon('save') }} Lưu caption</button>
       <h3 style="margin-top:18px">Xem trước theo nền tảng</h3>
       <div class="grid g3">
         <div><b class="small">Shopee Video</b><pre class="small" style="white-space:pre-wrap;background:#f5f6f8;padding:10px;border-radius:8px">{{ content.shopee_caption }}</pre></div>
@@ -286,7 +286,7 @@
       <div class="scene">
         <h3>Tìm / đổi sản phẩm</h3>
         <div class="row"><input id="p-kw" placeholder="Từ khoá Shopee, VD: máy xay sinh tố mini" style="flex:1">
-          <button class="btn" onclick="searchProducts()">🔍 Tìm</button></div>
+          <button class="btn" onclick="searchProducts()">{{ icon('search') }} Tìm</button></div>
         <p class="small muted" style="margin:10px 0 4px">Hoặc nhập tay (không cần Open API):
           tạo link ở <a href="https://affiliate.shopee.vn/" target="_blank" rel="noopener">Shopee Affiliate</a> → menu Hoa hồng → Custom Link, rồi dán vào đây.</p>
         <label>Link sản phẩm Shopee</label><input id="p-url" placeholder="https://shopee.vn/...">
@@ -344,10 +344,10 @@ function drawScenes(){
   box.innerHTML=SCRIPT.scenes.map((s,i)=>`
    <div class="scene" data-i="${i}">
      <div class="head"><span>Cảnh ${i+1} · ${esc(s.kind)}${s.segment!=null?' · đoạn '+s.segment:''}${s.visual?' · '+esc(s.visual):''}</span>
-       <span><button class="btn sm" onclick="moveScene(${i},-1)">↑</button>
-       <button class="btn sm" onclick="moveScene(${i},1)">↓</button>
-       <button class="btn sm danger" onclick="delScene(${i})">✕</button>
-       ${s.generated?`<button class="btn sm" title="Tạo lại clip AI của cảnh này (sửa được mô tả)" onclick="regenScene(${i})">🎬 Tạo lại</button>`:''}</span></div>
+       <span><button class="btn sm" aria-label="Lên trên" title="Lên trên" onclick="moveScene(${i},-1)">${iconSvg('up')}</button>
+       <button class="btn sm" aria-label="Xuống dưới" title="Xuống dưới" onclick="moveScene(${i},1)">${iconSvg('down')}</button>
+       <button class="btn sm danger" aria-label="Xoá cảnh" title="Xoá cảnh" onclick="delScene(${i})">${iconSvg('trash')}</button>
+       ${s.generated?`<button class="btn sm" title="Tạo lại clip AI của cảnh này (sửa được mô tả)" onclick="regenScene(${i})">${iconSvg('refresh')} Tạo lại</button>`:''}</span></div>
      ${(s.lines&&s.lines.length)?s.lines.map((ln,k)=>`<label>Lời ${esc((SCRIPT.voice_cast&&SCRIPT.voice_cast[ln.speaker]&&SCRIPT.voice_cast[ln.speaker].label)||ln.speaker)}${s.talking?' (nói trước camera)':''}</label>
        <textarea class="ln" data-k="${k}" rows="2">${esc(ln.text)}</textarea>`).join(""):
        `<label>Lời thoại</label><textarea class="vo" rows="2">${esc(s.voiceover)}</textarea>`}

@@ -51,8 +51,8 @@
       <label for="template-id">Series</label>
       <div class="voice-row">
         <select id="template-id">{% for t in series %}<option value="{{ t.id }}">{{ t.label }} · v{{ t.version }} · {{ t.reference_assets|length }} ảnh nhân vật</option>{% endfor %}</select>
-        <button type="button" class="btn" id="edit-series">✏️ Chỉnh series</button>
-        <button type="button" class="btn" id="new-series">＋ Series mới</button>
+        <button type="button" class="btn" id="edit-series">{{ icon('edit') }} Chỉnh series</button>
+        <button type="button" class="btn" id="new-series">{{ icon('plus') }} Series mới</button>
       </div>
       <p class="small muted" id="series-summary"></p>
       <label for="voice-mode" style="margin-top:12px">Kiểu lời thoại cho lần tạo này</label>
@@ -108,12 +108,12 @@
 
     <h3 style="margin-top:18px">Nhân vật <span class="small muted">(tối đa 6)</span></h3>
     <div id="s-chars"></div>
-    <button type="button" class="btn" id="add-char">＋ Thêm nhân vật</button>
+    <button type="button" class="btn" id="add-char">{{ icon('plus') }} Thêm nhân vật</button>
 
     <label for="s-rules" style="margin-top:14px">Quy tắc giữ liên tục (mỗi dòng một quy tắc)</label>
     <textarea id="s-rules" rows="3" maxlength="6000"></textarea>
     <div class="row-actions">
-      <button type="button" class="btn primary" id="save-series">💾 Lưu series</button>
+      <button type="button" class="btn primary" id="save-series">{{ icon('save') }} Lưu series</button>
       <button type="button" class="btn" id="close-editor">Đóng</button>
     </div>
 
@@ -218,7 +218,7 @@ function charCard(c = {}) {
   const appearance = area(c.appearance, 'Ngoại hình (vd: tóc buộc 2 bên, má phúng phính)');
   const wardrobe = area(c.wardrobe, 'Trang phục cố định (vd: váy vàng chấm bi)', 2, 600);
   const description = area(c.description, 'Mô tả ngắn / vai trò trong series', 2, 3000);
-  const remove = el('button', {type: 'button', className: 'btn', textContent: '✕ Xoá nhân vật'});
+  const remove = el('button', {type: 'button', className: 'btn', textContent: 'Xoá nhân vật'});
   remove.addEventListener('click', () => card.remove());
   const lab = (text, input) => el('div', {}, [el('label', {textContent: text}), input]);
   card.append(

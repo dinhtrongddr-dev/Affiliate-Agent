@@ -14,20 +14,20 @@
   <div class="card">
     <h2>1. Có video base</h2>
     <div class="drop" id="drop"><input type="file" accept="video/*" multiple hidden>
-      <div style="font-size:30px">⬆</div>
+      <div style="font-size:30px">{{ icon('upload') }}</div>
       <b>Kéo thả video vào đây</b> hoặc bấm để chọn file
       <div class="small muted">Hoặc chép vào {{ inbox }} — app tự quét. Chỉ dùng video bạn sở hữu/có quyền.</div>
     </div>
     <div class="row" style="margin-top:10px">
-      <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">🔄 Quét inbox</button>
+      <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">{{ icon('refresh') }} Quét inbox</button>
     </div>
   </div>
   <div class="card">
     <h2>2. Không có video</h2>
     <p class="small muted">AI chọn trend + sản phẩm, viết kịch bản, tự dựng video.</p>
-    <a class="btn primary" href="/trends">🔥 Làm từ trend</a>
+    <a class="btn primary" href="/trends">{{ icon('flame') }} Làm từ trend</a>
     <p></p>
-    <a class="btn" href="/products">🛒 Làm từ sản phẩm hot</a>
+    <a class="btn" href="/products">{{ icon('package') }} Làm từ sản phẩm hot</a>
   </div>
   <div class="card">
     <h2>Tình trạng hệ thống</h2>

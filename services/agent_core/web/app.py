@@ -168,7 +168,14 @@ def create_app(start_worker: bool = True) -> FastAPI:
 
     app.mount("/static", VersionedStatic(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
-    templates.env.globals.update(label=label, platform_labels=PLATFORM_LABELS)
+    from markupsafe import Markup
+
+    def icon(name: str, label: str = "") -> Markup:
+        """Inline SVG from the sprite in _icons.html; decorative unless a label is given."""
+        aria = f' role="img" aria-label="{Markup.escape(label)}"' if label else ' aria-hidden="true"'
+        return Markup(f'<svg class="ico"{aria}><use href="#i-{Markup.escape(name)}"/></svg>')
+
+    templates.env.globals.update(label=label, platform_labels=PLATFORM_LABELS, icon=icon)
     templates.env.filters["fromjson"] = lambda v: json.loads(v) if v else None
     from ..localtime import fmt as _localtime
     templates.env.filters["localtime"] = _localtime   # stored UTC -> Vietnam time on every page

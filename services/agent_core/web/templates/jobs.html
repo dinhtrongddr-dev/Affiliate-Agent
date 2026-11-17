@@ -3,7 +3,7 @@
 {% block title %}Video · Affiliate Agent{% endblock %}
 {% block content %}
 <div class="row space"><div><h1>Video</h1><p class="sub">Tất cả video đang xử lý, chờ duyệt và đã đăng.</p></div>
-  <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">🔄 Quét inbox</button></div>
+  <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">{{ icon('refresh') }} Quét inbox</button></div>
 <div class="row" style="margin-bottom:14px">
   <a class="btn sm {{ 'primary' if not status }}" href="/jobs">Tất cả</a>
   {% for st, n in counts.items() %}

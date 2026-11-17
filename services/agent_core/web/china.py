@@ -32,6 +32,7 @@ def install_routes(app, settings, render):
         ideas = store.list_ideas(s.database_path, limit=300)
         # one page of the open tab (radar = topics, ideas = ideas); the other tabs are small
         size = 50
+        totals = {"topics": len(topics), "ideas_new": sum(1 for i in ideas if i.get("status") == "NEW")}
         listed = topics if tab != "ideas" else ideas
         pages = max(1, -(-len(listed) // size))
         page = max(1, min(int(page or 1), pages))
@@ -46,7 +47,7 @@ def install_routes(app, settings, render):
         topic_names = store.topic_names(s.database_path, [i.get("topic_key") for i in ideas])
         from ..cn_trends.pipeline import autopilot_today
         return render(request, "china.html", active="china", tab=tab if tab in TABS else "radar",
-                      topics=topics, ideas=ideas, topic_names=topic_names, pager=pager,
+                      topics=topics, ideas=ideas, topic_names=topic_names, pager=pager, totals=totals,
                       query=urlencode({k: v for k, v in (("tab", tab), ("stage", stage), ("niche", niche),
                                                           ("goal", goal)) if v}),
                       niches=analysis.niche_stats(s), niche_names={n["id"]: n["name"] for n in store.niches(s.database_path)},
