@@ -49,7 +49,10 @@ class MetaReelsPublisher:
         title: str = "",
         poll_seconds: int = 300,
         poll_interval: int = 5,
+        hidden: bool = False,
     ) -> dict:
+        """hidden=True uploads the Reel as an unpublished draft on the Page (nobody sees it until
+        the owner publishes it in Meta Business Suite); otherwise it is published."""
         video_path = Path(video_path)
         if not video_path.is_file():
             raise FileNotFoundError(video_path)
@@ -94,7 +97,7 @@ class MetaReelsPublisher:
                 data={
                     "video_id": video_id,
                     "upload_phase": "finish",
-                    "video_state": "PUBLISHED",
+                    "video_state": "DRAFT" if hidden else "PUBLISHED",
                     "description": description,
                     **({"title": title} if title else {}),
                 },
@@ -120,6 +123,16 @@ class MetaReelsPublisher:
 
                 if video_status in {"error", "upload_failed", "expired"}:
                     raise MetaReelsError(f"Meta processing failed for video {video_id}: {last_status}")
+                processing = str((status.get("processing_phase") or {}).get("status") or "").lower()
+                if hidden and (video_status == "ready" or processing in {"complete", "completed"}):
+                    return {
+                        "status": "DRAFT_SAVED_CONFIRMED",
+                        "video_id": video_id,
+                        "permalink": last_status.get("permalink_url"),
+                        "meta_finish": finish_data,
+                        "meta_status": last_status,
+                        "hidden": True,
+                    }
                 if publishing_status in {"complete", "completed", "published", "success"}:
                     return {
                         "status": "PUBLISHED_CONFIRMED",

@@ -9,8 +9,10 @@ class PublishDisabled(RuntimeError):
     pass
 
 
-def publish_facebook_reel(settings, video_path: Path, description: str, title: str = "") -> dict:
-    if not settings.auto_publish:
+def publish_facebook_reel(settings, video_path: Path, description: str, title: str = "",
+                          hidden: bool = False) -> dict:
+    # a hidden (unpublished draft) Reel is not public, so it does not need AA_AUTO_PUBLISH
+    if not hidden and not settings.auto_publish:
         raise PublishDisabled("AA_AUTO_PUBLISH is false; Facebook publication is disabled.")
     if not settings.meta_enabled:
         raise PublishDisabled("AA_META_ENABLED is false; connect the Facebook Page first.")
@@ -28,4 +30,4 @@ def publish_facebook_reel(settings, video_path: Path, description: str, title: s
         page_id=settings.meta_page_id,
         page_access_token=token,
     )
-    return publisher.publish_reel(Path(video_path), description=description, title=title)
+    return publisher.publish_reel(Path(video_path), description=description, title=title, hidden=hidden)

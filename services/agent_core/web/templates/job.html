@@ -151,6 +151,11 @@
           <option value="draft">Lưu bản nháp (an toàn)</option>
           <option value="publish">Đăng ngay (cần AA_AUTO_PUBLISH)</option>
         </select>{% endif %}
+        {% if p == 'facebook_reels' %}
+        <select id="facebook-action" style="max-width:260px;margin-top:6px">
+          <option value="hidden">Đăng ẩn (bản nháp trên Page, chưa ai thấy)</option>
+          <option value="publish">Đăng công khai (cần AA_AUTO_PUBLISH)</option>
+        </select>{% endif %}
         {% for b in blockers[p] %}<div class="small err-text">• {{ b }}</div>{% endfor %}
       </div>
       {% endfor %}
@@ -450,7 +455,8 @@ async function saveCaption(){await api(`/api/jobs/${JOB}/content`,{content:capti
 async function approve(){
   const platforms={};
   document.querySelectorAll("input[name=pf]:checked").forEach(c=>{
-    platforms[c.value]=c.value==="shopee"?document.getElementById("shopee-action").value:"publish";});
+    const sel=document.getElementById(c.value==="shopee"?"shopee-action":c.value==="facebook_reels"?"facebook-action":"");
+    platforms[c.value]=sel?sel.value:"publish";});
   if(!Object.keys(platforms).length) return toast("Chọn ít nhất 1 nền tảng",true);
   const sched=document.getElementById("schedule").value;
   if(!confirm("Xác nhận đăng lên: "+Object.keys(platforms).join(", ")+(sched?" lúc "+sched:" ngay")+"?")) return;

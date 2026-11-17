@@ -64,3 +64,39 @@ def test_paths_outside_the_app_folders_are_refused(tmp_path):
     outside.write_text("keep")
     assert cleanup._safe_remove(s, outside) == 0 and outside.exists()
     assert cleanup.job_folders(s, "../etc") == []
+
+
+def test_hidden_facebook_reel_is_an_unpublished_draft(tmp_path, monkeypatch):
+    import httpx
+
+    from agent_core import meta_reels
+    sent = {}
+
+    def handler(request):
+        if request.url.host == "rupload.facebook.com":
+            return httpx.Response(200, json={"success": True})
+        if request.method == "POST" and b"upload_phase=start" in request.content:
+            return httpx.Response(200, json={"video_id": "v1", "upload_url": "https://rupload.facebook.com/v1"})
+        if request.method == "POST":
+            sent["finish"] = request.content.decode()
+            return httpx.Response(200, json={"success": True})
+        return httpx.Response(200, json={"status": {"video_status": "ready"}})
+
+    real = httpx.Client
+    monkeypatch.setattr(meta_reels.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"0" * 100)
+    pub = meta_reels.MetaReelsPublisher("v21.0", "123", "token")
+    out = pub.publish_reel(video, "mô tả", hidden=True, poll_interval=0)
+    assert "video_state=DRAFT" in sent["finish"] and out["status"] == "DRAFT_SAVED_CONFIRMED"
+
+
+def test_hidden_post_does_not_need_auto_publish():
+    from types import SimpleNamespace
+
+    from agent_core import workflow
+    s = SimpleNamespace(meta_enabled=True, auto_publish=False)
+    job = {"facebook_ready": 1, "affiliate_link": "", "brief_json": "{}", "script_json": "{}"}
+    hidden = workflow.publish_blockers(s, job, "facebook_reels", "hidden")
+    public = workflow.publish_blockers(s, job, "facebook_reels", "publish")
+    assert not any("AUTO_PUBLISH" in b for b in hidden) and any("AUTO_PUBLISH" in b for b in public)

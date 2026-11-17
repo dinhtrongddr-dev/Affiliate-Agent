@@ -335,7 +335,9 @@ def create_app(start_worker: bool = True) -> FastAPI:
         s = S()
         job = job_or_404(job_id)
         posts = db.list_platform_posts(s.database_path, job_id)
-        blockers = {p: workflow.publish_blockers(s, job, p) for p in PLATFORM_LABELS}
+        # checked for the safe default action of each platform (Facebook: hidden draft)
+        blockers = {p: workflow.publish_blockers(s, job, p, "hidden" if p == "facebook_reels" else "draft")
+                    for p in PLATFORM_LABELS}
         return render(request, "job.html", job=job, posts=posts, blockers=blockers,
                       analysis=json.loads(job.get("analysis_json") or "{}"),
                       script=json.loads(job.get("script_json") or "{}"),

@@ -1893,8 +1893,8 @@ def publish_blockers(settings, job: dict, platform: str, action: str = "draft") 
             issues.append("Video chưa qua QA Facebook Reels")
         if not settings.meta_enabled:
             issues.append("Chưa bật/cấu hình Facebook Page (AA_META_ENABLED)")
-        if not settings.auto_publish:
-            issues.append("Facebook đăng công khai cần bật AA_AUTO_PUBLISH")
+        if action != "hidden" and not settings.auto_publish:
+            issues.append("Facebook đăng công khai cần bật AA_AUTO_PUBLISH (đăng ẩn thì không cần)")
     elif platform == "tiktok":
         if not settings.tiktok_enabled or not settings.tiktok_access_token.get_secret_value():
             issues.append("Chưa cấu hình TikTok (AA_TIKTOK_ENABLED + access token)")
@@ -1992,11 +1992,12 @@ def upload_shopee_draft(settings, job_id: str, confirmed: bool = False,
     return result
 
 
-def publish_facebook_reel_job(settings, job_id: str, confirmed: bool = False) -> dict:
-    """Publish a reviewed Facebook Reel only after two explicit safety gates."""
+def publish_facebook_reel_job(settings, job_id: str, confirmed: bool = False, hidden: bool = False) -> dict:
+    """Publish a reviewed Facebook Reel only after two explicit safety gates.
+    hidden=True posts it as an unpublished draft on the Page (no AA_AUTO_PUBLISH needed)."""
     if not confirmed:
         raise WorkflowError("Facebook publishing requires --confirm; no action was taken.")
-    if not settings.auto_publish:
+    if not hidden and not settings.auto_publish:
         raise WorkflowError("AA_AUTO_PUBLISH is false; no Facebook request was sent.")
     if not settings.meta_enabled:
         raise WorkflowError("AA_META_ENABLED is false; configure the Facebook Page first.")
@@ -2020,7 +2021,7 @@ def publish_facebook_reel_job(settings, job_id: str, confirmed: bool = False) ->
 
     try:
         result = publish_facebook_reel(settings, video_path, description=description,
-                                       title=str(content.get("title") or ""))
+                                       title=str(content.get("title") or ""), hidden=hidden)
     except Exception as exc:
         upsert_platform_post(settings.database_path, job_id, "facebook_reels",
                              "UPLOAD_NEEDS_RECONCILIATION", last_error=str(exc)[:1000])
@@ -2070,7 +2071,7 @@ def publish_platform(settings, job_id: str, platform: str, action: str = "draft"
         return upload_shopee_draft(settings, job_id, confirmed=True,
                                    action="publish" if action == "publish" else "draft")
     if platform == "facebook_reels":
-        return publish_facebook_reel_job(settings, job_id, confirmed=True)
+        return publish_facebook_reel_job(settings, job_id, confirmed=True, hidden=action == "hidden")
     if platform == "tiktok":
         return publish_tiktok_job(settings, job_id, confirmed=True)
     raise WorkflowError(f"Unsupported platform: {platform}")
