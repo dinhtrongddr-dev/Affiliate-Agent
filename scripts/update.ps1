@@ -116,11 +116,27 @@ for ($try = 1; $try -le 3 -and $f.Code -ne 0 -and $f.Out -match "\.lock|couldn't
     Clear-GitLock
     $f = Invoke-Git @('fetch', '--quiet', 'origin', $branch)
 }
+$target = "origin/$branch"
+if ($f.Code -ne 0 -and $f.Out -match "couldn't set|cannot lock ref|unable to unlink") {
+    # The ref file itself is stuck (read-only attribute, broken file, antivirus): clear read-only
+    # flags in .git, drop the remote ref (it is only a cache of GitHub) and try again.
+    Write-Host 'Sua thu muc .git (bo thuoc tinh chi doc, xoa ref hong)...' -ForegroundColor Yellow
+    & attrib -R (Join-Path $Root '.git\*') /S /D 2>$null | Out-Null
+    $ref = Join-Path $Root ".git\refs\remotes\origin\$branch"
+    if (Test-Path $ref) { Remove-Item $ref -Force -Recurse -ErrorAction SilentlyContinue }
+    Invoke-Git @('update-ref', '-d', "refs/remotes/origin/$branch") | Out-Null
+    $f = Invoke-Git @('fetch', '--quiet', 'origin', $branch)
+    if ($f.Code -ne 0) {
+        # last resort: download into FETCH_HEAD only, never touching refs/remotes
+        $f = Invoke-Git @('fetch', '--quiet', '--refmap=', 'origin', $branch)
+        if ($f.Code -eq 0) { $target = 'FETCH_HEAD' }
+    }
+}
 if ($f.Code -ne 0) {
     Write-Host $f.Out.Trim() -ForegroundColor Red
     throw 'Khong tai duoc ban moi tu GitHub (xem dong loi phia tren). Kiem tra mang roi chay lai.'
 }
-$behind = [int](git rev-list --count "HEAD..origin/$branch")
+$behind = [int](git rev-list --count "HEAD..$target")
 $current = (git log -1 --format='%h %cd' --date=format:'%d/%m %H:%M').Trim()
 $script:From = (git log -1 --format='%h').Trim()
 if ($behind -eq 0) {
@@ -140,7 +156,7 @@ if ($behind -eq 0) {
     }
 }
 Write-Host "Co $behind cap nhat moi:" -ForegroundColor Cyan
-git log --format='  - %s' "HEAD..origin/$branch" | Select-Object -First 15
+git log --format='  - %s' "HEAD..$target" | Select-Object -First 15
 if ($Check) { exit 0 }
 
 # Never overwrite code someone edited on this machine.
@@ -171,11 +187,11 @@ if (Test-Path $db) {
 
 $before = (git rev-parse HEAD).Trim()
 Clear-GitLock   # stopping the app above may have interrupted a git call
-$m = Invoke-Git @('merge', '--ff-only', "origin/$branch")
-if ($m.Code -ne 0 -and $m.Out -match '\.lock') { Clear-GitLock; $m = Invoke-Git @('merge', '--ff-only', "origin/$branch") }
+$m = Invoke-Git @('merge', '--ff-only', $target)
+if ($m.Code -ne 0 -and $m.Out -match '\.lock') { Clear-GitLock; $m = Invoke-Git @('merge', '--ff-only', $target) }
 Write-Host $m.Out.Trim()
 if ($m.Code -ne 0) {
-    $ahead = [int](git rev-list --count "origin/$branch..HEAD")
+    $ahead = [int](git rev-list --count "$target..HEAD")
     if ($ahead -gt 0) {
         throw "May nay co $ahead commit rieng chua co tren GitHub: lich su da khac nhau, can xu ly tay."
     }
