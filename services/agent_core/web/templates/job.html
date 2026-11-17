@@ -100,7 +100,7 @@
     {% if frames %}<p class="small muted" style="margin:12px 0 4px">Khung hình video gốc</p>
     <div class="thumbs">{% for f in frames %}<img loading="lazy" alt="Khung hình {{ loop.index }}" src="/keyframe/{{ job.id }}/{{ loop.index0 }}">{% endfor %}</div>{% endif %}
     <div class="row" style="margin-top:14px">
-      {% if job.output_path %}<a class="btn sm" href="/files/{{ job.id }}/{{ job.id }}.mp4" download>{{ icon('download') }} Tải video</a>{% endif %}
+      {% if job.output_path %}<a class="btn sm" href="/files/{{ job.id }}/{{ job.id }}.mp4?dl=1" download>{{ icon('download') }} Tải video</a>{% endif %}
       <button class="btn sm danger" onclick="if(confirm('Xoá hẳn video này? Xoá cả clip AI, bản dựng và file tạm để giải phóng dung lượng. Không hoàn tác được.'))api('/api/jobs/{{ job.id }}/delete',undefined,{ok:r=>'Đã xoá, giải phóng '+(r.bytes/1048576).toFixed(0)+' MB',go:()=>'/jobs'})">{{ icon('trash') }} Xoá hẳn</button>
     </div>
   </div>

@@ -926,12 +926,13 @@ def create_app(start_worker: bool = True) -> FastAPI:
             raise HTTPException(400, str(exc)) from None
 
     @app.get("/files/{job_id}/{name:path}")
-    def job_file(job_id: str, name: str):
+    def job_file(job_id: str, name: str, dl: int = 0):
         base = (S().shopee_output / job_id).resolve()
         target = (base / name).resolve()
         if not target.is_relative_to(base) or not target.is_file():
             raise HTTPException(404)
-        return FileResponse(target)
+        # ?dl=1: save as a file (the app window ignores the <a download> attribute alone)
+        return FileResponse(target, filename=target.name if dl else None)
 
     @app.get("/clips/{job_id}/{name}")
     def clip_file(job_id: str, name: str):

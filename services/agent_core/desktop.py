@@ -80,6 +80,7 @@ def main(url: str = URL) -> int:
     except OSError:            # another window won the race
         return 0 if focus_existing(2) else _fallback(url)
     listener.listen(4)
+    webview.settings["ALLOW_DOWNLOADS"] = True   # "Tải video" links save to Downloads (off by default)
     window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(900, 600),
                                    text_select=True)
     threading.Thread(target=_serve_focus, args=(window, listener), daemon=True).start()
