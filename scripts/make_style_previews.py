@@ -40,7 +40,8 @@ def make(style_id: str) -> str:
     img = Image.open(io.BytesIO(raw)).convert("RGB")
     img.thumbnail((480, 640))
     OUT.mkdir(parents=True, exist_ok=True)
-    img.save(OUT / f"{style_id}.jpg", quality=82, optimize=True, progressive=True)
+    img.thumbnail((300, 450))   # shown at about 150x225; keeps the 15 previews small
+    img.save(OUT / f"{style_id}.jpg", quality=78, optimize=True, progressive=True)
     return f"{style_id}: ok {img.size}"
 
 
