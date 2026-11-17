@@ -3,7 +3,15 @@
 {% block title %}Video · Affiliate Agent{% endblock %}
 {% block content %}
 <div class="row space"><div><h1>Video</h1><p class="sub">Tất cả video đang xử lý, chờ duyệt và đã đăng.</p></div>
-  <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">{{ icon('refresh') }} Quét inbox</button></div>
+  <div class="row"><button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">{{ icon('refresh') }} Quét inbox</button>
+  <button class="btn danger" type="button" onclick="openCleanup()">{{ icon('trash') }} Dọn rác</button></div></div>
+<div class="card" id="cleanup" hidden>
+  <h2>Dọn rác: xoá hẳn video và file để giải phóng dung lượng</h2>
+  <p class="small muted">Xoá cả clip AI, bản dựng, file tạm của các video chọn dưới đây. Video gốc bạn thả vào inbox không bị xoá. Video đang chạy hoặc đang chờ đăng được giữ lại. Không hoàn tác được.</p>
+  <div id="cleanup-groups" class="small muted">Đang tính dung lượng…</div>
+  <div class="row-actions"><button class="btn" type="button" onclick="document.getElementById('cleanup').hidden=true">Đóng</button>
+    <button class="btn danger" type="button" id="cleanup-go" onclick="runCleanup(this)" disabled>{{ icon('trash') }} Xoá các nhóm đã chọn</button></div>
+</div>
 <div class="row" style="margin-bottom:14px">
   <a class="btn sm {{ 'primary' if not status }}" href="/jobs">Tất cả</a>
   {% for st, n in counts.items() %}
@@ -18,4 +26,26 @@
   {% else %}<p class="muted">Không có video.</p>{% endif %}
 </div>
 {% endblock %}
-
+{% block scripts %}<script>
+const mb = b => (b / 1048576).toFixed(b > 104857600 ? 0 : 1) + " MB";
+async function openCleanup() {
+  const box = document.getElementById("cleanup"), list = document.getElementById("cleanup-groups");
+  box.hidden = false; list.textContent = "Đang tính dung lượng…";
+  const r = await getJSON("/api/cleanup");
+  if (!r) { list.textContent = "Không đọc được dung lượng"; return; }
+  list.replaceChildren(...Object.entries(r).map(([g, v]) => {
+    const lab = document.createElement("label"); lab.className = "check";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.value = g; cb.disabled = !v.jobs;
+    cb.onchange = () => { document.getElementById("cleanup-go").disabled = !list.querySelector("input:checked"); };
+    lab.append(cb, ` ${v.label}: ${v.jobs} ${g === "orphans" ? "thư mục" : "video"}, ${mb(v.bytes)}`);
+    return lab;
+  }));
+}
+async function runCleanup(btn) {
+  const groups = [...document.querySelectorAll("#cleanup-groups input:checked")].map(x => x.value);
+  if (!groups.length || !confirm("Xoá hẳn các nhóm đã chọn? Không hoàn tác được.")) return;
+  const r = await api("/api/cleanup", {groups}, {btn, ok: d => `Đã xoá ${d.jobs} video, giải phóng ${mb(d.bytes)}`});
+  setTimeout(() => location.reload(), 900);
+}
+if (location.hash === "#cleanup") openCleanup();   // tray menu "Dọn rác"
+</script>{% endblock %}

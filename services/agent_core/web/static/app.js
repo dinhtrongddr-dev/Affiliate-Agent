@@ -376,6 +376,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btn) btn.addEventListener("click", confirmUpdate);
   const el = document.getElementById("version");
   if (el) el.addEventListener("click", () => loadVersion(true));
-  loadVersion(false);
+  loadVersion(new URLSearchParams(location.search).has("check-update"));   // tray "check for updates"
   livePoll(() => loadVersion(false).then(() => false), {min: 10 * 60 * 1000, max: 10 * 60 * 1000});
 });

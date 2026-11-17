@@ -44,20 +44,20 @@ def _env() -> dict:
     return env
 
 
-def open_window() -> None:
-    """Show the app window: focus the open one, else start agent_core.desktop."""
+def open_window(path: str = "") -> None:
+    """Show the app window (at `path`, e.g. "/tasks"): focus the open one, else start it."""
     try:
         from agent_core import desktop
-        if desktop.focus_existing():
+        if desktop.focus_existing(path=path):
             return
     except Exception:  # noqa: BLE001
         pass
     pythonw = Path(_python()).with_name("pythonw.exe")
     try:
-        subprocess.Popen([str(pythonw if pythonw.is_file() else _python()), "-m", "agent_core.desktop", URL],
+        subprocess.Popen([str(pythonw if pythonw.is_file() else _python()), "-m", "agent_core.desktop", URL + path],
                          cwd=str(ROOT), env=_env(), creationflags=NO_WINDOW)
     except OSError:
-        webbrowser.open(URL)
+        webbrowser.open(URL + path)
 
 
 def app_running(timeout: float = 2) -> bool:
@@ -225,8 +225,15 @@ class App:
         ]
         if c2a:   # where the ChatGPT account is logged in
             items.append(pystray.MenuItem("Mở ChatGPT2API (đăng nhập ChatGPT)", lambda *_: webbrowser.open(c2a)))
+        page = lambda path: (lambda *_: open_window(path))   # noqa: E731
         menu = pystray.Menu(
             *items,
+            pystray.MenuItem("Sáng tạo video mới", page("/create")),
+            pystray.MenuItem("Hàng đợi", page("/tasks")),
+            pystray.MenuItem("Dọn rác (xoá video cũ)", page("/jobs#cleanup")),
+            pystray.MenuItem("Cài đặt", page("/settings")),
+            pystray.MenuItem("Kiểm tra / cập nhật bản mới", page("/?check-update=1")),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Thư mục video", open_folder(media / "outbox" if media else ROOT)),
             pystray.MenuItem("Nhật ký", open_folder(LOGS / "app-console.log")),
             pystray.MenuItem("Khởi động lại", self.restart),

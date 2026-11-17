@@ -17,11 +17,11 @@ FOCUS_PORT = 8766          # local-only: "show" brings the open window to the fr
 TITLE = "Affiliate Agent"
 
 
-def focus_existing(timeout: float = 0.5) -> bool:
-    """True when a window is already open (and was asked to come to the front)."""
+def focus_existing(timeout: float = 0.5, path: str = "") -> bool:
+    """True when a window is already open (and was asked to come to the front, at `path`)."""
     try:
         with socket.create_connection(("127.0.0.1", FOCUS_PORT), timeout=timeout) as s:
-            s.sendall(b"show")
+            s.sendall(b"show" + (b" " + path.encode("utf-8") if path else b""))
             return s.recv(8) == b"ok"
     except OSError:
         return False
@@ -35,7 +35,11 @@ def _serve_focus(window, listener: socket.socket) -> None:
             return
         with conn:
             try:
-                if conn.recv(16) == b"show":
+                msg = conn.recv(512).decode("utf-8", "replace")
+                if msg.startswith("show"):
+                    path = msg[4:].strip()
+                    if path.startswith("/") and not path.startswith("//"):
+                        window.load_url(URL + path)
                     window.restore()
                     window.show()
                     window.on_top = True      # reliable way to raise it on Windows
@@ -45,9 +49,26 @@ def _serve_focus(window, listener: socket.socket) -> None:
                 pass
 
 
+def _app_icon() -> str | None:
+    from pathlib import Path
+    ico = Path(__file__).resolve().parents[2] / "assets" / "app.ico"
+    return str(ico) if ico.is_file() else None
+
+
+def _own_taskbar_entry() -> None:
+    """Group the window under Affiliate Agent's icon in the taskbar, not python.exe's."""
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AffiliateAgent.App")
+    except Exception:  # noqa: BLE001 - not Windows
+        pass
+
+
 def main(url: str = URL) -> int:
-    if focus_existing():
+    path = url[len(URL):] if url.startswith(URL) else ""
+    if focus_existing(path=path):
         return 0
+    _own_taskbar_entry()
     try:
         import webview
     except ImportError:
@@ -64,7 +85,7 @@ def main(url: str = URL) -> int:
     threading.Thread(target=_serve_focus, args=(window, listener), daemon=True).start()
     try:
         webview.start(gui="edgechromium", private_mode=False,
-                      storage_path=_storage_path())
+                      storage_path=_storage_path(), icon=_app_icon())
     except Exception as exc:  # noqa: BLE001  - no WebView2 runtime, broken install, ...
         print("Desktop window failed, using the browser:", exc, file=sys.stderr)
         listener.close()

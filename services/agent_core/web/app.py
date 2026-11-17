@@ -1130,11 +1130,27 @@ def create_app(start_worker: bool = True) -> FastAPI:
 
     @app.post("/api/jobs/{job_id}/delete")
     def api_delete(job_id: str):
-        job = job_or_404(job_id)
-        if job["status"] in BUSY:
-            raise HTTPException(400, "Job đang chạy, thử lại sau")
-        db.delete_job(S().database_path, job_id)
-        return {"deleted": True}
+        """Delete the job for good: rows, AI clips, renders and work files (frees disk)."""
+        from .. import cleanup
+        job_or_404(job_id)
+        try:
+            return {"deleted": True, **cleanup.purge_job(S(), job_id)}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.get("/api/cleanup")
+    def api_cleanup_preview():
+        from .. import cleanup
+        return cleanup.preview(S())
+
+    @app.post("/api/cleanup")
+    async def api_cleanup(request: Request):
+        from .. import cleanup
+        body = await request.json()
+        groups = [g for g in body.get("groups") or [] if g in cleanup.GROUPS]
+        if not groups:
+            raise HTTPException(400, "Chọn ít nhất một nhóm cần dọn")
+        return await run_in_threadpool(cleanup.purge_groups, S(), groups)
 
     @app.post("/api/trends/fetch")
     def api_trends_fetch():
