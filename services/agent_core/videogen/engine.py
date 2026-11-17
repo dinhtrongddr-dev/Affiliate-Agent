@@ -459,10 +459,10 @@ def _submit(settings, provider, t: dict) -> None:
                 state_path = Path(settings.work_dir) / t["job_id"] / "plan_state.json"
                 plan = json.loads(state_path.read_text(encoding="utf-8"))["plan"]
                 compiled = _compile_storyboard(settings, plan)
-                expected = {task_id(t["job_id"], index, "video", prompt, refs,
-                                    attempt=t["attempt"])
+                # a QA retry carries a fix note and a higher attempt: compare scene, base prompt, refs
+                expected = {(index, _base_prompt(prompt), tuple(sorted(refs)))
                             for index, prompt, refs, _ in compiled}
-                if t["id"] not in expected:
+                if (t["scene_index"], _base_prompt(t["prompt"]), tuple(sorted(t["refs"]))) not in expected:
                     raise providers.ProviderError("Queued task no longer matches current storyboard")
             except (OSError, ValueError, KeyError, TypeError, providers.ProviderError) as exc:
                 _update(db, t["id"], status="FAILED",
@@ -781,6 +781,12 @@ def poll(settings, provider=None) -> dict:
         except Exception as exc:  # noqa: BLE001 - one bad task must not stop the others
             log.exception("gen task %s error", t["id"])
             _update(db, t["id"], error=str(exc)[:500])
+    # A clip review finishes in a background thread: the job of its last clip is not in `rows`
+    # any more, so also pick up every waiting job whose clips are all settled.
+    with connect(db) as conn:
+        touched |= {r[0] for r in conn.execute(
+            "SELECT DISTINCT g.job_id FROM gen_tasks g JOIN jobs j ON j.id=g.job_id WHERE j.status=?",
+            (WAIT_STATUS,))}
     return {"tasks": len(rows), "resumed": _finish_jobs(settings, touched)}
 
 
@@ -801,6 +807,11 @@ def retry_task(settings, tid: str) -> str | None:
 
 
 FIX_PREFIX = "\nFix from the previous take (must not happen again): "
+
+
+def _base_prompt(prompt: str) -> str:
+    """The prompt without the QA fix note, so a retry still matches its storyboard scene."""
+    return "\n".join(ln for ln in str(prompt).splitlines() if not ln.startswith(FIX_PREFIX.strip()))
 
 
 def _with_fix(prompt: str, issues: list[str] | None) -> str:
