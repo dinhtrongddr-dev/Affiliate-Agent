@@ -98,7 +98,7 @@
     </div>
     {% set frames = (job.keyframes_json | fromjson) or [] %}
     {% if frames %}<p class="small muted" style="margin:12px 0 4px">Khung hình video gốc</p>
-    <div class="thumbs">{% for f in frames %}<img loading="lazy" src="/keyframe/{{ job.id }}/{{ loop.index0 }}">{% endfor %}</div>{% endif %}
+    <div class="thumbs">{% for f in frames %}<img loading="lazy" alt="Khung hình {{ loop.index }}" src="/keyframe/{{ job.id }}/{{ loop.index0 }}">{% endfor %}</div>{% endif %}
     <div class="row" style="margin-top:14px">
       {% if job.output_path %}<a class="btn sm" href="/files/{{ job.id }}/{{ job.id }}.mp4" download>{{ icon('download') }} Tải video</a>{% endif %}
       <button class="btn sm danger" onclick="if(confirm('Xoá job này khỏi danh sách? File video không bị xoá.'))api('/api/jobs/{{ job.id }}/delete',undefined,{go:()=>'/jobs'})">Xoá</button>
@@ -248,7 +248,7 @@
       <div class="offers">
         {% for c in clips %}
         <div class="card offer" style="padding:10px">
-          {% if c.thumb %}<img loading="lazy" src="/clips/{{ job.id }}/{{ c.thumb }}" style="aspect-ratio:9/16">{% endif %}
+          {% if c.thumb %}<img loading="lazy" alt="Ảnh clip" src="/clips/{{ job.id }}/{{ c.thumb }}" style="aspect-ratio:9/16">{% endif %}
           <div class="small" style="margin-top:6px"><b>{{ c.name }}</b></div>
           <div class="small muted">{{ 'Video %.1fs'|format(c.duration) if c.kind == 'video' else 'Ảnh' }} · {{ c.width }}x{{ c.height }}
             {% if c.ai_generated %}<span class="badge info">AI</span>{% endif %}</div>
@@ -298,7 +298,7 @@
       </div>
       {% if job.product_item_id %}
       <div class="prod card" style="margin-bottom:12px">
-        {% for c in candidates if c.item_id|string == job.product_item_id|string %}{% if loop.first and c.image_url %}<img loading="lazy" src="{{ c.image_url }}">{% endif %}{% endfor %}
+        {% for c in candidates if c.item_id|string == job.product_item_id|string %}{% if loop.first and c.image_url %}<img loading="lazy" alt="Ảnh sản phẩm" src="{{ c.image_url }}">{% endif %}{% endfor %}
         <div><b>{{ job.product_name }}</b><div class="small muted">ID {{ job.product_item_id }}</div>
           {% if job.affiliate_link %}<a href="{{ job.affiliate_link }}" target="_blank" rel="noopener">{{ job.affiliate_link }}</a>{% endif %}</div>
       </div>{% endif %}
@@ -306,7 +306,7 @@
       <h3>Ứng viên</h3>
       {% for c in candidates %}
       <div class="prod scene">
-        {% if c.image_url %}<img loading="lazy" src="{{ c.image_url }}">{% endif %}
+        {% if c.image_url %}<img loading="lazy" alt="Ảnh sản phẩm" src="{{ c.image_url }}">{% endif %}
         <div style="flex:1"><b>{{ c.name }}</b>
           <div class="small muted">Điểm khớp {{ c.score or '-' }} · giá từ {{ c.price_min or '-' }} · hoa hồng {{ c.commission_rate or '-' }} {% if c.sales %}· đã bán {{ c.sales }}{% endif %}</div></div>
         {% if c.item_id|string != job.product_item_id|string %}
@@ -446,7 +446,7 @@ async function savePerf(){
   const metrics={}; document.querySelectorAll("#perf-form input[data-k]").forEach(i=>{ if(i.value.trim()) metrics[i.dataset.k]=i.value.trim(); });
   await api(`/api/jobs/${JOB}/performance`,{platform:document.getElementById("perf-platform").value,metrics},{ok:"Đã lưu số liệu",reload:true});
 }
-async function saveCaption(){await api(`/api/jobs/${JOB}/content`,{content:caption()},{ok:"Đã lưu caption",reload:true});}
+async function saveCaption(){await api(`/api/jobs/${JOB}/content`,{content:caption()},{ok:"Đã lưu caption"});}
 async function approve(){
   const platforms={};
   document.querySelectorAll("input[name=pf]:checked").forEach(c=>{

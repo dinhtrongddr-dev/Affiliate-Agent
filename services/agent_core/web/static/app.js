@@ -8,6 +8,15 @@ function toast(msg, isErr) {
   setTimeout(() => el.remove(), isErr ? 9000 : 4000);
 }
 
+// The button that started a request is locked until it finishes (no double sends).
+// opts.btn names it; otherwise the button that has focus (the one just clicked) is used.
+function busyButton(btn, on) {
+  if (!btn || btn.tagName !== "BUTTON") return;
+  btn.disabled = on;
+  btn.classList.toggle("is-busy", on);
+  btn.setAttribute("aria-busy", on ? "true" : "false");
+}
+
 async function api(path, body, opts = {}) {
   const init = { method: "POST", headers: { "X-Requested-With": "affiliate-agent" } };
   if (body instanceof FormData) init.body = body;
@@ -15,14 +24,26 @@ async function api(path, body, opts = {}) {
     init.headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(path, init);
-  let data = {};
-  try { data = await res.json(); } catch (e) { }
+  const active = document.activeElement;
+  const btn = opts.btn || (active && active.tagName === "BUTTON" && !active.disabled ? active : null);
+  busyButton(btn, true);
+  let res, data = {};
+  try {
+    res = await fetch(path, init);
+    try { data = await res.json(); } catch (e) { }
+  } catch (e) {
+    busyButton(btn, false);
+    toast("Mất kết nối tới app", true);
+    throw e;
+  }
+  // stays locked when the page is about to reload or navigate
+  if (!res.ok || !(opts.reload || opts.go)) busyButton(btn, false);
   if (!res.ok) {
     const msg = data.error || data.detail || ("Lỗi HTTP " + res.status);
     toast(msg, true);
     throw new Error(msg);
   }
+  if (!opts.reload && !opts.go && opts.keepDirty !== true) document.body.dataset.dirty = "0";  // saved
   if (opts.ok) toast(typeof opts.ok === "function" ? opts.ok(data) : opts.ok);
   if (opts.reload) setTimeout(() => location.reload(), opts.delay || 600);
   if (opts.go) setTimeout(() => (location.href = opts.go(data)), 500);
@@ -118,7 +139,7 @@ function pollJob(jobId) {
   livePoll(async () => {
     const r = await getJSON("/api/jobs/" + jobId + "/progress");
     if (!r) return false;
-    if (!r.busy && document.body.dataset.busy === "1") { location.reload(); return "stop"; }
+    if (!r.busy && document.body.dataset.busy === "1") { softReload(); return "stop"; }
     document.querySelectorAll("[data-live-status]").forEach(el => (el.textContent = r.label));
     if (r.busy) renderTimeline(box, r);
     const sig = r.updated_at + ":" + r.pct;
@@ -144,7 +165,7 @@ function watchJobRows() {
       const cell = row.querySelector("[data-job-pct]");
       if (cell && j.pct != null) cell.textContent = `${j.pct}%` + (j.eta_sec ? ` · còn ~${fmtDur(j.eta_sec)}` : "");
     });
-    if (changed) { location.reload(); return "stop"; }
+    if (changed) { softReload(); return "stop"; }
     return false;
   }, {min: 5000, max: 20000, immediate: true});
 }
@@ -154,23 +175,61 @@ function watchTasks() {
   livePoll(async () => {
     const r = await getJSON("/api/tasks-live");
     if (!r) return false;
-    if (sig !== null && r.signature !== sig) { location.reload(); return "stop"; }
+    if (sig !== null && r.signature !== sig) { softReload(); return "stop"; }
     sig = r.signature;
     return false;
   }, {min: 5000, max: 30000, immediate: true});
 }
 
 function tabs(root) {
-  root.querySelectorAll(".tabs button").forEach(btn => btn.addEventListener("click", () => {
-    root.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b === btn));
+  // one saved tab per kind of page (all job pages share it), never one key per job
+  const path = location.pathname;
+  const key = "tab:" + (path.split("/").length > 2 ? path.replace(/\/[^/]+$/, "/*") : path);
+  const buttons = [...root.querySelectorAll(".tabs button")];
+  root.querySelector(".tabs")?.setAttribute("role", "tablist");
+  const select = btn => {
+    buttons.forEach(b => { b.classList.toggle("active", b === btn); b.setAttribute("aria-selected", b === btn); });
     root.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.id === btn.dataset.tab));
-    try { localStorage.setItem("tab:" + location.pathname, btn.dataset.tab); } catch (e) { }
-  }));
+  };
+  buttons.forEach(btn => {
+    btn.setAttribute("role", "tab");
+    btn.addEventListener("click", () => {
+      select(btn);
+      try { localStorage.setItem(key, btn.dataset.tab); } catch (e) { }
+    });
+  });
+  // a tab named in the URL (?tab=x or #t-x) wins over the remembered one
+  const wanted = new URLSearchParams(location.search).get("tab");
+  const fromUrl = (wanted && root.querySelector(`.tabs button[data-tab="t-${wanted}"]`))
+    || (location.hash && root.querySelector(`.tabs button[data-tab="${location.hash.slice(1)}"]`));
+  if (fromUrl) { select(fromUrl); return; }
   let saved = null;
-  try { saved = localStorage.getItem("tab:" + location.pathname); } catch (e) { }
+  try { saved = localStorage.getItem(key); } catch (e) { }
   const b = saved && root.querySelector(`.tabs button[data-tab="${saved}"]`);
-  if (b) b.click();
+  if (b) select(b);
+  else { const cur = buttons.find(x => x.classList.contains("active")); if (cur) select(cur); }
 }
+
+// True while the person is typing or has unsaved edits: auto-refresh must not throw them away.
+function userEditing() {
+  const a = document.activeElement;
+  if (a && (a.tagName === "TEXTAREA" || a.isContentEditable ||
+            (a.tagName === "INPUT" && !["checkbox", "radio", "button", "submit"].includes(a.type)))) return true;
+  return document.body.dataset.dirty === "1";
+}
+
+function softReload() {
+  if (!userEditing()) { location.reload(); return; }
+  if (document.getElementById("refresh-bar")) return;
+  const bar = document.createElement("button");
+  bar.id = "refresh-bar"; bar.type = "button"; bar.className = "refresh-bar";
+  bar.textContent = "Có cập nhật mới – bấm để tải lại (đang giữ nội dung bạn đang sửa)";
+  bar.onclick = () => location.reload();
+  document.body.append(bar);
+}
+document.addEventListener("input", e => {
+  if (e.target.closest && e.target.closest("main") && !e.target.closest("[data-no-dirty]")) document.body.dataset.dirty = "1";
+});
 
 function iconSvg(name) {
   return `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;

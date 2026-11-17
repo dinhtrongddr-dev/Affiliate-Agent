@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Sản phẩm bán chạy · Affiliate Agent{% endblock %}
 {% block content %}
 <h1>Sản phẩm hot</h1>
 <p class="sub">Tìm sản phẩm bán chạy / hoa hồng cao qua Shopee Affiliate API, rồi để AI làm video từ A–Z.</p>
@@ -17,7 +18,7 @@
 <div class="offers">
 {% for o in offers %}
   <div class="card offer">
-    {% if o.imageUrl %}<img src="{{ o.imageUrl }}" loading="lazy">{% endif %}
+    {% if o.imageUrl %}<img src="{{ o.imageUrl }}" alt="Ảnh sản phẩm" loading="lazy">{% endif %}
     <div class="name" title="{{ o.productName }}">{{ o.productName }}</div>
     <div class="small muted">Giá từ {{ o.priceMin }} · HH {{ o.commissionRate }}{% if o.sales %} · đã bán {{ o.sales }}{% endif %}</div>
     <p></p>
