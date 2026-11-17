@@ -107,3 +107,4 @@ pre.log{background:#0f141b;color:#cbd5e1;padding:16px;border-radius:10px;overflo
 .tl-clip{font-size:11px;padding:1px 6px;border-radius:8px;background:rgba(255,255,255,.12)}
 .tl-clip.ok{background:rgba(74,222,128,.25)}
 .tl-clip.err{background:rgba(248,113,113,.3)}
+.pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin:12px 0}

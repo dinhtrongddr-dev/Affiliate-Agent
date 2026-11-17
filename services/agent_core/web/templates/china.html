@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pagination %}
+{% block title %}Trend Trung Quốc · Affiliate Agent{% endblock %}
 {% block content %}
 {% set SC = {'early_signal':'ok','rising':'ok','peak':'warn','saturated':'err'} %}
 {% set GOALS = {'fb_growth':'Facebook (giữ chân, chia sẻ)','affiliate':'Affiliate (bán hàng)'} %}
@@ -51,6 +53,7 @@
           <button class="btn sm" onclick="api('/api/china/topics/{{ t.key }}/status',{status:'{{ 'NEW' if t.status=='IGNORED' else 'IGNORED' }}'},{reload:true})">{{ 'Mở lại' if t.status=='IGNORED' else 'Bỏ qua' }}</button>{% endif %}</td>
       </tr>{% endfor %}
     </table>
+    {% if tab != 'ideas' %}{{ pagination(pager, query) }}{% endif %}
     {% else %}<p class="muted">Chưa có trend. Bấm <b>Thu thập ngay</b> (lần đầu mất vài phút vì AI dịch và gắn nhãn).</p>{% endif %}
     <p class="small muted">Điểm cơ hội (0–100) = tăng trưởng 25, lan truyền giữa nền tảng 20, tương tác 20, Việt hoá được 15, app sản xuất được 10, thương mại 10; nhân với hệ số giai đoạn (ưu tiên Tín hiệu sớm/Đang lên), rủi ro FB/bản quyền và độ trùng với video kênh đã làm. Dữ liệu dưới 3 mốc được ghi độ tin cậy thấp.</p>
   </div>
@@ -83,6 +86,7 @@
       <td>{% if i.status=='NEW' %}<button class="btn sm primary" onclick="api('/api/china/ideas/{{ i.id }}/produce',undefined,{ok:'Đã đưa vào sản xuất',reload:true,delay:2500})">🎬 Sản xuất</button>
         <button class="btn sm" onclick="api('/api/china/ideas/{{ i.id }}/reject',undefined,{reload:true})">Bỏ</button>{% endif %}</td>
     </tr>{% endfor %}</table>
+    {% if tab == 'ideas' %}{{ pagination(pager, query) }}{% endif %}
     {% else %}<p class="muted">Chưa có ý tưởng. Mở tab Trend Radar, bấm <b>💡 Ý tưởng</b> ở một trend (hoặc chờ lượt tự động: 3 trend điểm cao nhất mỗi lần thu thập).</p>{% endif %}
   </div>
 

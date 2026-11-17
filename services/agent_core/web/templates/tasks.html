@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "_macros.html" import badge %}
+{% from "_macros.html" import badge, pagination %}
+{% block title %}Hàng đợi · Affiliate Agent{% endblock %}
 {% block content %}
 <h1>Hàng đợi</h1>
 <p class="sub">Việc chạy nền: xử lý video, dựng, đăng, lấy trend, đồng bộ doanh thu.</p>
@@ -14,6 +15,7 @@
   <td class="small muted">{{ t.updated_at | localtime('%d/%m/%Y %H:%M:%S') }}</td>
   <td>{% if t.status == 'FAILED' and t.kind != 'publish' %}<button class="btn sm" onclick="api('/api/tasks/{{ t.id }}/retry',undefined,{reload:true})">Thử lại</button>{% endif %}</td></tr>
 {% endfor %}</table>
+  {{ pagination(pager, query) }}
 {% else %}<p class="muted">Hàng đợi trống.</p>{% endif %}
 </div>
 {% endblock %}

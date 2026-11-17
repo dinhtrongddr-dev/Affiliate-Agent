@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pagination %}
+{% block title %}Trend · Affiliate Agent{% endblock %}
 {% block content %}
 {% set LC = {'RISING':'ok','NEW':'info','PEAKING':'warn','SATURATED':'warn','STABLE':'info','DECLINING':'err','UNKNOWN':''} %}
 <div class="row space"><div><h1>Trend</h1>
@@ -92,6 +94,7 @@
   </tr>
   {% endfor %}
 </table></div>
+{{ pagination(pager, 'view=' ~ view) }}
 {% else %}
   <p class="muted">{% if view == 'products' %}Chưa có trend nào khớp sản phẩm. Nhập CSV ở <a href="/catalog">Kho sản phẩm</a>, rồi bấm "Phân tích lại", hoặc xem tab "Tất cả trend dùng được".{% else %}Chưa có trend. Bấm "Thu thập &amp; phân tích".{% endif %}</p>
 {% endif %}

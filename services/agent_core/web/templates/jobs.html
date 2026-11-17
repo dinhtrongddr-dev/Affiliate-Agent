@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "_macros.html" import job_row %}
+{% from "_macros.html" import job_row, pagination %}
+{% block title %}Video · Affiliate Agent{% endblock %}
 {% block content %}
 <div class="row space"><div><h1>Video</h1><p class="sub">Tất cả video đang xử lý, chờ duyệt và đã đăng.</p></div>
   <button class="btn" onclick="api('/api/scan',undefined,{ok:'Đã quét inbox',reload:true})">🔄 Quét inbox</button></div>
@@ -13,6 +14,7 @@
   {% if jobs %}
   <table><tr><th>Video</th><th>Trạng thái</th><th>Điểm</th><th>Cập nhật</th></tr>
     {% for job in jobs %}{{ job_row(job) }}{% endfor %}</table>
+  {{ pagination(pager, query) }}
   {% else %}<p class="muted">Không có video.</p>{% endif %}
 </div>
 {% endblock %}

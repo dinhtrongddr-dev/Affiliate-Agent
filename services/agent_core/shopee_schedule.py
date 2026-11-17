@@ -55,16 +55,34 @@ def _preamble(settings):
 
 
 _STATUS_CACHE: dict = {}
-STATUS_TTL = 60.0
+_REFRESHING: set[str] = set()
+STATUS_TTL = 600.0
 
 
-def status(settings, fresh: bool = False):
-    """Task Scheduler is queried through PowerShell (3-5 s); pages reuse a 60 s snapshot."""
+def status(settings, fresh: bool = False, wait: bool = True):
+    """Task Scheduler is queried through PowerShell (3-5 s); pages reuse a snapshot.
+
+    wait=False (pages): return the last snapshot at once, even an old one, and refresh it in the
+    background; before the first snapshot exists the state is reported as still loading."""
+    import threading
     import time
     key = str(getattr(settings, "project_root", ""))
     cached = _STATUS_CACHE.get(key)
     if not fresh and cached and time.monotonic() - cached[0] < STATUS_TTL:
         return dict(cached[1])
+    if not wait and not fresh:
+        if key not in _REFRESHING:
+            _REFRESHING.add(key)
+
+            def refresh():
+                try:
+                    _STATUS_CACHE[key] = (time.monotonic(), _status_uncached(settings))
+                finally:
+                    _REFRESHING.discard(key)
+            threading.Thread(target=refresh, name="schedule-status", daemon=True).start()
+        if cached:
+            return dict(cached[1])
+        return {"installed": None, "managed": None, "enabled": None, "loading": True, "task_name": TASK_NAME}
     result = _status_uncached(settings)
     _STATUS_CACHE[key] = (time.monotonic(), result)
     return dict(result)

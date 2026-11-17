@@ -11,6 +11,7 @@ import shutil
 from contextlib import asynccontextmanager
 from importlib.util import find_spec
 from pathlib import Path
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -69,6 +70,7 @@ STATUS_LABELS = {
 }
 PLATFORM_LABELS = {"shopee": "Shopee Video", "facebook_reels": "Facebook Reels",
                    "tiktok": "TikTok"}
+PAGE_SIZE = 50   # rows per page on list pages: keeps every page small and fast
 BUSY = {"ANALYZING", "SCRIPTING", "RENDERING", "WAITING_FOR_GENERATION", "GENERATION_DONE",
         "WAITING_FOR_CAST", "WAITING_FOR_SEGMENTS"}
 
@@ -178,11 +180,37 @@ def create_app(start_worker: bool = True) -> FastAPI:
     def S():
         return state["settings"]
 
+    background_last: dict[str, float] = {}
+
+    def background_once(name: str, every: float, fn, *args) -> None:
+        """Run fn in a thread at most once per `every` seconds; never blocks the page."""
+        import threading
+        now = time.monotonic()
+        if now - background_last.get(name, -1e9) < every:
+            return
+        background_last[name] = now
+
+        def run():
+            try:
+                fn(*args)
+            except Exception:  # noqa: BLE001
+                log.exception("background %s failed", name)
+        threading.Thread(target=run, name=f"bg-{name}", daemon=True).start()
+
+    def paginate(total: int, page: int, size: int = PAGE_SIZE) -> dict:
+        """Slice bounds and links for a list page (?page=N, 1-based)."""
+        pages = max(1, -(-total // size))
+        page = max(1, min(int(page or 1), pages))
+        start = (page - 1) * size
+        return {"page": page, "pages": pages, "total": total, "start": start, "end": min(total, start + size)}
+
     @app.middleware("http")
     async def server_timing(request: Request, call_next):
         """Render time in the Server-Timing header (visible in the browser's network panel)."""
         started = time.perf_counter()
         response = await call_next(request)
+        if request.method == "POST" and request.url.path.startswith("/api/muse"):
+            gateway_cache.clear()   # a Muse change must show at once, not after the 20 s snapshot
         response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - started) * 1000:.1f}"
         return response
 
@@ -286,9 +314,12 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       summary=db.conversion_summary(s.database_path)[:5])
 
     @app.get("/jobs", response_class=HTMLResponse)
-    def jobs_page(request: Request, status: str = ""):
+    def jobs_page(request: Request, status: str = "", page: int = 1):
         s = S()
-        return render(request, "jobs.html", jobs=db.list_jobs(s.database_path, 300, status or None),
+        jobs = db.list_jobs(s.database_path, 500, status or None)
+        pager = paginate(len(jobs), page)
+        return render(request, "jobs.html", jobs=jobs[pager["start"]:pager["end"]], pager=pager,
+                      query=urlencode({"status": status}) if status else "",
                       counts=db.get_counts(s.database_path), status=status)
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -317,12 +348,12 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       gen_tasks=gen_engine.list_tasks(s.database_path, job_id, 50))
 
     @app.get("/trends", response_class=HTMLResponse)
-    def trends_page(request: Request, view: str = "all"):
+    def trends_page(request: Request, view: str = "all", page: int = 1):
         from ..trend_intel import analyzer, scoring, store as tstore
         s = S()
         topics = tstore.list_topics(s.database_path, 300)
         counts = {"products": 0, "all": 0, "skipped": 0}
-        shown = []
+        selected = []
         for t in topics:
             skipped = t["safety"] == "BLOCKED" or t["status"] == "IGNORED"
             counts["skipped" if skipped else "all"] += 1
@@ -330,32 +361,57 @@ def create_app(start_worker: bool = True) -> FastAPI:
                 counts["products"] += 1
             if (view == "products" and (skipped or t["status"] != "MATCHED")) or                (view == "all" and skipped) or (view == "skipped" and not skipped):
                 continue
-            t["matches"] = []
-            for m in tstore.matches_for(s.database_path, t["key"])[:5]:
-                product = catalog.get_product(s.database_path, m["product_id"])
-                if product:
-                    t["matches"].append({**m, "product": product})
-            t["observations"] = tstore.observations(s.database_path, t["key"], limit=8)
+            selected.append(t)
+        pager = paginate(len(selected), page)
+        shown = selected[pager["start"]:pager["end"]]
+        # three queries for the whole page instead of ~7 per topic
+        keys = [t["key"] for t in shown]
+        matches = tstore.matches_for_many(s.database_path, keys)
+        products = catalog.get_products(s.database_path, [m["product_id"] for ms in matches.values() for m in ms])
+        observed = tstore.observations_many(s.database_path, keys, limit=8)
+        for t in shown:
+            t["matches"] = [{**m, "product": products[str(m["product_id"])]}
+                            for m in matches.get(t["key"], []) if str(m["product_id"]) in products]
+            t["observations"] = observed.get(t["key"], [])
             t["lifecycle_label"] = analyzer.LIFECYCLE_LABELS.get(t.get("lifecycle") or "", "")
-            shown.append(t)
         usage = {"trendsmcp": tstore.usage(s.database_path, "trendsmcp"),
                  "youtube_units": tstore.usage(s.database_path, "youtube_units", "day")}
-        return render(request, "trends.html", topics=shown, view=view, counts=counts,
+        return render(request, "trends.html", topics=shown, view=view, counts=counts, pager=pager,
                       labels=scoring.LABELS, usage=usage,
                       has_youtube=bool(s.youtube_api_key.get_secret_value()),
                       has_trendsmcp=bool(s.trendsmcp_api_key.get_secret_value()),
                       trends=db.list_trends(s.database_path, 150))
 
     @app.get("/generation", response_class=HTMLResponse)
-    def generation_page(request: Request, job: str = ""):
+    def generation_page(request: Request, job: str = "", page: int = 1):
         s = S()
         provider = get_provider(s)
-        gateway_info = _gateway_info(s)
-        return render(request, "generation.html", tasks=gen_engine.list_tasks(s.database_path, job or None, 300),
+        gateway_info = _gateway_info_cached(s)
+        tasks = gen_engine.list_tasks(s.database_path, job or None, 500)
+        pager = paginate(len(tasks), page)
+        return render(request, "generation.html", tasks=tasks[pager["start"]:pager["end"]], pager=pager,
+                      query=urlencode({"job": job}) if job else "",
                       provider=provider.name if provider else "", base_url=s.videogen_base_url,
                       remaining=gen_engine.remaining_today(s), daily=s.videogen_daily_limit,
                       job_filter=job, active="generation", session=_muse_summary(s),
                       gateway=gateway_info, muse_profiles=_muse_profile_summaries(s, gateway_info))
+
+    gateway_cache: dict = {}
+
+    def _gateway_info_cached(s, max_age: float = 20.0):
+        """Gateway health + accounts for the page: reuse a snapshot up to 20 s old and refresh
+        it in the background, so the page never waits on HTTP calls to the gateway."""
+        hit = gateway_cache.get("v")
+        if hit and time.monotonic() - hit[0] < max_age:
+            return hit[1]
+        if hit:
+            def refresh():
+                gateway_cache["v"] = (time.monotonic(), _gateway_info(s))
+            background_once("gateway_info", max_age / 2, refresh)
+            return hit[1]
+        info = _gateway_info(s)
+        gateway_cache["v"] = (time.monotonic(), info)
+        return info
 
     def _gateway_info(s):
         from ..videogen import gateway
@@ -610,17 +666,24 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       seeds=s.seed_keywords)
 
     @app.get("/catalog", response_class=HTMLResponse)
-    def catalog_page(request: Request, sort: str = "score", q: str = "", status: str = "", platform: str = ""):
+    def catalog_page(request: Request, sort: str = "score", q: str = "", status: str = "", platform: str = "",
+                     page: int = 1):
         s = S()
         from ..shopee_intelligence import auto_sync, unified_catalog, addlive_config
         from .. import shopee_schedule
-        unified_catalog.reconcile(s)
+        # Imports and syncs reconcile right after they write; the page only tops that up in the
+        # background (it takes the DB write lock, so it must never hold up a GET).
+        background_once("catalog_reconcile", 300, unified_catalog.reconcile, s)
         rows = unified_catalog.list_unified(s, q=q, sort=sort, status=status)
         if platform in {"shopee", "tiktok"}:
             rows = [p for p in rows if p.get("platform") == platform]
-        return render(request, "catalog.html", products=rows, sort=sort, q=q, status=status,
+        pager = paginate(len(rows), page)
+        query = urlencode({k: v for k, v in (("sort", sort), ("q", q), ("status", status),
+                                              ("platform", platform)) if v})
+        return render(request, "catalog.html", products=rows[pager["start"]:pager["end"]], pager=pager,
+                      query=query, sort=sort, q=q, status=status,
                       platform=platform, sync=auto_sync.status(s), addlive=addlive_config.summary(s),
-                      schedule=shopee_schedule.status(s))
+                      schedule=shopee_schedule.status(s, wait=False))
 
     @app.post("/api/catalog/import")
     async def api_catalog_import(file: UploadFile = File(...), tiktok: str = Form("false")):
@@ -754,8 +817,10 @@ def create_app(start_worker: bool = True) -> FastAPI:
                       posts=db.list_platform_posts(s.database_path))
 
     @app.get("/tasks", response_class=HTMLResponse)
-    def tasks_page(request: Request):
-        return render(request, "tasks.html", tasks=db.list_tasks(S().database_path, 200))
+    def tasks_page(request: Request, page: int = 1):
+        tasks = db.list_tasks(S().database_path, 500)
+        pager = paginate(len(tasks), page)
+        return render(request, "tasks.html", tasks=tasks[pager["start"]:pager["end"]], pager=pager, query="")
 
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request):

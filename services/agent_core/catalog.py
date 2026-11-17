@@ -11,6 +11,7 @@ import csv
 import io
 import re
 import unicodedata
+from pathlib import Path
 from typing import Any
 
 from .db import connect, init_db, now_iso
@@ -65,13 +66,20 @@ class CatalogError(RuntimeError):
     pass
 
 
+_ready: set[str] = set()
+
+
 def ensure_schema(db_path) -> None:
+    key = str(Path(db_path).resolve())
+    if key in _ready and Path(db_path).exists():
+        return      # once per process: pages read many products and must not re-run the DDL
     init_db(db_path)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(products)")}
         if "revenue" not in columns:
             conn.execute("ALTER TABLE products ADD COLUMN revenue REAL")
+    _ready.add(key)
 
 
 def _norm(text: str) -> str:
@@ -283,6 +291,17 @@ def get_product(db_path, product_id: str) -> dict | None:
     with connect(db_path) as conn:
         row = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
         return dict(row) if row else None
+
+
+def get_products(db_path, ids: list[str]) -> dict[str, dict]:
+    """Many products in one query (id -> row)."""
+    ids = list(dict.fromkeys(str(i) for i in ids if i))
+    if not ids:
+        return {}
+    ensure_schema(db_path)
+    with connect(db_path) as conn:
+        rows = conn.execute(f"SELECT * FROM products WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()
+    return {str(r["id"]): dict(r) for r in rows}
 
 
 def update_product(db_path, product_id: str, **fields) -> None:

@@ -245,6 +245,43 @@ def matches_for(db_path, key: str) -> list[dict]:
             "SELECT * FROM trend_products WHERE topic_key=? ORDER BY score DESC", (key,)).fetchall()]
 
 
+def matches_for_many(db_path, keys: list[str], per_topic: int = 5) -> dict[str, list[dict]]:
+    """Best product matches of many topics in one query (topic key -> rows, best first)."""
+    keys = list(dict.fromkeys(keys))
+    out: dict[str, list[dict]] = {k: [] for k in keys}
+    if not keys:
+        return out
+    ensure_schema(db_path)
+    with connect(db_path) as conn:
+        rows = conn.execute(f"SELECT * FROM trend_products WHERE topic_key IN ({','.join('?' * len(keys))}) "
+                            "ORDER BY topic_key, score DESC", keys).fetchall()
+    for r in rows:
+        bucket = out.setdefault(r["topic_key"], [])
+        if len(bucket) < per_topic:
+            bucket.append(dict(r))
+    return out
+
+
+def observations_many(db_path, keys: list[str], limit: int = 8) -> dict[str, list[dict]]:
+    """Newest observations of many topics in one query (topic key -> rows, newest first)."""
+    keys = list(dict.fromkeys(keys))
+    out: dict[str, list[dict]] = {k: [] for k in keys}
+    if not keys:
+        return out
+    ensure_schema(db_path)
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY topic_key ORDER BY observed_at DESC) AS rn "
+            f"FROM trend_observations WHERE topic_key IN ({','.join('?' * len(keys))})) WHERE rn <= ? "
+            "ORDER BY topic_key, observed_at DESC", [*keys, int(limit)]).fetchall()
+    for r in rows:
+        row = dict(r)
+        row.pop("rn", None)
+        row["meta"] = json.loads(row.pop("meta_json") or "{}")
+        out.setdefault(row["topic_key"], []).append(row)
+    return out
+
+
 # ------------------------------------------------------------------ budgets
 
 def _period(kind: str) -> str:

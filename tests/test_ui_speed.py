@@ -29,3 +29,30 @@ def test_timezone_follows_env_changes(monkeypatch):
     localtime.fmt("2026-11-17T01:00:00+00:00")
     assert len(calls) == 2
     localtime._zone_cache.clear()
+
+
+def test_trend_batches_match_the_single_queries(tmp_path):
+    from agent_core.trend_intel import store
+    db_path = tmp_path / "t.sqlite3"
+    store.ensure_schema(db_path)
+    from agent_core.db import connect
+    with connect(db_path) as conn:
+        for k in ("a", "b"):
+            for i in range(3):
+                conn.execute("INSERT INTO trend_observations (topic_key, source, observed_at, meta_json) "
+                             "VALUES (?, 'x', ?, '{}')", (k, f"2026-11-1{i}T00:00:00+00:00"))
+    many = store.observations_many(db_path, ["a", "b", "c"], limit=2)
+    assert [o["observed_at"] for o in many["a"]] == [o["observed_at"] for o in store.observations(db_path, "a", limit=2)]
+    assert len(many["b"]) == 2 and many["c"] == []
+    assert store.matches_for_many(db_path, []) == {}
+
+
+def test_catalog_schema_check_runs_once(tmp_path, monkeypatch):
+    from agent_core import catalog
+    db_path = tmp_path / "c.sqlite3"
+    catalog.ensure_schema(db_path)
+    calls = []
+    monkeypatch.setattr(catalog, "init_db", lambda p: calls.append(p))
+    catalog.ensure_schema(db_path)
+    assert calls == []                               # cached after the first call
+    assert catalog.get_products(db_path, ["missing"]) == {}

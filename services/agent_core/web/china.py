@@ -1,5 +1,6 @@
 """China Trend dashboard: Trend Radar, Niche Explorer, Idea Generator, sources, autopilot."""
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
@@ -16,7 +17,8 @@ def install_routes(app, settings, render):
         return {"queued": bool(tid), "task_id": tid}
 
     @app.get("/china")
-    def china_page(request: Request, tab: str = "radar", stage: str = "", niche: str = "", goal: str = ""):
+    def china_page(request: Request, tab: str = "radar", stage: str = "", niche: str = "", goal: str = "",
+                   page: int = 1):
         s = settings()
         store.ensure_schema(s.database_path)
         analysis.ensure_niches(s)
@@ -28,11 +30,25 @@ def install_routes(app, settings, render):
         if goal:
             topics = [t for t in topics if t.get("goal") == goal]
         ideas = store.list_ideas(s.database_path, limit=300)
-        topic_names = {t["key"]: t.get("title_vi") or t["title_zh"] for t in
-                       store.list_topics(s.database_path, 2000, since_hours=None)}
+        # one page of the open tab (radar = topics, ideas = ideas); the other tabs are small
+        size = 50
+        listed = topics if tab != "ideas" else ideas
+        pages = max(1, -(-len(listed) // size))
+        page = max(1, min(int(page or 1), pages))
+        pager = {"page": page, "pages": pages, "total": len(listed),
+                 "start": (page - 1) * size, "end": min(len(listed), page * size)}
+        if tab == "ideas":
+            ideas = ideas[pager["start"]:pager["end"]]
+            topics = topics[:size]
+        else:
+            topics = topics[pager["start"]:pager["end"]]
+            ideas = ideas[:size]
+        topic_names = store.topic_names(s.database_path, [i.get("topic_key") for i in ideas])
         from ..cn_trends.pipeline import autopilot_today
         return render(request, "china.html", active="china", tab=tab if tab in TABS else "radar",
-                      topics=topics, ideas=ideas, topic_names=topic_names,
+                      topics=topics, ideas=ideas, topic_names=topic_names, pager=pager,
+                      query=urlencode({k: v for k, v in (("tab", tab), ("stage", stage), ("niche", niche),
+                                                          ("goal", goal)) if v}),
                       niches=analysis.niche_stats(s), niche_names={n["id"]: n["name"] for n in store.niches(s.database_path)},
                       sources=collectors.SOURCES, source_state=store.source_state(s.database_path),
                       stage_labels=analysis.STAGE_LABELS, filters={"stage": stage, "niche": niche, "goal": goal},

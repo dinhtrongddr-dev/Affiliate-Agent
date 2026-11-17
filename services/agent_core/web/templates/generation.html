@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pagination %}
+{% block title %}Clip AI (Muse) · Affiliate Agent{% endblock %}
 {% block content %}
 {% set ST = {'DOWNLOADED':('Xong','ok'),'FAILED':('Lỗi','err'),'CANCELLED':('Đã huỷ',''),'SUBMITTED':('Đang tạo','run'),'SUBMITTING':('Đang gửi','run'),'PENDING':('Chờ','info')} %}
 <div class="row space"><div><h1>Video AI</h1>
@@ -148,6 +150,7 @@
     </tr>
     {% endfor %}
   </table></div>
+  {{ pagination(pager, query) }}
   {% else %}<p class="muted">Chưa có clip AI nào.</p>{% endif %}
 </div>
 {% endblock %}

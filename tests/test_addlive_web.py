@@ -24,7 +24,7 @@ def local(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "get_settings", lambda: s)
     monkeypatch.setattr(routes.shopee_schedule, "install", lambda *a, **k: {
         "installed": True, "managed": True, "enabled": k.get("enabled", True)})
-    monkeypatch.setattr(routes.shopee_schedule, "status", lambda *a: {
+    monkeypatch.setattr(routes.shopee_schedule, "status", lambda *a, **k: {
         "installed": True, "managed": True, "enabled": True})
     app = web.create_app(start_worker=False)
     with patch.object(web, "setup_logging"), TestClient(app) as client:

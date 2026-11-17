@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pagination %}
+{% block title %}Sản phẩm Shopee · Affiliate Agent{% endblock %}
 {% block content %}
 <style>
 .shopee-status{padding:14px 0;border-block:1px solid var(--line);margin:16px 0 20px}.shopee-status small{display:block;color:var(--muted)}
@@ -13,7 +15,7 @@
 <section class="shopee-status row space" aria-label="Trạng thái đồng bộ">
   <div><b>{{ 'Đã lưu kết nối' if addlive.configured else 'Chưa kết nối dữ liệu' }}</b><small>{{ 'Tự động mỗi ngày lúc ' ~ cfg.local_time ~ ' · ' ~ cfg.timezone if cfg.enabled else 'Đồng bộ tự động đang tắt' }}</small></div>
   <div><small>Lần gần nhất</small><span>{{ {'completed':'Đã hoàn tất','partial':'Cập nhật một phần','failed':'Chưa hoàn tất','blocked':'Nguồn tạm chặn','queued':'Đang chờ','running':'Đang đồng bộ','unknown':'Cần kiểm tra'}.get(last.status, 'Chưa đồng bộ') }}</span><small><time>{{ last.local_time or '—' }}</time></small>{% if last.result and last.status in ('completed','partial') %}<small>{{ last.result.imported }} / {{ last.result.requested }} sản phẩm{% if last.result.summary %} · {{ last.result.summary.get('fromApi',0) }} mới, {{ last.result.summary.get('fromCache',0) }} cache{% endif %}</small>{% endif %}</div>
-  <div><small>Lần tiếp theo</small><time>{{ sync.next_due_local or 'Cần kết nối / bật lịch' }}</time><small>{{ 'Chạy được khi app đóng · Windows cần đăng nhập' if schedule.get('installed') and schedule.get('managed') and schedule.get('enabled') else 'Chưa xác nhận lịch Windows; lưu cài đặt để thiết lập' }}</small></div>
+  <div><small>Lần tiếp theo</small><time>{{ sync.next_due_local or 'Cần kết nối / bật lịch' }}</time><small>{{ 'Đang kiểm tra lịch Windows…' if schedule.get('loading') else 'Chạy được khi app đóng · Windows cần đăng nhập' if schedule.get('installed') and schedule.get('managed') and schedule.get('enabled') else 'Chưa xác nhận lịch Windows; lưu cài đặt để thiết lập' }}</small></div>
   <button class="btn" id="sync-now" type="button" onclick="syncNow(this)" {{ 'disabled' if not addlive.configured or last.status in ('queued','running') }}> {{ 'Đang đồng bộ…' if last.status in ('queued','running') else 'Đồng bộ ngay' }}</button>
 </section>
 {% if schedule.error %}<p class="err-text" role="alert">Lịch Windows: {{ schedule.error }}</p>{% endif %}
@@ -116,6 +118,7 @@
     </tr>{% endfor %}
   </table>
   </div>
+  {{ pagination(pager, query) }}
   {% else %}<p class="muted">Chưa có sản phẩm phù hợp. Thêm link / ID ở trên hoặc bấm Đồng bộ ngay để khám phá sản phẩm.</p>{% endif %}
 </div>
 {% endblock %}

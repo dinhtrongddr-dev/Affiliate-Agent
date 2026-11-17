@@ -99,8 +99,25 @@ def save(settings, text: str, label: str = "") -> dict:
     return summary(session)
 
 
+_load_cache: dict = {}
+
+
 def load(settings) -> dict | None:
-    return secret_store.load(settings, NAME)
+    """Decrypted once per file version (DPAPI is a system call; pages read it often)."""
+    import copy
+    path = secret_store._path(settings, NAME)
+    try:
+        st = path.stat()
+        key = (str(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    hit = _load_cache.get("v")
+    if key and hit and hit[0] == key:
+        return copy.deepcopy(hit[1])
+    value = secret_store.load(settings, NAME)
+    if key:
+        _load_cache["v"] = (key, copy.deepcopy(value))
+    return value
 
 
 def delete(settings) -> bool:

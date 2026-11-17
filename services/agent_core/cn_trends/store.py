@@ -179,7 +179,9 @@ def list_topics(db_path, limit: int = 200, since_hours: float | None = 96,
     ensure_schema(db_path)
     sql, args = "SELECT * FROM cn_topics WHERE 1=1", []
     if since_hours:
-        sql += " AND last_seen >= datetime('now', ?)"
+        # last_seen is ISO with a "T"; compare against the same format (datetime() uses a space,
+        # which made this a text comparison that let every row through)
+        sql += " AND last_seen >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)"
         args.append(f"-{int(since_hours)} hours")
     if status:
         sql += f" AND status IN ({','.join('?' * len(status))})"
@@ -188,6 +190,18 @@ def list_topics(db_path, limit: int = 200, since_hours: float | None = 96,
     args.append(int(limit))
     with connect(db_path) as conn:
         return [_topic(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def topic_names(db_path, keys: list[str]) -> dict[str, str]:
+    """Display name of the listed topics only (key -> Vietnamese title, else Chinese)."""
+    keys = list(dict.fromkeys(k for k in keys if k))
+    if not keys:
+        return {}
+    ensure_schema(db_path)
+    with connect(db_path) as conn:
+        rows = conn.execute(f"SELECT key, title_vi, title_zh FROM cn_topics WHERE key IN ({','.join('?' * len(keys))})",
+                            keys).fetchall()
+    return {r["key"]: r["title_vi"] or r["title_zh"] for r in rows}
 
 
 def observations(db_path, key: str, limit: int = 60) -> list[dict]:
