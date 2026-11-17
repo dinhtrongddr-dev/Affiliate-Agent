@@ -117,7 +117,8 @@ function renderTimeline(box, p) {
     const li = el("li", "tl-" + st.state);
     li.append(el("span", "tl-dot"), el("span", "tl-label", st.label));
     const info = st.state === "done" ? fmtDur(st.elapsed_sec)
-      : st.state === "running" ? `${st.pct}% · ${fmtDur(st.elapsed_sec)}` : "~" + fmtDur(st.expected_sec);
+      : st.state === "running" ? (st.queued ? `xếp hàng sau ${st.queued} clip của video khác`
+                                             : `${st.pct}% · ${fmtDur(st.elapsed_sec)}`) : "~" + fmtDur(st.expected_sec);
     li.append(el("span", "tl-info small", info));
     if (st.key === "muse" && (p.clips || []).length && st.state !== "pending") {
       const clips = el("div", "tl-clips");

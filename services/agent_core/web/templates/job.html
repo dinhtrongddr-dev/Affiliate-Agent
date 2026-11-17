@@ -234,7 +234,11 @@
         {{ 'có giọng đọc' if script.render.voice else 'không có giọng' }} ·
         nhạc: {{ (script.render.music_metadata.title if script.render.music_metadata else (script.render.music or 'Ambient Floor')).split('\\')[-1] }}</p>
       {% if script.render.music_metadata %}<p class="small muted">🎵 Nhạc Mixkit: {{ script.render.music_metadata.title }} ({{ script.render.music_metadata.score }}/100) · Giấy phép: {{ script.render.music_metadata.license }} · Đã dọn dẹp file tạm</p>{% endif %}{% endif %}
-      {% else %}<p class="muted">Chưa có kịch bản.</p>{% endif %}
+      {% elif storyboard %}
+      <p class="small muted">Kịch bản đã viết xong; sửa được sau khi video dựng xong. Lời từng cảnh:</p>
+      {% if storyboard.hook %}<p><b>Hook:</b> {{ storyboard.hook }}</p>{% endif %}
+      <ol>{% for scene in storyboard.scenes or [] %}<li>{{ scene.voiceover or '(cảnh không lời)' }}{% if (scene.shot or {}).action %}<div class="small muted">{{ scene.shot.action }}</div>{% endif %}</li>{% endfor %}</ol>
+      {% else %}<p class="muted">Chưa có kịch bản: AI đang viết.</p>{% endif %}
     </div>
 
     <!-- Clip library -->

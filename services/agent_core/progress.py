@@ -106,6 +106,22 @@ def clip_progress(settings, job_id: str) -> list[dict]:
     return clips
 
 
+CLIP_SECONDS = 180   # one Muse clip incl. checks, when this machine has no better number
+
+
+def queue_ahead(settings, job_id: str) -> int:
+    """Muse clips of OTHER videos that will be made before this video's next clip."""
+    from .videogen import engine
+    engine.ensure_schema(settings.database_path)
+    with connect(settings.database_path) as conn:
+        mine = conn.execute("SELECT MIN(created_at) FROM gen_tasks WHERE job_id=? AND status IN "
+                            "('PENDING','SUBMITTING','SUBMITTED','CHECKING')", (job_id,)).fetchone()[0]
+        if not mine:
+            return 0
+        return conn.execute("SELECT COUNT(*) FROM gen_tasks WHERE job_id!=? AND created_at<=? AND status IN "
+                            "('PENDING','SUBMITTING','SUBMITTED','CHECKING')", (job_id, mine)).fetchone()[0]
+
+
 def job_progress(settings, job: dict, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     status = job["status"]
@@ -124,7 +140,7 @@ def job_progress(settings, job: dict, now: float | None = None) -> dict:
     steps, order = [], [k for k, *_ in STEPS if not (k == "muse" and skip_muse)]
     cur_index = order.index(current) if current in order else (len(order) if finished else -1)
     total = sum(expected[k] for k in order) or 1.0
-    done_weight, remaining = 0.0, 0.0
+    done_weight, remaining, queued = 0.0, 0.0, 0
     for i, (key, label, a, b) in enumerate(s for s in STEPS if s[0] in order):
         start, end = marks.get(a), marks.get(b)
         exp = expected[key]
@@ -135,16 +151,22 @@ def job_progress(settings, job: dict, now: float | None = None) -> dict:
             elapsed = max(0.0, now - start) if start else 0.0
             if key == "muse" and clips:
                 fraction = sum(c["pct"] for c in clips) / (100.0 * len(clips))
+                ahead = queue_ahead(settings, job["id"])
+                left = sum(1 for c in clips if c["pct"] < 100)
+                # Muse makes one clip at a time: wait for the queue, then this video's own clips
+                remaining += (ahead + left) * CLIP_SECONDS * (1 - fraction / max(1, left) if left else 0)
+                queued = ahead
             else:
                 fraction = min(0.95, elapsed / exp) if exp else 0.0
-            # remaining: what the fraction says, but never less than a little while running
-            remaining += max(exp * (1 - fraction), 15.0)
+                remaining += max(exp * (1 - fraction), 15.0)
         else:
             state, fraction = "pending", 0.0
             remaining += exp
         done_weight += exp * fraction
         step = {"key": key, "label": label, "state": state, "pct": round(fraction * 100),
                 "expected_sec": round(exp)}
+        if key == "muse" and state == "running" and queued:
+            step["queued"] = queued
         if start:
             step["started_at"] = start
             step["elapsed_sec"] = round((end or now) - start) if state != "pending" else 0

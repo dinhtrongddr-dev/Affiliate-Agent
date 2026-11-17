@@ -94,7 +94,7 @@ class GatewayProcess:
             "MUSE2API_PORT": str(s.muse_gateway_port),
             "MUSE2API_CDP_PORT": str(s.muse_cdp_port),
             "MUSE2API_KEY": s.videogen_api_key.get_secret_value(),
-            "MUSE2API_CONCURRENCY": "1",
+            "MUSE2API_CONCURRENCY": str(max(1, int(getattr(s, "muse_concurrency", 3) or 1))),
             "MUSE2API_CORS_ORIGINS": "",
             "MUSE2API_REF_IMAGE_LOCAL_FILES": "0",
             "MUSE2API_REF_IMAGE_PRIVATE_FETCH": "0",

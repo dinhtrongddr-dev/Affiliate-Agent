@@ -57,3 +57,18 @@ def test_finished_and_no_muse(tmp_path):
 
 def test_pct_clamped_below_100_until_checked():
     assert engine._pct("99.6") == 99 and engine._pct(None) == 0 and engine._pct("x") == 0
+
+
+def test_muse_eta_counts_clips_of_other_videos_ahead(tmp_path):
+    s, job = _setup(tmp_path, "WAITING_FOR_GENERATION",
+                    {"script_start": _t(0), "script_done": _t(2), "muse_start": _t(2)})
+    engine.ensure_schema(s.database_path)
+    with db.connect(s.database_path) as conn:
+        for i, (jid, st, at) in enumerate([("other", "PENDING", "a"), ("other", "SUBMITTED", "a"),
+                                           ("j1", "PENDING", "b")]):
+            conn.execute("INSERT INTO gen_tasks (id, job_id, scene_index, kind, provider, prompt, status, "
+                         "progress, created_at, updated_at) VALUES (?, ?, ?, 'video', 'm', 'p', ?, 0, ?, 'x')",
+                         (f"g{i}", jid, i, st, at))
+    p = progress.job_progress(s, job, progress._parse(_t(5)))
+    muse = p["steps"][1]
+    assert muse["queued"] == 2 and p["eta_sec"] >= 3 * progress.CLIP_SECONDS
