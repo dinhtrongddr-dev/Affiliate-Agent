@@ -1,0 +1,78 @@
+{
+ "at": "2026-11-17T09:10:35",
+ "runs": 1,
+ "pages": {
+  "/": {
+   "status": 200,
+   "median_s": 0.573,
+   "max_s": 0.573,
+   "kb": 11
+  },
+  "/create": {
+   "status": 200,
+   "median_s": 0.038,
+   "max_s": 0.038,
+   "kb": 80
+  },
+  "/jobs": {
+   "status": 200,
+   "median_s": 1.17,
+   "max_s": 1.17,
+   "kb": 17
+  },
+  "/trends": {
+   "status": 200,
+   "median_s": 75.088,
+   "max_s": 75.088,
+   "kb": 698
+  },
+  "/china": {
+   "status": 200,
+   "median_s": 22.408,
+   "max_s": 22.408,
+   "kb": 943
+  },
+  "/catalog": {
+   "status": 200,
+   "median_s": 5.275,
+   "max_s": 5.275,
+   "kb": 1052
+  },
+  "/generation": {
+   "status": 200,
+   "median_s": 18.276,
+   "max_s": 18.276,
+   "kb": 152
+  },
+  "/analytics": {
+   "status": 200,
+   "median_s": 0.014,
+   "max_s": 0.014,
+   "kb": 2
+  },
+  "/performance": {
+   "status": 200,
+   "median_s": 0.04,
+   "max_s": 0.04,
+   "kb": 3
+  },
+  "/tasks": {
+   "status": 200,
+   "median_s": 17.066,
+   "max_s": 17.066,
+   "kb": 39
+  },
+  "/settings": {
+   "status": 200,
+   "median_s": 0.009,
+   "max_s": 0.009,
+   "kb": 17
+  },
+  "/logs": {
+   "status": 200,
+   "median_s": 0.13,
+   "max_s": 0.13,
+   "kb": 53
+  }
+ }
+}

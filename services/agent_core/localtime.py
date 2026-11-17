@@ -8,13 +8,40 @@ from datetime import datetime, timedelta, timezone, tzinfo
 VIETNAM = timezone(timedelta(hours=7), "ICT")   # no daylight saving: a fixed offset is exact
 
 
+_zone_cache: dict = {}
+
+
+def _configured_name() -> str:
+    """The owner's time zone from settings, read once per .env version.
+
+    Building Settings() re-reads .env (~80 ms); pages format hundreds of times, so the name is
+    cached and refreshed only when .env changes (checked at most once a second)."""
+    import time
+    hit = _zone_cache.get("name")
+    now = time.monotonic()
+    if hit and now - hit[2] < 1.0:
+        return hit[1]
+    try:
+        from .settings import PROJECT_ROOT
+        env = PROJECT_ROOT / ".env"
+        key = env.stat().st_mtime_ns if env.exists() else 0
+    except Exception:  # noqa: BLE001
+        key = 0
+    if hit and hit[0] == key:
+        _zone_cache["name"] = (key, hit[1], now)
+        return hit[1]
+    try:
+        from .settings import get_settings
+        name = get_settings().timezone
+    except Exception:  # noqa: BLE001
+        name = "Asia/Ho_Chi_Minh"
+    _zone_cache["name"] = (key, name, now)
+    return name
+
+
 def zone(name: str | None = None) -> tzinfo:
     if not name:
-        try:
-            from .settings import get_settings
-            name = get_settings().timezone
-        except Exception:  # noqa: BLE001
-            name = "Asia/Ho_Chi_Minh"
+        name = _configured_name()
     if name in ("Asia/Ho_Chi_Minh", "Asia/Saigon", "", None):
         return VIETNAM
     try:

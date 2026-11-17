@@ -179,6 +179,14 @@ def create_app(start_worker: bool = True) -> FastAPI:
         return state["settings"]
 
     @app.middleware("http")
+    async def server_timing(request: Request, call_next):
+        """Render time in the Server-Timing header (visible in the browser's network panel)."""
+        started = time.perf_counter()
+        response = await call_next(request)
+        response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - started) * 1000:.1f}"
+        return response
+
+    @app.middleware("http")
     async def guard(request: Request, call_next):
         if request.method not in {"GET", "HEAD"} and request.url.path.startswith("/api/"):
             if request.headers.get("x-requested-with") != "affiliate-agent":
