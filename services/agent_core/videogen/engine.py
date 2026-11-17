@@ -277,11 +277,11 @@ def _sheet_characters(plan, compiled) -> list[dict]:
 
 
 def _matching_storyboard_tasks(db, job_id, compiled):
-    expected = {index: (prompt, refs) for index, prompt, refs, _ in compiled}
+    # QA retries carry a fix note: match on scene + base prompt + refs, not on the exact id
+    expected = {index: (_base_prompt(prompt), tuple(sorted(refs))) for index, prompt, refs, _ in compiled}
     return [t for t in list_tasks(db, job_id, 10000)
             if t["kind"] == "video" and t["scene_index"] in expected
-            and t["id"] == task_id(job_id, t["scene_index"], "video",
-                                    *expected[t["scene_index"]], attempt=t["attempt"])]
+            and (_base_prompt(t["prompt"]), tuple(sorted(t["refs"]))) == expected[t["scene_index"]]]
 
 
 def results_for_storyboard(settings, job_id: str, plan: dict) -> dict[int, Path]:

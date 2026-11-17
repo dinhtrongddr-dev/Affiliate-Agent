@@ -84,12 +84,9 @@ class MetaReelsPublisher:
                 "file_size": str(file_size),
                 "Content-Type": "application/octet-stream",
             }
-            with video_path.open("rb") as stream:
-                upload = client.post(
-                    upload_url,
-                    headers=upload_headers,
-                    content=iter(lambda: stream.read(1024 * 1024), b""),
-                )
+            # Meta refuses chunked transfer: send the bytes with an explicit Content-Length
+            upload = client.post(upload_url, headers={**upload_headers, "Content-Length": str(file_size)},
+                                 content=video_path.read_bytes())
             self._raise_for_meta(upload, "transfer_video")
 
             finish = client.post(
