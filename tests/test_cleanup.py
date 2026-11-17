@@ -113,3 +113,20 @@ def test_preflight_blocks_when_ai_is_down(monkeypatch, tmp_path):
     assert not out["ok"] and any("AI" in b for b in out["blocking"])
     monkeypatch.setattr(preflight, "check_ai", lambda st: preflight._check("AI", True, "OK"))
     assert preflight.run(s, fresh=True)["ok"]
+
+
+def test_preflight_muse_session_probe(monkeypatch, tmp_path):
+    from agent_core import preflight
+    from agent_core.videogen import muse_health, muse_profiles
+    monkeypatch.setattr(muse_profiles, "load", lambda s: [{"profile_id": "m1"}, {"profile_id": "m2"}])
+    replies = {"m1": {"ok": False, "message": "cookie hết hạn"}, "m2": {"ok": True}}
+    monkeypatch.setattr(muse_health, "check", lambda s, pid, kind: replies[pid])
+    r = preflight.check_muse_session(object())
+    assert r["ok"] and "1/2" in r["detail"] and "cookie hết hạn" in r["detail"]
+    replies["m2"] = {"ok": False}
+    assert not preflight.check_muse_session(object())["ok"]
+
+    def busy(s, pid, kind):
+        raise muse_profiles.ProfileError("Profile đang bận; thử lại sau")
+    monkeypatch.setattr(muse_health, "check", busy)
+    assert preflight.check_muse_session(object())["ok"]          # busy = making a clip = live

@@ -36,10 +36,40 @@ def check_muse(settings) -> list[dict]:
     info = gateway.account_status(settings)
     accounts = info.get("accounts") or []
     usable = [a for a in accounts if a.get("enabled", True) and not a.get("last_error")]
-    return [_check("Cổng Muse (muse2api)", True, "đang chạy"),
-            _check("Tài khoản Muse", bool(usable),
-                   f"{len(usable)}/{len(accounts)} tài khoản dùng được" if accounts
-                   else "Chưa có tài khoản/profile Muse nào")]
+    out = [_check("Cổng Muse (muse2api)", True, "đang chạy"),
+           _check("Tài khoản Muse", bool(usable),
+                  f"{len(usable)}/{len(accounts)} tài khoản dùng được" if accounts
+                  else "Chưa có tài khoản/profile Muse nào")]
+    out.append(check_muse_session(settings))
+    return out
+
+
+def check_muse_session(settings) -> dict:
+    """A real request to muse.ai: open each enabled profile's session through its own proxy
+    (the 'Test phiên Muse' probe). It never generates content, so it costs no Muse quota."""
+    from .videogen import muse_health, muse_profiles
+    try:
+        profiles = [p for p in muse_profiles.load(settings) if p.get("enabled", True)]
+    except Exception as exc:  # noqa: BLE001
+        return _check("Phiên Muse (muse.ai)", False, f"Không đọc được profile: {exc}")
+    if not profiles:
+        return _check("Phiên Muse (muse.ai)", True, "dùng phiên cũ (không có profile)", required=False)
+    good, notes = 0, []
+    for p in profiles:
+        try:
+            r = muse_health.check(settings, p["profile_id"], "session")
+            if r.get("ok"):
+                good += 1
+            else:
+                notes.append(f"{p['profile_id']}: {r.get('message') or 'phiên lỗi'}")
+        except Exception as exc:  # noqa: BLE001
+            if "bận" in str(exc):     # the account is making a clip right now: its session is live
+                good += 1
+                notes.append(f"{p['profile_id']}: đang tạo clip (phiên đang hoạt động)")
+            else:
+                notes.append(f"{p['profile_id']}: {exc}")
+    detail = f"{good}/{len(profiles)} profile mở được phiên muse.ai qua proxy"
+    return _check("Phiên Muse (muse.ai)", good > 0, detail + (" · " + "; ".join(notes) if notes else ""))
 
 
 def check_tools(settings) -> list[dict]:
