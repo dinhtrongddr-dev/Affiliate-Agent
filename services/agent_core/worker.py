@@ -241,8 +241,8 @@ class Worker:
         self.last_run["_gen"] = now
         from .videogen import engine, gateway
         gateway.instance(self.settings).ensure_alive()
-        if engine.has_active(self.settings.database_path):
-            engine.poll(self.settings)
+        if engine.has_active(self.settings.database_path) or engine.has_waiting_job(self.settings.database_path):
+            engine.poll(self.settings)   # poll also resumes a waiting job whose clips are all settled
 
     def run(self) -> None:
         log.info("Worker started")

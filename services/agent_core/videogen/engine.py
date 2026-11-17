@@ -118,6 +118,14 @@ def has_active(db_path) -> bool:
             ACTIVE).fetchone() is not None
 
 
+def has_waiting_job(db_path) -> bool:
+    """A job still marked as waiting for clips that has clip tasks (it may be ready to resume)."""
+    ensure_schema(db_path)
+    with connect(db_path) as conn:
+        return conn.execute("SELECT 1 FROM gen_tasks g JOIN jobs j ON j.id=g.job_id WHERE j.status=? LIMIT 1",
+                            (WAIT_STATUS,)).fetchone() is not None
+
+
 def _insert(db_path, *, job_id, scene_index, kind, provider, prompt, refs, duration=None,
             depends_on=None, attempt=1) -> str:
     tid = task_id(job_id, scene_index, kind, prompt, refs, attempt)
