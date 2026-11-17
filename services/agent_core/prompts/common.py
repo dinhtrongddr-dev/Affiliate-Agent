@@ -99,14 +99,19 @@ def base_schema(branch: str, low: float, high: float, has_stock: bool) -> dict:
     return schema
 
 
+MAX_BEATS = 10   # creative.normalise_plan refuses more scenes than this (never drops them silently)
+
+
 def writing_method(words: tuple[int, int, int], rate: float) -> str:
+    # enough words per beat that the whole script fits in MAX_BEATS beats (short beats where possible)
+    per_beat = max(12, -(-words[2] // (MAX_BEATS - 1)))
     return f"""CÁCH VIẾT (bắt buộc theo thứ tự):
 1) Viết "script" TRƯỚC: lời liền mạch như một người kể cho bạn nghe, {words[0]}-{words[2]} từ,
    NHẮM KHOẢNG {words[1]} TỪ (giọng đọc ~{rate:g} từ/giây; ít lời hơn thì video hụt thời lượng).
    Câu nối ý ("vì", "nên", "nhưng", "hoá ra", "thế là", "rồi"); payoff TRẢ LỜI đúng hook; chỉ giữ 3-4 ý
    phục vụ "takeaway"; không liệt kê sự kiện rời rạc.
 2) Chia script thành NHỊP (mỗi phần tử "scenes" là một nhịp): ghép các "lines" lại phải ra đúng script.
-   Mỗi nhịp tối đa khoảng 12 từ (~3 giây hình): video giữ người xem bằng nhịp cắt <= 3 giây.
+   TỐI ĐA {MAX_BEATS} NHỊP cho cả video. Mỗi nhịp khoảng {per_beat} từ trở xuống; nhịp ngắn giữ người xem tốt hơn.
    Thời lượng do app tính theo giọng (trường "duration" chỉ dùng cho nhịp không lời).
    "pause": true khi cần nghỉ lâu hơn cho khoảnh khắc cảm xúc (hiếm).
 3) Mỗi nhịp có hình MINH HOẠ ĐÚNG điều đang được nói ("nói gì cho xem nấy")."""

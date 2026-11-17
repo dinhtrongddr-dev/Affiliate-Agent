@@ -100,3 +100,16 @@ def test_hidden_post_does_not_need_auto_publish():
     hidden = workflow.publish_blockers(s, job, "facebook_reels", "hidden")
     public = workflow.publish_blockers(s, job, "facebook_reels", "publish")
     assert not any("AUTO_PUBLISH" in b for b in hidden) and any("AUTO_PUBLISH" in b for b in public)
+
+
+def test_preflight_blocks_when_ai_is_down(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from agent_core import preflight
+    s = SimpleNamespace(database_path=tmp_path / "p.sqlite3", ai_model="m", videogen_provider="none",
+                        ffmpeg_path="ffmpeg", ffprobe_path="ffprobe", media_root=tmp_path, meta_enabled=False)
+    monkeypatch.setattr(preflight, "check_ai", lambda st: preflight._check("AI", False, "401"))
+    out = preflight.run(s, fresh=True)
+    assert not out["ok"] and any("AI" in b for b in out["blocking"])
+    monkeypatch.setattr(preflight, "check_ai", lambda st: preflight._check("AI", True, "OK"))
+    assert preflight.run(s, fresh=True)["ok"]

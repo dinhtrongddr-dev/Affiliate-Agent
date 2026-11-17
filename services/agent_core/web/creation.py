@@ -93,7 +93,10 @@ def install_routes(app, settings, render):
                       selected_branch=branch if branch in {'product_review', 'viral_creator', 'template_series'} else 'product_review')
 
     @app.post('/api/create')
-    def create(body: Creation):
+    def create(body: Creation, request: Request):
+        check = getattr(request.app.state, 'require_preflight', None)
+        if check:
+            check()          # AI, Muse, ffmpeg and disk must be ready before any AI call is spent
         s = settings()
         options = {'creation_branch': body.creation_branch, 'experience': body.experience}
         topic = body.topic.strip()

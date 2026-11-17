@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     lipsync_provider: str = "none"            # none | (future) sync.so / fal LatentSync for talking shots
     visual_qa: bool = True                    # one AI vision pass over the rendered frames
     qa_autofix: bool = True                   # quality gate regenerates flagged scenes once
+    preflight_enabled: bool = True            # quick AI/Muse/ffmpeg/disk check before a video is started
     clip_qa: bool = True                      # 7-point AI check of each Muse clip; failures are remade
     series_native_voice: bool = True          # dialogue series: keep Muse's own Vietnamese speech when it says the line
     series_vieneu_fallback: bool = True       # a line Muse never says right (3 takes) is voiced by VieNeu

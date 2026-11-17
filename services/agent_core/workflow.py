@@ -43,6 +43,8 @@ from .quality import (
 )
 from .shopee_video import upload_shopee_video
 
+MAX_SCENES = 10   # creative.normalise_plan refuses a longer storyboard
+
 log = logging.getLogger("affiliate_agent.workflow")
 
 DISCLOSURE = ("Thông báo: Đây là liên kết tiếp thị liên kết; tôi có thể nhận hoa hồng "
@@ -849,6 +851,13 @@ def _create_and_render(settings, job, client, analysis, product, affiliate_link,
             raw = _ask_json(client, settings, prompt,
                             [Path(r["path"]) for r in references] or None,
                             temperature=0.7, max_tokens=5000)
+            if len(raw.get("scenes") or []) > MAX_SCENES:
+                # one repair turn instead of failing the job: merge beats down to the limit
+                log.info("storyboard has %s beats; asking for at most %s", len(raw["scenes"]), MAX_SCENES)
+                raw = _ask_json(client, settings, prompt + (
+                    f"\nBẢN TRƯỚC CÓ {len(raw['scenes'])} NHỊP, QUÁ GIỚI HẠN. Viết lại đúng nội dung đó nhưng "
+                    f"GỘP còn tối đa {MAX_SCENES} nhịp (gộp các câu liền nhau cùng hình). Trả lại đủ JSON."),
+                    [Path(r["path"]) for r in references] or None, temperature=0.4, max_tokens=5000)
             plan = creative.normalise_plan({**raw, "creation_branch": branch,
                                             "storyboard_version": 1, **_brief_plan_fields(brief, settings)},
                                            "trend", None, n_clips)

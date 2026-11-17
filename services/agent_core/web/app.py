@@ -634,9 +634,27 @@ def create_app(start_worker: bool = True) -> FastAPI:
             raise HTTPException(400, "Hành động không hợp lệ")
         return {"ok": True}
 
+    @app.get("/api/preflight")
+    def api_preflight(fresh: bool = False, facebook: bool = False):
+        from .. import preflight
+        return preflight.run(S(), fresh=fresh, facebook=facebook)
+
+    def require_preflight():
+        """Refuse to start a video when AI / Muse / ffmpeg / disk is not ready (cached 5 min)."""
+        from .. import preflight
+        if not getattr(S(), "preflight_enabled", True):
+            return
+        result = preflight.run(S())
+        if not result["ok"]:
+            raise HTTPException(409, "Chưa tạo video được, kiểm tra trước khi chạy không đạt: "
+                                     + "; ".join(result["blocking"]))
+
+    app.state.require_preflight = require_preflight
+
     @app.post("/api/intel/create-job")
     async def api_intel_job(request: Request):
         from ..trend_intel import store as tstore
+        await run_in_threadpool(require_preflight)
         body = await request.json()
         s = S()
         topic = tstore.get_topic(s.database_path, str(body.get("key") or ""))
@@ -1176,6 +1194,7 @@ def create_app(start_worker: bool = True) -> FastAPI:
 
     @app.post("/api/trends/{trend_id}/create-job")
     def api_trend_job(trend_id: int):
+        require_preflight()
         s = S()
         trend = db.get_trend(s.database_path, trend_id)
         if not trend:
