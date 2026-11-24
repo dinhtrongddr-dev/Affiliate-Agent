@@ -108,3 +108,17 @@ def test_tray_starts_chatgpt2api_only_when_it_is_down(tmp_path):
         popen.assert_not_called()
     with patch.object(tray, "chatgpt2api_dir", return_value=None):
         assert tray.ensure_chatgpt2api() == ""                    # not installed: nothing to do
+
+
+def test_remote_ai_is_never_started_locally(monkeypatch):
+    from agent_core import settings as settings_mod, tray
+    monkeypatch.setenv("AA_AI_BASE_URL", "https://api.example-vps.io/v1")
+    if hasattr(settings_mod, "reset_settings_cache"):
+        settings_mod.reset_settings_cache()
+    with patch("subprocess.Popen") as popen:
+        assert tray.ensure_chatgpt2api() == "https://api.example-vps.io"
+    popen.assert_not_called()
+    monkeypatch.setenv("AA_AI_BASE_URL", "http://127.0.0.1:13000/v1")
+    if hasattr(settings_mod, "reset_settings_cache"):
+        settings_mod.reset_settings_cache()
+    assert tray.remote_ai_url() == ""

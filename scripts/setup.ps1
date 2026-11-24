@@ -226,7 +226,14 @@ if ($vp -eq 'muse2api') {
 # ------------------------------------------------------------------ ChatGPT2API (AI gateway)
 Step 'ChatGPT2API (AI viet kich ban)'
 $C2AUrl = 'https://github.com/dinhtrongddr-dev/chatgpt2api-web.git'
-if (-not $ChatGPT2ApiDir) {
+# AI on another server (VPS): keep that address and key, never install/start a local copy over it
+$aiBase = [string](Get-EnvValue 'AA_AI_BASE_URL')
+$remoteAI = $aiBase -and ($aiBase -notmatch '^https?://(127\.0\.0\.1|localhost|\[::1\])(:|/|$)')
+if ($remoteAI) {
+    $ok.Add("ChatGPT2API: dung may chu $aiBase (khong chay ban tren may nay)")
+    $SkipChatGPT2Api = $true
+    $ChatGPT2ApiDir = $null
+} elseif (-not $ChatGPT2ApiDir) {
     foreach ($c in @((Join-Path (Split-Path -Parent $Root) 'chatgpt2api-web'), 'D:\chatgpt2api-web', 'C:\chatgpt2api-web')) {
         if (Test-Path (Join-Path $c 'main.py')) { $ChatGPT2ApiDir = $c; break }
     }
@@ -277,7 +284,7 @@ if ($ChatGPT2ApiDir -and (Test-Path (Join-Path $ChatGPT2ApiDir 'main.py'))) {
     else { $todo.Add("ChatGPT2API chua chay: mo loi tat 'ChatGPT2API' tren Desktop (no in ra ly do loi), sua roi chay lai setup.") }
     # shortcut to start it later
     $script:ChatGPT2ApiStart = Join-Path $Root 'scripts\start-chatgpt2api.cmd'   # starts it AND reports OK / the error
-} else {
+} elseif (-not $remoteAI) {
     $todo.Add("Cai ChatGPT2API: git clone $C2AUrl, chay setup.ps1 trong do, roi chay lai script nay.")
 }
 
@@ -366,6 +373,7 @@ try {
 # a real AI round trip: proves the key, the gateway and a logged-in ChatGPT account
 & $venvPy (Join-Path $Root 'scripts\check_ai.py')
 if ($LASTEXITCODE -eq 0) { $ok.Add('Goi thu AI (ChatGPT2API): OK') }
+elseif ($remoteAI) { $todo.Add("AI tren may chu $aiBase khong tra loi: kiem tra VPS va AA_AI_API_KEY trong .env.") }
 else { $todo.Add('Dang nhap tai khoan ChatGPT trong ChatGPT2API (mo http://127.0.0.1:13000), roi chay lai setup de kiem tra.') }
 $todo.Add('Mo app (scripts\start-app.cmd) > Cai dat: nhap lai cac key luu bang Windows (DPAPI) - Muse cookie JSON, AddLive API key, Facebook token, YouTube/Trends-MCP key neu dung.')
 $todo.Add('Dang nhap lai Shopee Creator: scripts\open-shopee-login.cmd')

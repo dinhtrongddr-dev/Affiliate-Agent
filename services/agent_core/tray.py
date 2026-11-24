@@ -89,10 +89,27 @@ def chatgpt2api_url(folder: Path | None) -> str:
     return f"http://127.0.0.1:{port}"
 
 
+def remote_ai_url() -> str:
+    """The web page of a ChatGPT2API on another server (VPS) when AA_AI_BASE_URL points there, else ''."""
+    from urllib.parse import urlparse
+    try:
+        from .settings import get_settings
+        base = str(get_settings().ai_base_url or "")
+    except Exception:  # noqa: BLE001
+        return ""
+    host = (urlparse(base).hostname or "").lower()
+    if not host or host in ("127.0.0.1", "localhost", "::1"):
+        return ""
+    return base.rstrip("/").removesuffix("/v1")
+
+
 def ensure_chatgpt2api() -> str:
     """Start ChatGPT2API (hidden, its own tray icon) when it is not running, so one shortcut is
-    enough. Returns its URL ('' when it is not installed)."""
+    enough. Returns its URL ('' when it is not installed). A remote (VPS) gateway is never started here."""
     import httpx
+    remote = remote_ai_url()
+    if remote:
+        return remote
     folder = chatgpt2api_dir()
     if folder is None:
         return ""
@@ -217,7 +234,7 @@ class App:
             c2a = ensure_chatgpt2api()          # the AI gateway the app needs, started with it
         except Exception as exc:  # noqa: BLE001
             print("ChatGPT2API start failed:", exc)
-            c2a = chatgpt2api_url(chatgpt2api_dir()) if chatgpt2api_dir() else ""
+            c2a = remote_ai_url() or (chatgpt2api_url(chatgpt2api_dir()) if chatgpt2api_dir() else "")
         items = [
             pystray.MenuItem("Mở Affiliate Agent", lambda *_: open_window(), default=True),
             pystray.MenuItem(lambda _: f"Trạng thái: {self.state}", None, enabled=False),

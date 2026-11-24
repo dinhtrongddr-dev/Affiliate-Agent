@@ -22,13 +22,18 @@ def health_problem() -> tuple[str, str] | None:
     if LAST_CALL["ok"] is not False:
         return None
     err = LAST_CALL["error"]
+    from .tray import remote_ai_url
+    remote = remote_ai_url()
+    page = remote or "http://127.0.0.1:13000"
     if "no available text account" in err or "no available" in err and "account" in err:
         return ("AI: ChatGPT2API chưa có tài khoản ChatGPT đăng nhập",
-                "Mở http://127.0.0.1:13000, đăng nhập tài khoản ChatGPT, rồi bấm làm mới trang")
+                f"Mở {page}, đăng nhập tài khoản ChatGPT, rồi bấm làm mới trang")
     if "401" in err:
-        return ("AI: sai API key", "Chạy lại scripts\\setup.ps1 để khớp key với ChatGPT2API")
+        return ("AI: sai API key", "Sửa AA_AI_API_KEY trong .env cho khớp key của ChatGPT2API" if remote
+                else "Chạy lại scripts\\setup.ps1 để khớp key với ChatGPT2API")
     if "unavailable" in err or "Connection" in err or "connect" in err.lower():
-        return ("AI: không kết nối được ChatGPT2API", "Mở ChatGPT2API (lối tắt ChatGPT2API trên Desktop)")
+        return ("AI: không kết nối được ChatGPT2API",
+                f"Kiểm tra mạng và VPS ({page})" if remote else "Mở ChatGPT2API (lối tắt ChatGPT2API trên Desktop)")
     return ("AI: lần gọi gần nhất bị lỗi", err[:160])
 
 
