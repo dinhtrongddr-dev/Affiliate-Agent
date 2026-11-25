@@ -189,6 +189,7 @@ class Worker:
             from .shopee_intelligence import auto_sync
             auto_sync.enqueue_due(self.settings)
         self._requeue_ai_waits()
+        self._housekeeping(now)
         if now - self.last_run.get("_long", -1e9) >= 30:
             self.last_run["_long"] = now
             self._advance_long_and_cast()
@@ -213,6 +214,25 @@ class Worker:
                     enqueue_task(self.settings.database_path, "process", job["id"])
         except Exception:  # noqa: BLE001
             log.exception("long video / shared cast check failed")
+
+    HOUSEKEEPING_EVERY = 6 * 3600
+
+    def _housekeeping(self, now: float) -> None:
+        """Delete junk files on their own (first round 15 min after start, then every 6 h)."""
+        self.last_run.setdefault("_housekeeping", now - self.HOUSEKEEPING_EVERY + 900)
+        if now - self.last_run["_housekeeping"] < self.HOUSEKEEPING_EVERY:
+            return
+        self.last_run["_housekeeping"] = now
+        import threading
+
+        from . import housekeeping
+
+        def job():
+            try:
+                housekeeping.run(self.settings)
+            except Exception:  # noqa: BLE001
+                log.exception("housekeeping failed")
+        threading.Thread(target=job, name="housekeeping", daemon=True).start()
 
     AI_RETRY_EVERY = 15 * 60
     AI_RETRY_MAX = 6
